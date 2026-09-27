@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GITLEAKS_VERSION: "8.30.1"
+
+jobs:
+  seguranca:
+    name: Segurança (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Instalar gitleaks (binário verificado por checksum, sem Action de terceiros com licença)
+        run: |
+          set -euo pipefail
+          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          sha256sum --ignore-missing -c "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          tar -xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+
+      - name: gitleaks detect
+        run: gitleaks detect --source . --redact -v
+
+  backend-unit:
+    name: Backend (unit + arquitetura)
+    runs-on: ubuntu-latest
+    needs: seguranca
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: backend/global.json
+
+      - name: Restore
+        run: dotnet restore backend/WebRadio.slnx
+
+      - name: Build (TreatWarningsAsErrors)
+        run: dotnet build backend/WebRadio.slnx --no-restore --configuration Release
+
+      - name: Test (unitários + arquitetura; exclui [Trait("Categoria","Integracao")])
+        run: >
+          dotnet test backend/WebRadio.slnx --no-build --configuration Release
+          --filter "Categoria!=Integracao"
+          --logger "trx"
+          --collect:"XPlat Code Coverage"
