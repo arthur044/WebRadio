@@ -1,0 +1,51 @@
+@import 'tailwindcss';
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;600&display=swap');
+
+@theme {
+  --color-surface: oklch(97% 0.006 80);
+  --color-surface-raised: oklch(100% 0 0);
+  --color-border: oklch(88% 0.008 80);
+  --color-text: oklch(20% 0.01 80);
+  --color-text-muted: oklch(48% 0.01 80);
+  --color-on-air: oklch(55% 0.21 25);
+  --color-accent: oklch(58% 0.14 250);
+  --color-accent-contrast: oklch(99% 0 0);
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-surface: oklch(16% 0.012 280);
+    --color-surface-raised: oklch(21% 0.014 280);
+    --color-border: oklch(30% 0.016 280);
+    --color-text: oklch(94% 0.01 80);
+    --color-text-muted: oklch(68% 0.012 280);
+    --color-on-air: oklch(62% 0.22 25);
+    --color-accent: oklch(72% 0.13 250);
+    --color-accent-contrast: oklch(12% 0.01 280);
+  }
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100svh;
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-body);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

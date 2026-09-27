@@ -1,0 +1,50 @@
+## .NET
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+artifacts/
+*.dbmdl
+*.pdb
+*.cache
+TestResults/
+[Cc]overage/
+*.trx
+*.received.*
+
+## Node / Frontend
+node_modules/
+dist/
+dist-ssr/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+
+## Segredos e ambiente
+.env
+.env.*
+!.env.example
+*.pfx
+*.pem
+*.key
+secrets/
+
+## Maestri (canvas de orquestração dos agentes; não faz parte do repositório do produto)
+.maestri/
+
+## Editores / SO
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+.DS_Store
+Thumbs.db
+
+## Docker
+*.log

@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WebRadio.Api/WebRadio.Api.csproj" />
+    <Project Path="src/WebRadio.Application/WebRadio.Application.csproj" />
+    <Project Path="src/WebRadio.Domain/WebRadio.Domain.csproj" />
+    <Project Path="src/WebRadio.Infrastructure/WebRadio.Infrastructure.csproj" />
+    <Project Path="src/WebRadio.Worker/WebRadio.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WebRadio.Api.IntegrationTests/WebRadio.Api.IntegrationTests.csproj" />
+    <Project Path="tests/WebRadio.Application.Tests/WebRadio.Application.Tests.csproj" />
+    <Project Path="tests/WebRadio.Architecture.Tests/WebRadio.Architecture.Tests.csproj" />
+    <Project Path="tests/WebRadio.Domain.Tests/WebRadio.Domain.Tests.csproj" />
+  </Folder>
+</Solution>

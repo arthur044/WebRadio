@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>WebRadio.Api</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WebRadio.Application\WebRadio.Application.csproj" />
+    <ProjectReference Include="..\WebRadio.Infrastructure\WebRadio.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
