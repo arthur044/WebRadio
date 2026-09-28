@@ -21,8 +21,6 @@ public sealed class ArquivoMidia : Entidade
     /// <summary>CK_ArquivoMidia_MimeType.</summary>
     private static readonly string[] MimeTypesPermitidos = ["audio/mpeg", "audio/ogg", "audio/wav", "audio/flac"];
 
-    private long _tamanhoBytesDeclarado;
-
     public string NomeOriginal { get; private set; } = null!;
 
     public string? Titulo { get; private set; }
@@ -113,7 +111,6 @@ public sealed class ArquivoMidia : Entidade
         ChaveStorage = $"{agora:yyyy}/{agora:MM}/{id}";
         MimeTypeDeclarado = mimeTypeDeclarado;
         TamanhoBytes = tamanhoBytesDeclarado;
-        _tamanhoBytesDeclarado = tamanhoBytesDeclarado;
         StatusSanitizacao = StatusSanitizacao.AguardandoUpload;
         EnviadoPorUsuarioId = enviadoPorUsuarioId;
         DataUploadUtc = agora;
@@ -138,8 +135,10 @@ public sealed class ArquivoMidia : Entidade
             throw new TransicaoInvalidaException("A janela de upload (1h) expirou.");
         }
 
-        if (tamanhoBytesReal > _tamanhoBytesDeclarado)
+        if (tamanhoBytesReal > TamanhoBytes)
         {
+            // TamanhoBytes ainda guarda o valor declarado na criação até esta linha o sobrescrever;
+            // não usar um campo privado à parte, que não sobreviveria a um reload do EF Core (F04).
             throw new TransicaoInvalidaException("O tamanho enviado é maior que o declarado na criação.");
         }
 

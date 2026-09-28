@@ -1,3 +1,4 @@
+using System.Reflection;
 using WebRadio.Domain.Enums;
 using WebRadio.Domain.Erros;
 using WebRadio.Domain.Midia;
@@ -324,5 +325,28 @@ public class ArquivoMidiaTests
 
         Assert.False(midia.Ativo);
         Assert.Equal(StatusSanitizacao.AguardandoUpload, midia.StatusSanitizacao);
+    }
+
+    [Fact]
+    public void ConcluirUpload_apos_reidratacao_pelo_EF_nao_depende_de_estado_nao_persistido_N1()
+    {
+        // Simula o materializador do EF Core: construtor privado sem parâmetros + set de propriedades via
+        // reflection, sem passar pelo construtor de domínio (que é onde um campo privado ficaria só em
+        // memória). Prova que ConcluirUpload compara só contra TamanhoBytes, que já é uma coluna mapeada —
+        // nunca contra um campo derivado que o EF não persistiria.
+        var midia = (ArquivoMidia)Activator.CreateInstance(typeof(ArquivoMidia), nonPublic: true)!;
+        DefinirPropriedade(midia, nameof(ArquivoMidia.TamanhoBytes), 1000L);
+        DefinirPropriedade(midia, nameof(ArquivoMidia.StatusSanitizacao), StatusSanitizacao.AguardandoUpload);
+        DefinirPropriedade(midia, nameof(ArquivoMidia.UploadExpiraEmUtc), Agora.AddHours(1));
+
+        midia.ConcluirUpload(1000, "etag-reidratado", Agora.AddMinutes(1));
+
+        Assert.Equal(StatusSanitizacao.Pendente, midia.StatusSanitizacao);
+    }
+
+    private static void DefinirPropriedade(object instancia, string nomeDaPropriedade, object? valor)
+    {
+        var propriedade = instancia.GetType().GetProperty(nomeDaPropriedade, BindingFlags.Public | BindingFlags.Instance)!;
+        propriedade.SetValue(instancia, valor);
     }
 }
