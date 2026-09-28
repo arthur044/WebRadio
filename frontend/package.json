@@ -15,7 +15,8 @@
     "test:coverage": "vitest run --coverage",
     "e2e": "playwright test",
     "test:e2e": "playwright test",
-    "pretest:e2e": "npm run build"
+    "pretest:e2e": "npm run build:e2e",
+    "build:e2e": "tsc -b && vite build --config vite.config.e2e.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.0",

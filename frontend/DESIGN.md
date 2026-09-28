@@ -42,6 +42,11 @@ Duas famílias (limite do `web/performance.md`):
   700 carregados.
 - **Leitura** — `Inter` (Mural, formulário de pedido, textos de programa). Só o peso 400 e 600.
 
+Ambas **auto-hospedadas** em `src/assets/fonts/` (`@font-face` em `src/index.css`), não via
+CDN do Google: a CSP normativa do Épico 1 (`05-seguranca-auditoria.md` S-M14) restringe
+`style-src`/`font-src` a `'self'`, então `fonts.googleapis.com`/`fonts.gstatic.com` não
+passariam no console do Playwright do P06.
+
 Escala tipográfica com `clamp()` (`--text-*` tokens), igual ao padrão de
 `web/coding-style.md`.
 

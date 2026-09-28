@@ -24,7 +24,6 @@ export function PlayerBar() {
       data-testid="player-bar"
       className="border-border bg-surface-raised text-text flex items-center gap-4 border-t px-4 py-3"
     >
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption -- stream de áudio ao vivo, sem faixas de legenda */}
       <audio ref={audioRef} src={STREAM_URL} preload="none" data-testid="radio-audio" />
 
       <button

@@ -9,8 +9,13 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-e2e
 dist-ssr
 *.local
+
+# Artefatos de teste (Playwright)
+playwright-report
+test-results
 
 # Editor directories and files
 .vscode/*

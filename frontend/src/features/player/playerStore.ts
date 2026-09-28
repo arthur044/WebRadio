@@ -33,6 +33,7 @@ interface PlayerActions {
 
 let audioEl: HTMLAudioElement | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let detachListeners: (() => void) | null = null
 
 function clearReconnectTimer() {
   if (reconnectTimer !== null) {
@@ -62,6 +63,11 @@ export const usePlayerStore = create<PlayerState & PlayerActions>((set, get) => 
   userPaused: false,
 
   attachAudioElement: (el) => {
+    // Guardian L7: cada attach adicionava listeners novos sem tirar os antigos — em
+    // StrictMode (dev) ou numa re-attach de verdade, os handlers duplicavam. Desliga
+    // o attach anterior antes de ligar (ou de sair, se el for null no unmount).
+    detachListeners?.()
+    detachListeners = null
     audioEl = el
     if (!el) return
 
@@ -69,24 +75,30 @@ export const usePlayerStore = create<PlayerState & PlayerActions>((set, get) => 
     el.volume = volume
     el.muted = muted
 
-    el.addEventListener('playing', () => {
+    const onPlaying = () => {
       clearReconnectTimer()
       set({ status: 'playing', reconnectAttempt: 0 })
       updateMediaSession(get().nowPlaying, 'playing')
-    })
-    el.addEventListener('pause', () => {
+    }
+    const onPause = () => {
       if (!get().userPaused) return
       set({ status: 'paused' })
       updateMediaSession(get().nowPlaying, 'paused')
-    })
-    el.addEventListener('waiting', () => set({ status: 'connecting' }))
+    }
+    const onWaiting = () => set({ status: 'connecting' })
 
+    // Guardian M5: um stream ao vivo nunca devia "terminar" — se o Icecast fechar a
+    // conexão de forma limpa (troca de fonte, restart), o <audio> dispara 'ended',
+    // não 'error'/'stalled', e sem isso a barra ficava presa em "Ao vivo" sem som.
     const scheduleReconnect = () => {
       if (get().userPaused) return
       set({ status: 'error' })
       clearReconnectTimer()
       const attempt = get().reconnectAttempt
-      const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_MAX_MS)
+      // Jitter: evita que todos os ouvintes reconectem no mesmo milissegundo depois
+      // de um restart do Icecast.
+      const jitter = Math.random() * 250
+      const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_MAX_MS) + jitter
       reconnectTimer = setTimeout(() => {
         set({ reconnectAttempt: attempt + 1 })
         const current = audioEl
@@ -98,8 +110,21 @@ export const usePlayerStore = create<PlayerState & PlayerActions>((set, get) => 
       }, delay)
     }
 
+    el.addEventListener('playing', onPlaying)
+    el.addEventListener('pause', onPause)
+    el.addEventListener('waiting', onWaiting)
     el.addEventListener('error', scheduleReconnect)
     el.addEventListener('stalled', scheduleReconnect)
+    el.addEventListener('ended', scheduleReconnect)
+
+    detachListeners = () => {
+      el.removeEventListener('playing', onPlaying)
+      el.removeEventListener('pause', onPause)
+      el.removeEventListener('waiting', onWaiting)
+      el.removeEventListener('error', scheduleReconnect)
+      el.removeEventListener('stalled', scheduleReconnect)
+      el.removeEventListener('ended', scheduleReconnect)
+    }
   },
 
   play: () => {

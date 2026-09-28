@@ -3,20 +3,21 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// https://vite.dev/config/
+// Build de produção — single entry só, sem nada de teste (Guardian H2). O
+// vite.config.e2e.ts é quem adiciona a fixture do Playwright.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {
       '/api': 'http://localhost:8080',
       '/hubs': { target: 'ws://localhost:8080', ws: true },
-      '/stream': 'http://localhost:8080',
     },
   },
   test: {
     environment: 'jsdom',
     globals: true,
     pool: 'threads',
+    fileParallelism: false,
     setupFiles: ['./vitest.setup.ts'],
     css: true,
     coverage: {

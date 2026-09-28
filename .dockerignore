@@ -1,0 +1,16 @@
+# Contexto de build = raiz do repo. O Vite embute qualquer VITE_* de .env no bundle
+# do browser (secrets de build viram públicos), e node_modules/dist não deviam nem
+# ir pro daemon (achado do Sentinel no PR do Prism).
+**/node_modules
+**/dist
+**/dist-e2e
+**/.env
+**/.env.*
+!**/.env.example
+**/test-results
+**/playwright-report
+**/bin
+**/obj
+.git
+.maestri
+secrets
