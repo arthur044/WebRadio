@@ -12,7 +12,7 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium' } }],
   webServer: {
-    command: 'npm run preview -- --port 4173',
+    command: 'npx vite preview --config vite.config.e2e.ts --port 4173',
     url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
   },

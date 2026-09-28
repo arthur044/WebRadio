@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../shared/api/authStore'
-import { apiFetch, ApiError } from '../../shared/api/httpClient'
+import { apiFetch, ApiError, refreshSession } from '../../shared/api/httpClient'
 
 /**
  * Tela obrigatória quando deveTrocarSenha=true (Admin semeado, S-B07). É a única
@@ -16,26 +16,26 @@ export function TrocarSenhaPage() {
   const [erro, setErro] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
 
+  // Anônimo não tem o que trocar (Guardian L5) — a página exige Bearer no POST.
+  if (!usuario) {
+    return <Navigate to="/login" replace />
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setErro(null)
     setEnviando(true)
     try {
-      await apiFetch<void>('/auth/trocar-senha', {
-        method: 'POST',
-        body: { senhaAtual, novaSenha },
-      })
-      const token = useAuthStore.getState().accessToken
-      if (usuario && token) {
-        useAuthStore.getState().setSession(token, { ...usuario, deveTrocarSenha: false })
-      }
+      await apiFetch<void>('/auth/trocar-senha', { method: 'POST', body: { senhaAtual, novaSenha } })
+      // Guardian H3: o 204 não devolve token novo, e o access token atual só vale
+      // pra /auth/trocar-senha e /auth/me enquanto deveTrocarSenha=true (01 §2.1).
+      // Sem trocar de token aqui, toda chamada seguinte (mesmo depois de "trocar a
+      // senha com sucesso") recebe 403 até o token expirar sozinho. Passa pelo MESMO
+      // lock do refresh comum — a família de refresh não foi revogada, só rotacionada.
+      await refreshSession(useAuthStore.getState().accessToken)
       navigate('/', { replace: true })
     } catch (err) {
-      setErro(
-        err instanceof ApiError
-          ? err.problem.detail || err.message
-          : 'Não foi possível trocar a senha',
-      )
+      setErro(err instanceof ApiError ? err.problem.detail || err.message : 'Não foi possível trocar a senha')
     } finally {
       setEnviando(false)
     }

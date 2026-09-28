@@ -3,21 +3,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// https://vite.dev/config/
+// Build de produção — single entry só, sem nada de teste (Guardian H2). O
+// vite.config.e2e.ts é quem adiciona a fixture do Playwright.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  build: {
-    rollupOptions: {
-      // "probe" só existe pro Playwright de e2e/refresh-cross-tab.spec.ts exercitar o
-      // httpClient real num browser de verdade (cookies e Web Locks entre abas não dá
-      // pra simular em Vitest/jsdom). Removido de dist/ no Dockerfile antes da imagem
-      // de produção — não é uma rota do app, ninguém navega até ela por acaso.
-      input: {
-        main: 'index.html',
-        probe: 'e2e/fixtures/refresh-probe.html',
-      },
-    },
-  },
   server: {
     proxy: {
       '/api': 'http://localhost:8080',

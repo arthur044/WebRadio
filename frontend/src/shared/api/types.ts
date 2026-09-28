@@ -40,7 +40,7 @@ export interface PedidoDto {
   id: string
   nomeOuvinte: string
   tituloMusica: string
-  artista: string | null
+  artista: string
   mensagem: string | null
   status: PedidoStatus
   criadoEmUtc: string
@@ -76,8 +76,8 @@ export interface DivulgacaoDto {
   imagemUrl: string | null
   linkDestino: string | null
   prioridade: number
-  inicioExibicaoUtc: string
-  fimExibicaoUtc: string
+  inicioExibicaoUtc: string | null
+  fimExibicaoUtc: string | null
   ativo: boolean
 }
 

@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, type Location } from 'react-router-dom'
 import { useAuthStore } from '../../shared/api/authStore'
-import { apiFetch } from '../../shared/api/httpClient'
+import { apiFetch, ApiError } from '../../shared/api/httpClient'
 import type { LoginResponse } from '../../shared/api/types'
 
 export function LoginPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
   const [erro, setErro] = useState<string | null>(null)
@@ -19,14 +20,24 @@ export function LoginPage() {
       const data = await apiFetch<LoginResponse>('/auth/login', {
         method: 'POST',
         skipAuth: true,
+        // Nunca dispara refresh nem retry em /auth/* (Guardian M1): um 401 de senha
+        // errada não pode virar 2 tentativas contadas no bloqueio do D21.
+        skipRefreshRetry: true,
         body: { email, senha },
       })
       useAuthStore.getState().setSession(data.accessToken, data.usuario)
-      navigate(data.deveTrocarSenha ? '/trocar-senha' : '/', { replace: true })
-    } catch {
-      // Mensagem sempre genérica — nunca revela se o e-mail existe, conta bloqueada
-      // ou senha errada (D21/S-A12: qualquer falha de login vira 401 genérico).
-      setErro('E-mail ou senha inválidos')
+      const from = (location.state as { from?: Location } | null)?.from
+      navigate(data.deveTrocarSenha ? '/trocar-senha' : (from?.pathname ?? '/'), { replace: true })
+    } catch (err) {
+      // 429 é limite de tentativas, não credencial errada — não faz sentido fingir
+      // que é a mesma coisa, e não revela nada sobre a conta (Guardian L4).
+      if (err instanceof ApiError && err.status === 429) {
+        setErro('Muitas tentativas. Tente novamente em alguns minutos.')
+      } else {
+        // Mensagem sempre genérica — nunca revela se o e-mail existe, conta bloqueada
+        // ou senha errada (D21/S-A12: qualquer falha de login vira 401 genérico).
+        setErro('E-mail ou senha inválidos')
+      }
     } finally {
       setEnviando(false)
     }

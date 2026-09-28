@@ -1,9 +1,13 @@
-# Host header injection: com $http_host repassado ao upstream (necessário pra
-# assinatura do MinIO manter a porta — ver comentário em /storage/ abaixo), um Host
-# forjado chegaria intacto na API/MinIO. Este server captura QUALQUER Host que não
+# Host header injection: com um Host controlado pelo cliente repassado ao upstream,
+# a API/MinIO receberiam um Host forjado. Este server captura QUALQUER Host que não
 # bata com o server_name explícito do server real logo abaixo e fecha a conexão sem
 # resposta (444), antes de tocar em qualquer location/proxy_pass. Precisa ser o
 # primeiro server deste arquivo para virar o default_server da porta 8080.
+#
+# Isso sozinho NÃO bastava (revisão do Sentinel): server_name só filtra o NOME, não
+# a PORTA — um Host: localhost:8081 batia no server_name "localhost" e a porta
+# errada seguia pro upstream via $http_host. Por isso todo proxy_set_header Host
+# abaixo usa um valor FIXO (${PUBLIC_AUTHORITY}), nunca o que o cliente mandou.
 server {
     listen 8080 default_server;
     server_name _;
@@ -51,7 +55,7 @@ server {
         client_max_body_size 1m;
 
         proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
+        proxy_set_header Host "${PUBLIC_AUTHORITY}";
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         set $api_upstream http://api:8080;
@@ -64,7 +68,7 @@ server {
         client_max_body_size 1m;
 
         proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
+        proxy_set_header Host "${PUBLIC_AUTHORITY}";
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         set $api_upstream http://api:8080;
@@ -75,12 +79,12 @@ server {
     location /hubs/ {
         include /etc/nginx/security-headers.conf;
         limit_conn conn_hubs 10;
-        access_log /dev/stdout hubs_anon;
+        access_log /dev/stdout anon_sem_query;
 
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
-        proxy_set_header Host $http_host;
+        proxy_set_header Host "${PUBLIC_AUTHORITY}";
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 3600s;
@@ -97,7 +101,7 @@ server {
         }
         proxy_buffering off;
         proxy_read_timeout 3600s;
-        proxy_set_header Host $http_host;
+        proxy_set_header Host "${PUBLIC_AUTHORITY}";
         # rewrite+break (não "proxy_pass $var/radio.mp3"): com host por variável, um
         # sufixo literal colado no mesmo proxy_pass é ambíguo sobre reescrita de URI —
         # confirmado com um eco na mesma rede (aliases api/icecast/minio) que o Icecast
@@ -117,70 +121,65 @@ server {
     # assina a POST policy e a URL de GET sem esse prefixo (correção v1.1 do S-A03) —
     # confirmado com eco que o MinIO recebe /midia/x, nunca /storage/midia/x.
     #
-    # Host: propositalmente ENCAMINHADO SEM TROCA E COM A PORTA (proxy_set_header Host
-    # $http_host — não $host, que descarta a porta — confirmado com eco: Host:
-    # site:8080 chegava ao MinIO só como "site" via $host). O mesmo Host que o browser
-    # mandou, nunca "minio:9000". A assinatura de uma URL pré-assinada (POST policy ou
-    # GET) inclui o Host com a porta; o Storage__PublicEndpoint do backend (E1-F09) é
-    # <origem>/storage (com :8080 em dev) e assina contra ESSE host:porta. Se o nginx
-    # aqui reescrever ou truncar o Host, toda URL pré-assinada vira 403
-    # SignatureDoesNotMatch. Contrato combinado com o Forge: Storage__PublicEndpoint
-    # usa exatamente o host:porta que o browser acessa (o $http_host desta borda),
-    # nunca o hostname interno do MinIO.
+    # Host: FIXO em ${PUBLIC_AUTHORITY} (revisão do Sentinel — ver comentário no topo
+    # do arquivo). A assinatura de uma URL pré-assinada (POST policy ou GET) inclui o
+    # Host com a porta; o Storage__PublicEndpoint do backend (E1-F09) tem que ser
+    # exatamente <esquema>://${PUBLIC_AUTHORITY}/storage (com :8080 em dev), porque é
+    # esse valor fixo — nunca o que o cliente mandou — que chega ao MinIO.
     location ~ ^/storage/quarentena(/|$) {
         include /etc/nginx/security-headers.conf;
-        if ($storage_listing_blocked) {
-            return 404;
-        }
         limit_except POST {
             deny all;
         }
         client_max_body_size 250m;
+        access_log /dev/stdout anon_sem_query;
         # $minio_upstream ANTES do rewrite: "break" para o módulo rewrite ali mesmo,
         # então um "set" escrito depois de "break" nunca roda (fica vazio → 500).
         set $minio_upstream http://minio:9000;
         rewrite ^/storage/(.*)$ /$1 break;
-        proxy_set_header Host $http_host;
+        proxy_set_header Host "${PUBLIC_AUTHORITY}";
         proxy_pass $minio_upstream;
     }
 
-    location ~ ^/storage/midia/ {
+    # Allowlist (revisão do Sentinel, troca a denylist de parâmetros de listagem):
+    # só uma chave não vazia ((.+) exige pelo menos 1 caractere depois de "midia/")
+    # E query com X-Amz-Signature passam — isto é, só GET/HEAD pré-assinado de um
+    # objeto de verdade. /storage/midia/ sem chave não bate nesta location e cai no
+    # catch-all /storage/ → 404 (S-A05: nunca lista o bucket).
+    location ~ ^/storage/midia/(.+)$ {
         include /etc/nginx/security-headers.conf;
-        if ($storage_listing_blocked) {
+        if ($has_amz_signature = 0) {
             return 404;
         }
         limit_except GET HEAD {
             deny all;
         }
+        access_log /dev/stdout anon_sem_query;
         set $minio_upstream http://minio:9000;
         rewrite ^/storage/(.*)$ /$1 break;
-        proxy_set_header Host $http_host;
+        proxy_set_header Host "${PUBLIC_AUTHORITY}";
         proxy_pass $minio_upstream;
     }
 
-    # Raiz exata do bucket (sem chave) → 404 ANTES do proxy: listagem do bucket
-    # público vaza divulgações ainda não publicadas (S-A05). Camada extra além da
-    # política do MinIO (que já nega s3:ListBucket).
-    location = /storage/publico/ {
-        include /etc/nginx/security-headers.conf;
-        return 404;
-    }
-
-    location ~ ^/storage/publico/ {
+    # Allowlist simétrica pro bucket público: chave não vazia E SEM query nenhuma
+    # (imagem de divulgação é servida com GetObject anônimo simples, nunca com
+    # parâmetros de listagem). Bare /storage/publico/ também cai no catch-all → 404.
+    location ~ ^/storage/publico/(.+)$ {
         include /etc/nginx/security-headers.conf;
         # Conteúdo enviado por usuários (imagens de divulgação): nosniff já vem do
         # include acima; CSP sandbox soma (não substitui) mais uma camada contra um
         # upload que escape da recodificação da API (S-A05).
         add_header Content-Security-Policy "sandbox" always;
-        if ($storage_listing_blocked) {
+        if ($args) {
             return 404;
         }
         limit_except GET HEAD {
             deny all;
         }
+        access_log /dev/stdout anon_sem_query;
         set $minio_upstream http://minio:9000;
         rewrite ^/storage/(.*)$ /$1 break;
-        proxy_set_header Host $http_host;
+        proxy_set_header Host "${PUBLIC_AUTHORITY}";
         proxy_pass $minio_upstream;
     }
 

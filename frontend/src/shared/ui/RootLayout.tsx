@@ -29,7 +29,7 @@ function AuthNavItem() {
 
   async function sair() {
     try {
-      await apiFetch<void>('/auth/logout', { method: 'POST' })
+      await apiFetch<void>('/auth/logout', { method: 'POST', skipRefreshRetry: true })
     } finally {
       useAuthStore.getState().clearSession()
       navigate('/', { replace: true })
