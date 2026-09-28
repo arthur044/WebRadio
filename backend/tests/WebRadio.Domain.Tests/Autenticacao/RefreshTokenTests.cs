@@ -53,6 +53,7 @@ public class RefreshTokenTests
         token.Revogar(Agora.AddHours(2)); // não deve lançar, nem sobrescrever o timestamp original
 
         Assert.True(token.EstaRevogado);
+        Assert.Equal(Agora.AddHours(1), token.RevogadoEmUtc);
         Assert.False(token.EstaValido(Agora.AddHours(3)));
     }
 
@@ -65,6 +66,18 @@ public class RefreshTokenTests
         token.MarcarSubstituidoPor(proximoId, Agora.AddDays(1));
 
         Assert.True(token.EstaRevogado);
+        Assert.Equal(proximoId, token.SubstituidoPorId);
+    }
+
+    [Fact]
+    public void Construtor_copia_o_TokenHash_M6()
+    {
+        var hash = new byte[32];
+        var token = new RefreshToken(Guid.NewGuid(), Guid.NewGuid(), hash, Guid.NewGuid(), Agora, TimeSpan.FromDays(7), null);
+
+        hash[0] = 0xFF;
+
+        Assert.NotEqual((byte)0xFF, token.TokenHash[0]);
     }
 
     [Fact]

@@ -93,6 +93,34 @@ public class PedidoMusicaTests
     }
 
     [Fact]
+    public void MarcarTocado_a_partir_de_Rejeitado_lanca_TransicaoInvalida()
+    {
+        var pedido = Criar();
+        pedido.Rejeitar(Guid.NewGuid(), "motivo", Agora.AddMinutes(1));
+
+        Assert.Throws<TransicaoInvalidaException>(() => pedido.MarcarTocado(Agora.AddMinutes(2)));
+    }
+
+    [Fact]
+    public void MarcarTocado_a_partir_de_Tocado_lanca_TransicaoInvalida()
+    {
+        var pedido = Criar();
+        pedido.Aprovar(Guid.NewGuid(), Guid.NewGuid(), Agora.AddMinutes(1));
+        pedido.MarcarTocado(Agora.AddMinutes(2));
+
+        Assert.Throws<TransicaoInvalidaException>(() => pedido.MarcarTocado(Agora.AddMinutes(3)));
+    }
+
+    [Fact]
+    public void MarcarTocado_a_partir_de_Expirado_lanca_TransicaoInvalida()
+    {
+        var pedido = Criar(criadoEmUtc: Agora);
+        pedido.Expirar(TimeSpan.FromMinutes(120), Agora.AddMinutes(121));
+
+        Assert.Throws<TransicaoInvalidaException>(() => pedido.MarcarTocado(Agora.AddMinutes(122)));
+    }
+
+    [Fact]
     public void MarcarEnviadoAoPlayout_exige_Aprovado()
     {
         var pedido = Criar();

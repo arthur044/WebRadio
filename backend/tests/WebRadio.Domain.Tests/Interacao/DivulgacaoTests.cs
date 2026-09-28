@@ -7,7 +7,7 @@ public class DivulgacaoTests
 {
     private static readonly DateTime Agora = new(2026, 9, 27, 12, 0, 0, DateTimeKind.Utc);
 
-    private static Divulgacao Criar(DateTime? inicio = null, DateTime? fim = null, byte prioridade = 50, bool ativo = true) =>
+    private static Divulgacao Criar(DateTime? inicio = null, DateTime? fim = null, byte prioridade = 50) =>
         new(Guid.NewGuid(), "Título", "Mensagem", null, "https://example.com", prioridade, inicio, fim, Guid.NewGuid(), Agora);
 
     [Fact]

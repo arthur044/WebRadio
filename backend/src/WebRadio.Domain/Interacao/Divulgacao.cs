@@ -126,9 +126,14 @@ public sealed class Divulgacao : Entidade
 
     private static void ValidarLink(string? link)
     {
-        if (link is not null && !link.StartsWith("https://", StringComparison.Ordinal))
+        if (link is null)
         {
-            throw new ArgumentException("LinkDestino precisa começar com https://.", nameof(link));
+            return;
+        }
+
+        if (!Uri.TryCreate(link, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new ArgumentException("LinkDestino precisa ser uma URL absoluta https://.", nameof(link));
         }
     }
 

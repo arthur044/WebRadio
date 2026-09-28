@@ -71,8 +71,8 @@ public sealed class PedidoMusica : Entidade
         TituloMusica = tituloMusica;
         Artista = artista;
         Mensagem = mensagem;
-        ListenerDeviceHash = listenerDeviceHash;
-        ListenerIpHash = listenerIpHash;
+        ListenerDeviceHash = (byte[]?)listenerDeviceHash?.Clone();
+        ListenerIpHash = (byte[]?)listenerIpHash?.Clone();
         Status = StatusPedido.Pendente;
         CriadoEmUtc = agora;
     }

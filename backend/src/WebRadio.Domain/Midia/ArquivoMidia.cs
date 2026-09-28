@@ -15,6 +15,14 @@ public sealed class ArquivoMidia : Entidade
     /// <summary>Fluxo C: na 3ª falha de processamento (não determinística — timeout/crash do sanitizer) → Rejeitado.</summary>
     public const byte MaxTentativasSanitizacao = 3;
 
+    private const string BucketQuarentena = "quarentena";
+    private const string BucketMidia = "midia";
+
+    /// <summary>CK_ArquivoMidia_MimeType.</summary>
+    private static readonly string[] MimeTypesPermitidos = ["audio/mpeg", "audio/ogg", "audio/wav", "audio/flac"];
+
+    private long _tamanhoBytesDeclarado;
+
     public string NomeOriginal { get; private set; } = null!;
 
     public string? Titulo { get; private set; }
@@ -25,6 +33,8 @@ public sealed class ArquivoMidia : Entidade
 
     public string Bucket { get; private set; } = null!;
 
+    /// <summary>Gerada pelo servidor a partir de Id + data de criação: `{yyyy}/{MM}/{Id}` (D11/S-M01); ganha a
+    /// extensão em Aprovar, após a recodificação.</summary>
     public string ChaveStorage { get; private set; } = null!;
 
     public string MimeTypeDeclarado { get; private set; } = null!;
@@ -49,7 +59,8 @@ public sealed class ArquivoMidia : Entidade
     /// <summary>+1 a cada vez que entra em EmAnalise.</summary>
     public byte TentativasSanitizacao { get; private set; }
 
-    /// <summary>Lease do worker; obrigatório em EmAnalise. Um lease vencido volta para Pendente.</summary>
+    /// <summary>Lease do worker; obrigatório em EmAnalise. Um lease vencido conta como falha (mesma regra de
+    /// RegistrarFalhaProcessamento) — nunca fica preso em EmAnalise nem estoura a CK 0-10.</summary>
     public DateTime? EmAnaliseDesdeUtc { get; private set; }
 
     public string? MotivoRejeicao { get; private set; }
@@ -74,7 +85,6 @@ public sealed class ArquivoMidia : Entidade
         string? titulo,
         string? artista,
         TipoMidia tipoMidia,
-        string chaveStorage,
         string mimeTypeDeclarado,
         long tamanhoBytesDeclarado,
         Guid enviadoPorUsuarioId,
@@ -82,7 +92,6 @@ public sealed class ArquivoMidia : Entidade
         : base(id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(nomeOriginal);
-        ArgumentException.ThrowIfNullOrWhiteSpace(chaveStorage);
         ArgumentException.ThrowIfNullOrWhiteSpace(mimeTypeDeclarado);
         UtcGuard.Exigir(agora, nameof(agora));
 
@@ -100,10 +109,11 @@ public sealed class ArquivoMidia : Entidade
         Titulo = titulo;
         Artista = artista;
         TipoMidia = tipoMidia;
-        Bucket = "quarentena";
-        ChaveStorage = chaveStorage;
+        Bucket = BucketQuarentena;
+        ChaveStorage = $"{agora:yyyy}/{agora:MM}/{id}";
         MimeTypeDeclarado = mimeTypeDeclarado;
         TamanhoBytes = tamanhoBytesDeclarado;
+        _tamanhoBytesDeclarado = tamanhoBytesDeclarado;
         StatusSanitizacao = StatusSanitizacao.AguardandoUpload;
         EnviadoPorUsuarioId = enviadoPorUsuarioId;
         DataUploadUtc = agora;
@@ -117,6 +127,21 @@ public sealed class ArquivoMidia : Entidade
         ArgumentException.ThrowIfNullOrWhiteSpace(etag);
         UtcGuard.Exigir(agora, nameof(agora));
         GarantirStatus(StatusSanitizacao.AguardandoUpload);
+
+        if (tamanhoBytesReal <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(tamanhoBytesReal), "O tamanho enviado precisa ser positivo.");
+        }
+
+        if (agora >= UploadExpiraEmUtc)
+        {
+            throw new TransicaoInvalidaException("A janela de upload (1h) expirou.");
+        }
+
+        if (tamanhoBytesReal > _tamanhoBytesDeclarado)
+        {
+            throw new TransicaoInvalidaException("O tamanho enviado é maior que o declarado na criação.");
+        }
 
         TamanhoBytes = tamanhoBytesReal;
         EtagUpload = etag;
@@ -134,7 +159,7 @@ public sealed class ArquivoMidia : Entidade
         EmAnaliseDesdeUtc = agora;
     }
 
-    /// <summary>Um lease vencido (> timeout do job) volta para a fila.</summary>
+    /// <summary>Um lease vencido (> timeout do job) é uma falha como outra qualquer: mesma regra de 3 tentativas.</summary>
     public void LiberarLeaseExpirado(DateTime agora, TimeSpan timeoutLease)
     {
         UtcGuard.Exigir(agora, nameof(agora));
@@ -145,18 +170,25 @@ public sealed class ArquivoMidia : Entidade
             throw new TransicaoInvalidaException("O lease de análise ainda não expirou.");
         }
 
-        StatusSanitizacao = StatusSanitizacao.Pendente;
-        EmAnaliseDesdeUtc = null;
+        TransicaoPorFalha(agora);
     }
 
-    /// <summary>Hash do arquivo recebido, antes da recodificação — auditoria; não muda o status.</summary>
+    /// <summary>Hash do arquivo recebido, antes da recodificação — auditoria; escrita única, não muda o status.</summary>
     public void RegistrarHashOriginal(byte[] hashOriginalSha256)
     {
         ValidarHash(hashOriginalSha256, nameof(hashOriginalSha256));
-        HashOriginalSHA256 = hashOriginalSha256;
+        GarantirStatus(StatusSanitizacao.EmAnalise);
+
+        if (HashOriginalSHA256 is not null)
+        {
+            throw new TransicaoInvalidaException("O hash original já foi registrado.");
+        }
+
+        HashOriginalSHA256 = (byte[])hashOriginalSha256.Clone();
     }
 
-    /// <summary>Rejeição determinística: formato inválido, tamanho/duração fora do limite, duplicata, TOCTOU do ETag.</summary>
+    /// <summary>Rejeição determinística: formato inválido, duplicata, TOCTOU do ETag (limite de tamanho/duração
+    /// passa por Aprovar, que rejeita internamente em vez de lançar).</summary>
     public void Rejeitar(string motivo, DateTime agora)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(motivo);
@@ -178,18 +210,7 @@ public sealed class ArquivoMidia : Entidade
         UtcGuard.Exigir(agora, nameof(agora));
         GarantirStatus(StatusSanitizacao.EmAnalise);
 
-        if (TentativasSanitizacao >= MaxTentativasSanitizacao)
-        {
-            StatusSanitizacao = StatusSanitizacao.Rejeitado;
-            MotivoRejeicao = "falha de processamento";
-            SanitizadoEmUtc = agora;
-        }
-        else
-        {
-            StatusSanitizacao = StatusSanitizacao.Pendente;
-        }
-
-        EmAnaliseDesdeUtc = null;
+        TransicaoPorFalha(agora);
     }
 
     public void MarcarQuarentena(string motivo, DateTime agora)
@@ -204,37 +225,78 @@ public sealed class ArquivoMidia : Entidade
         EmAnaliseDesdeUtc = null;
     }
 
-    /// <summary>DuracaoSegundos e MimeType vêm do arquivo de saída (S-A01); limite é aplicado sobre eles.</summary>
-    public void Aprovar(string mimeType, byte[] hashSha256Saida, decimal duracaoSegundos, LimiteMidia limite, DateTime agora)
+    /// <summary>
+    /// DuracaoSegundos, MimeType e TamanhoBytes vêm do arquivo de saída (S-A01). Mídia fora do limite do tipo
+    /// (§2.5) ou com MimeType fora da lista permitida (CK_ArquivoMidia_MimeType) vira Rejeitado com o motivo —
+    /// nunca lança exceção, para não confundir o worker com uma falha de processamento transitória (H2).
+    /// </summary>
+    public void Aprovar(
+        string mimeType,
+        byte[] hashSha256Saida,
+        decimal duracaoSegundos,
+        long tamanhoBytesSaida,
+        string extensao,
+        LimiteMidia limite,
+        DateTime agora)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(mimeType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(extensao);
         ValidarHash(hashSha256Saida, nameof(hashSha256Saida));
         UtcGuard.Exigir(agora, nameof(agora));
         GarantirStatus(StatusSanitizacao.EmAnalise);
 
+        if (tamanhoBytesSaida <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(tamanhoBytesSaida), "O tamanho de saída precisa ser positivo.");
+        }
+
+        if (!MimeTypesPermitidos.Contains(mimeType))
+        {
+            Rejeitar($"tipo de mídia não permitido: {mimeType}", agora);
+            return;
+        }
+
         var duracao = TimeSpan.FromSeconds((double)duracaoSegundos);
         if (duracao < limite.DuracaoMinima || duracao > limite.DuracaoMaxima)
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(duracaoSegundos),
-                $"Duração {duracao} fora do limite [{limite.DuracaoMinima}, {limite.DuracaoMaxima}] para {TipoMidia}.");
+            Rejeitar($"duração ({duracao}) fora do limite [{limite.DuracaoMinima}, {limite.DuracaoMaxima}] para {TipoMidia}", agora);
+            return;
         }
 
-        if (TamanhoBytes > limite.TamanhoMaximoBytes)
+        if (tamanhoBytesSaida > limite.TamanhoMaximoBytes)
         {
-            throw new ArgumentOutOfRangeException(nameof(limite), $"Tamanho {TamanhoBytes} acima do limite de {limite.TamanhoMaximoBytes} bytes para {TipoMidia}.");
+            Rejeitar($"tamanho ({tamanhoBytesSaida} bytes) acima do limite de {limite.TamanhoMaximoBytes} bytes para {TipoMidia}", agora);
+            return;
         }
 
         MimeType = mimeType;
-        HashSHA256 = hashSha256Saida;
+        HashSHA256 = (byte[])hashSha256Saida.Clone();
         DuracaoSegundos = duracaoSegundos;
+        TamanhoBytes = tamanhoBytesSaida;
+        ChaveStorage += extensao;
         StatusSanitizacao = StatusSanitizacao.Aprovado;
-        Bucket = "midia";
+        Bucket = BucketMidia;
         SanitizadoEmUtc = agora;
         EmAnaliseDesdeUtc = null;
     }
 
     public void Desativar() => Ativo = false;
+
+    private void TransicaoPorFalha(DateTime agora)
+    {
+        if (TentativasSanitizacao >= MaxTentativasSanitizacao)
+        {
+            StatusSanitizacao = StatusSanitizacao.Rejeitado;
+            MotivoRejeicao = "falha de processamento";
+            SanitizadoEmUtc = agora;
+        }
+        else
+        {
+            StatusSanitizacao = StatusSanitizacao.Pendente;
+        }
+
+        EmAnaliseDesdeUtc = null;
+    }
 
     private void GarantirStatus(StatusSanitizacao esperado)
     {
@@ -246,6 +308,8 @@ public sealed class ArquivoMidia : Entidade
 
     private static void ValidarHash(byte[] hash, string nomeParametro)
     {
+        ArgumentNullException.ThrowIfNull(hash, nomeParametro);
+
         if (hash.Length != TamanhoHashBytes)
         {
             throw new ArgumentException($"O hash precisa ter {TamanhoHashBytes} bytes (SHA-256).", nomeParametro);

@@ -142,6 +142,24 @@ public class ProgramaTests
     }
 
     [Fact]
+    public void Encerrar_a_partir_de_Finalizado_lanca_TransicaoInvalida()
+    {
+        var programa = Criar(inicio: Agora, fim: Agora.AddMinutes(10), agora: Agora);
+        programa.FinalizarPorFimDeJanela(Agora.AddHours(1));
+
+        Assert.Throws<TransicaoInvalidaException>(() => programa.Encerrar(Agora.AddHours(2)));
+    }
+
+    [Fact]
+    public void Encerrar_com_agora_antes_ou_igual_ao_inicio_lanca_TransicaoInvalida()
+    {
+        var programa = Criar(inicio: Agora, fim: Agora.AddHours(1), agora: Agora);
+        programa.IniciarAoVivo(Agora.AddMinutes(1));
+
+        Assert.Throws<TransicaoInvalidaException>(() => programa.Encerrar(Agora));
+    }
+
+    [Fact]
     public void Cancelar_a_partir_de_Agendado_funciona()
     {
         var programa = Criar(inicio: Agora.AddHours(1), fim: Agora.AddHours(2), agora: Agora);
@@ -159,6 +177,15 @@ public class ProgramaTests
         programa.IniciarAoVivo(Agora.AddMinutes(1));
 
         Assert.Throws<TransicaoInvalidaException>(() => programa.Cancelar(Agora.AddMinutes(2)));
+    }
+
+    [Fact]
+    public void Cancelar_a_partir_de_Finalizado_lanca_TransicaoInvalida()
+    {
+        var programa = Criar(inicio: Agora, fim: Agora.AddMinutes(10), agora: Agora);
+        programa.FinalizarPorFimDeJanela(Agora.AddHours(1));
+
+        Assert.Throws<TransicaoInvalidaException>(() => programa.Cancelar(Agora.AddHours(2)));
     }
 
     [Fact]
