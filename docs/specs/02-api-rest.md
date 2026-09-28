@@ -116,7 +116,7 @@ Validação de horário: `inicioUtc`/`fimUtc` **precisam** terminar em `Z` (offs
 
 ## 9. Endpoints internos — só no listener Kestrel `:8081` (D17)
 
-O grupo `/api/v1/internal` (e `/health/*`) tem um filtro de endpoint que exige `HttpContext.Connection.LocalPort == 8081` (a porta real do socket; **nunca** `RequireHost`, que compara o cabeçalho `Host`, controlado pelo cliente), com o listener `:8081` do Kestrel ligado só ao IP da rede `playout`; a porta 8081 só está na rede `playout` e o nginx nunca a encaminha. Autenticação: Bearer `Playout__Token` comparado com `CryptographicOperations.FixedTimeEquals`, aceitando também `Playout__TokenAnterior` durante a rotação. O Liquidsoap chama `http://api:8081/api/v1/internal/...`.
+O grupo `/api/v1/internal` (e `/health/*`) tem um filtro de endpoint que exige `HttpContext.Connection.LocalPort == 8081` (a porta real do socket; **nunca** `RequireHost`, que compara o cabeçalho `Host`, controlado pelo cliente), com o listener `:8081` do Kestrel ligado só ao IP da rede `playout` e a `127.0.0.1` (o healthcheck roda dentro do contêiner; S-A06); a porta 8081 só está na rede `playout` e o nginx nunca a encaminha. Autenticação: Bearer `Playout__Token` comparado com `CryptographicOperations.FixedTimeEquals`, aceitando também `Playout__TokenAnterior` durante a rotação. O Liquidsoap chama `http://api:8081/api/v1/internal/...`.
 
 | Método | Rota | Descrição |
 |---|---|---|
