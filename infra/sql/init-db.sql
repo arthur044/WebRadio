@@ -14,13 +14,15 @@
    exclusividade de banco à toa mesmo já estando correto.
 
    Variável sqlcmd:
-     $(Ambiente)  'Development' ou 'Production' — mesmos valores de
-                  ASPNETCORE_ENVIRONMENT (docs/specs/05-seguranca-auditoria.md §5.1)
-                  — decide o recovery model (E1-A04). OBRIGATÓRIA, sem valor
-                  padrão: um :setvar aqui teria precedência sobre o -v do
-                  invocador e mascararia esse -v silenciosamente (mesma classe de
-                  bug do E1-A06/seed-dev.sql) — sem -v Ambiente, o script falha
-                  (fail-closed) em vez de assumir Development.
+     $(Ambiente)  'Development' ou 'Production' (lista branca — qualquer outro
+                  valor, incluindo vazio, aborta com RAISERROR; ver N1 abaixo) —
+                  mesmos valores de ASPNETCORE_ENVIRONMENT
+                  (docs/specs/05-seguranca-auditoria.md §5.1) — decide o recovery
+                  model (E1-A04). OBRIGATÓRIA, sem valor padrão: um :setvar aqui
+                  teria precedência sobre o -v do invocador e mascararia esse -v
+                  silenciosamente (mesma classe de bug do E1-A06/seed-dev.sql) —
+                  sem -v Ambiente, o script falha (fail-closed) em vez de assumir
+                  Development.
 
    Uso (db-init; senha da SA via SQLCMDPASSWORD, nunca em -P — S-A10, fica
    visível em `ps`/`docker inspect`):
@@ -72,6 +74,16 @@ BEGIN
     ALTER DATABASE WebRadio SET COMPATIBILITY_LEVEL = 160;
 END
 GO
+
+-- [Atlas/Guardian, N1] Lista branca: só Development ou Production. Sem isso, um
+-- valor vazio ou digitado errado (ex.: "Prod") caía no ELSE abaixo e ligava RECOVERY
+-- SIMPLE em silêncio — em produção isso perde a recuperação point-in-time sem
+-- nenhum aviso.
+IF (N'$(Ambiente)' NOT IN (N'Development', N'Production'))
+BEGIN
+    RAISERROR(N'init-db.sql: Ambiente inválido ("$(Ambiente)"). Esperado Development ou Production. Abortando.', 16, 1);
+    RETURN;
+END
 
 -- Recovery model por ambiente (E1-A04): SIMPLE em dev/CI (sem estratégia de
 -- backup no Épico 1; log não precisa crescer) e FULL em produção (prepara

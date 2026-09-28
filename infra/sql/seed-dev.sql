@@ -43,7 +43,8 @@
    programa criado por quem está testando a API é pulado, não sobrescrito.
 
    Tudo roda numa única transação (XACT_ABORT ON): se o INSERT falhar depois
-   do DELETE, a transação desfaz tudo — nunca fica com a grade vazia.
+   do DELETE, a transação desfaz tudo — nunca fica com a grade vazia. Usa o
+   mesmo sp_getapplock 'grade:programa' do ADR D7 antes de mexer na grade.
 
    Limitação conhecida: se algum PedidoMusica de teste já referenciar um
    Programa de um lote "[seed] " anterior, o DELETE falha por FK
@@ -79,6 +80,17 @@ BEGIN
 END
 
 BEGIN TRAN;
+
+-- [Atlas/Guardian, LOW] Mesma trava do ADR D7 (POST /programas): evita corrida com a
+-- API enquanto o seed roda. Baixo risco em dev, mas barato de manter consistente.
+DECLARE @LockResult int;
+EXEC @LockResult = sp_getapplock @Resource = 'grade:programa', @LockMode = 'Exclusive', @LockOwner = 'Transaction';
+IF @LockResult < 0
+BEGIN
+    ROLLBACK;
+    RAISERROR(N'seed-dev.sql: não consegui o lock grade:programa (sp_getapplock retornou %d). Abortando.', 16, 1, @LockResult);
+    RETURN;
+END
 
 -- ---------- Grade: 7 dias, sem sobreposição com QUALQUER programa Agendado/AoVivo existente ----------
 -- Reseed remove só o que ESTE script criou: prefixo "[seed] " no título E LocutorId é
