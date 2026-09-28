@@ -7,7 +7,14 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest</AnalysisLevel>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!--
+      E1-F04: InvariantGlobalization=true quebra Microsoft.Data.SqlClient por completo
+      (System.NotSupportedException ao abrir a conexão — "Globalization Invariant Mode is not
+      supported", reproduzido com `dotnet ef database update` contra SQL Server real). Como Api,
+      Worker e Migrator dependem de EF Core/SqlClient em runtime, manter isso ligado quebraria o
+      stack inteiro. Desligado deliberadamente; nunca reative sem trocar de driver de SQL Server.
+    -->
+    <InvariantGlobalization>false</InvariantGlobalization>
     <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
   </PropertyGroup>
 
