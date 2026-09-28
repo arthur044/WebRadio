@@ -6,9 +6,13 @@
    "-- [Atlas]" (achados da revisão de tipos/CHECKs/índices/collation) e
    "-- [Atlas/v1.1]" (S-A12/S-B07/S-M02/S-M03/S-M04, auditoria do Sentinel em
    docs/specs/05-seguranca-auditoria.md, incorporados a pedido do Nexus).
-   Não compilado contra uma instância real nesta revisão: Docker/WSL2
-   indisponível no ambiente do Atlas (sem virtualização aninhada). Forge deve
-   validar via Testcontainers (E1-F04) e reportar qualquer erro de compilação.
+   COMPILADO de verdade contra SQL Server 2022 em contêiner (Docker local
+   corrigido em 2026-09-27): infra/sql/init-db.sql → este arquivo →
+   infra/sql/logins.sql rodaram via sqlcmd -b sem erro, e o GRANT de
+   webradio_app foi confirmado (CREATE TABLE negado, sp_getapplock ok). Um
+   erro real apareceu e foi corrigido: SET QUOTED_IDENTIFIER ON no topo
+   (item 0.1) — sqlcmd liga OFF por padrão, o que quebra todo CREATE INDEX
+   filtrado (erro 1934).
 
    Papel deste arquivo (ADR D14):
      - Contrato do modelo relacional. As EF Core Migrations do Forge são
@@ -36,6 +40,15 @@
 -- GO
 /* Com RCSI ligado, leitores não bloqueiam escritores. Por isso a regra de
    não sobreposição da grade usa sp_getapplock (ADR D7), não trigger. */
+
+/* ---------- 0.1 Sessão ---------- */
+-- [Atlas] QUOTED_IDENTIFIER precisa estar ON para CREATE INDEX filtrado (todos os
+-- índices WHERE deste arquivo), colunas computadas e views indexadas. sqlcmd/osql
+-- ligam OFF por padrão — sem isso, todo CREATE INDEX filtrado falha com o erro 1934
+-- (achado rodando de verdade contra SQL Server 2022, E1-A01). O SSMS já liga ON por
+-- padrão, por isso esse bug só aparece via sqlcmd/CI, nunca em teste manual no SSMS.
+SET QUOTED_IDENTIFIER ON;
+GO
 
 /* ---------- 1. Schemas ---------- */
 CREATE SCHEMA seg;        -- identidade e acesso
@@ -310,20 +323,16 @@ CREATE TABLE infra.EventoOutbox (
 CREATE INDEX IX_EventoOutbox_Pendentes ON infra.EventoOutbox (Id) INCLUDE (Tentativas) WHERE ProcessadoEmUtc IS NULL;
 GO
 
-/* ---------- 10. Segurança de acesso (template; Atlas finaliza — tarefa E1-A02) ----------
-   Três principals, nenhum sysadmin:
-     webradio_migrator : db_ddladmin + db_datareader + db_datawriter  (só o serviço "migrator")
-     webradio_app      : SELECT/INSERT/UPDATE/DELETE nos schemas + EXECUTE (API e Worker)
-     webradio_relatorio: SELECT em midia/grade/interacao + EXECUTE no schema rel (futuro)
-
-   CREATE LOGIN webradio_app WITH PASSWORD = '$(APP_DB_PASSWORD)', CHECK_POLICY = ON;
-   CREATE USER  webradio_app FOR LOGIN webradio_app;
-   GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON SCHEMA::seg       TO webradio_app;
-   GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON SCHEMA::grade     TO webradio_app;
-   GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON SCHEMA::interacao TO webradio_app;
-   GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON SCHEMA::midia     TO webradio_app;
-   GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON SCHEMA::infra     TO webradio_app;
-   -- sp_getapplock é público; não precisa de GRANT.
+/* ---------- 10. Segurança de acesso (E1-A02, concluída) ----------
+   [Atlas/v1.1] Implementação real em infra/sql/logins.sql — este bloco virou só um
+   ponteiro para não manter duas cópias das GRANTs divergindo com o tempo. Três
+   principals, nenhum sysadmin: webradio_migrator (db_ddladmin+datareader+datawriter,
+   só "migrator"), webradio_app (SELECT/INSERT/UPDATE/DELETE/EXECUTE nos 5 schemas,
+   api+worker), webradio_relatorio (SELECT em midia/grade/interacao, leitura para
+   relatório — EXECUTE em rel.* entra no Épico 3, quando o schema existir). Nomes de
+   senha por sqlcmd: DB_APP_PASSWORD, DB_MIGRATOR_PASSWORD, DB_RELATORIO_PASSWORD
+   (S-A10, docs/specs/05-seguranca-auditoria.md §5.1). Executado pelo "db-init" (D20)
+   com a SA, logo após infra/sql/init-db.sql (E1-A04).
    --------------------------------------------------------------------------------------- */
 
 /* ---------- 11. Rotinas de manutenção (Atlas, Épico 1 cria o esqueleto) ----------
