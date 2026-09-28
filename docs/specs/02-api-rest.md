@@ -30,10 +30,12 @@ Políticas ASP.NET: `PodeModerar` (Locutor, Admin), `SomenteAdmin` (Admin). Quem
 | POST | `/auth/login` | anônimo | `{ email, senha }` → **200** `{ accessToken, expiraEmUtc, deveTrocarSenha, usuario: UsuarioDto }` + cookie `__Secure-wr_refresh`. Qualquer falha (inclusive conta bloqueada) → **401** genérico (D21) |
 | POST | `/auth/refresh` | cookie + `Origin` da mesma origem | → **200** mesmo formato do login + novo cookie (rotação). Inválido → 401 e o cookie é apagado |
 | POST | `/auth/logout` | cookie + `Origin` da mesma origem | → **204**; revoga o token e apaga o cookie |
-| POST | `/auth/trocar-senha` | Bearer | `{ senhaAtual, novaSenha }` → **204**; revoga as outras famílias de refresh. É a única rota (além de `/auth/me`) liberada enquanto `deveTrocarSenha = true` |
+| POST | `/auth/trocar-senha` | Bearer | `{ senhaAtual, novaSenha }` → **204**; revoga as **outras** famílias de refresh e mantém a atual. O access token em uso continua restrito até expirar, então o cliente **chama `POST /auth/refresh` logo depois do 204** para receber um token sem a restrição (`deveTrocarSenha = false`). É a única rota (além de `/auth/me`) liberada enquanto `deveTrocarSenha = true` |
 | GET | `/auth/me` | Bearer | → **200** `UsuarioDto` |
 
 `UsuarioDto = { id, nome, email, role, deveTrocarSenha }`
+
+Cliente HTTP: as rotas `/auth/login`, `/auth/registrar`, `/auth/refresh` e `/auth/logout` **nunca** passam pela lógica de "401 → refresh → repetir". Um login errado não pode disparar refresh nem ser reenviado, porque contaria 2 falhas no bloqueio do D21. A restauração de sessão no boot usa o **mesmo lock** entre abas do refresh.
 
 Limites: `/auth/login` 5/min por IP; `/auth/registrar` 3/h por IP; senha de 12 a 128 caracteres, checada contra uma lista local de senhas vazadas (S-B02).
 
@@ -114,7 +116,7 @@ Validação de horário: `inicioUtc`/`fimUtc` **precisam** terminar em `Z` (offs
 
 ## 9. Endpoints internos — só no listener Kestrel `:8081` (D17)
 
-O grupo `/api/v1/internal` tem `.RequireHost("*:8081")`; a porta 8081 só está na rede `playout` e o nginx nunca a encaminha. Autenticação: Bearer `Playout__Token` comparado com `CryptographicOperations.FixedTimeEquals`, aceitando também `Playout__TokenAnterior` durante a rotação. O Liquidsoap chama `http://api:8081/api/v1/internal/...`.
+O grupo `/api/v1/internal` (e `/health/*`) tem um filtro de endpoint que exige `HttpContext.Connection.LocalPort == 8081` (a porta real do socket; **nunca** `RequireHost`, que compara o cabeçalho `Host`, controlado pelo cliente), com o listener `:8081` do Kestrel ligado só ao IP da rede `playout` e a `127.0.0.1` (o healthcheck roda dentro do contêiner; S-A06); a porta 8081 só está na rede `playout` e o nginx nunca a encaminha. Autenticação: Bearer `Playout__Token` comparado com `CryptographicOperations.FixedTimeEquals`, aceitando também `Playout__TokenAnterior` durante a rotação. O Liquidsoap chama `http://api:8081/api/v1/internal/...`.
 
 | Método | Rota | Descrição |
 |---|---|---|

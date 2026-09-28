@@ -94,7 +94,7 @@ A tabela de serviços publica a porta 9000 porque o browser precisa dela. Isso e
 - **GET pré-assinado (correção v1.1):** a SigV4 assina o **caminho** e o **host**. O MinIO não serve com prefixo de caminho, e o nginx remove o `/storage` antes de repassar. Então, se o cliente público assinar `https://<host>/storage/midia/k`, o MinIO recalcula a assinatura sobre `/midia/k` e responde `SignatureDoesNotMatch`. Como fazer:
   1. assinar a URL **sem** o prefixo, com o host público: `https://<host>/midia/k?X-Amz-...`;
   2. inserir o `/storage` no caminho **depois** de assinar: `https://<host>/storage/midia/k?X-Amz-...`;
-  3. o nginx remove o `/storage` (`proxy_pass http://minio:9000/;`) e repassa `proxy_set_header Host $host;`. O MinIO passa a ver exatamente o host e o caminho assinados.
+  3. o nginx remove o `/storage` (`proxy_pass http://minio:9000/;`) e envia `proxy_set_header Host "${PUBLIC_AUTHORITY}";` (o host:porta canônico fixo, igual ao assinado; ver S-A06). O MinIO passa a ver exatamente o host e o caminho assinados.
 
   Encapsular isso no `IObjectStorage.UrlGetPreAssinada` (cliente público). **Teste de integração pelo nginx real** (E1-F09/P06): o preview responde 200 e uma URL com a query adulterada responde 403.
 - Nesse `location`, permitir **só** `POST` em `/storage/quarentena` e `GET/HEAD` em `/storage/midia/*` (com query de assinatura) e `/storage/publico/*`. Todo o resto responde 404: `/storage/minio/*`, listagem de bucket, `PUT`, `DELETE`. Usar `client_max_body_size 250m` só nesse `location`.
@@ -134,7 +134,7 @@ O Liquidsoap **não** recebe credencial: ele só consome URLs pré-assinadas.
   ```
   O mesmo filtro vale para `/health/*`. Criar um helper `.SomentePortaInterna()` e aplicá-lo nos dois grupos.
 - **Bind da `:8081`:** o Docker não liga porta por rede; o contêiner escuta em `0.0.0.0` em **todas** as redes a que pertence. Para que a `:8081` exista só na rede `playout`, fixar o IP da api nessa rede (`ipv4_address`) e usar `Kestrel:Endpoints` = `http://0.0.0.0:8080` + `http://<ip-playout>:8081` + `http://127.0.0.1:8081` (o último para o healthcheck).
-- Nginx: `proxy_set_header Host $host;` (sem porta) ou não sobrescrever o Host; **nunca** `$http_host`.
+- Nginx (revisado no PR #3): `proxy_set_header Host "${PUBLIC_AUTHORITY}";`, com um **host:porta canônico fixo** (igual ao do `Storage__PublicEndpoint`), em todos os proxies. **Nunca** `$http_host`: o `server_name` filtra só o nome, e a porta escolhida pelo cliente chegaria ao upstream. O `$host` também não serve para o `/storage/`, porque descarta a porta e quebra a SigV4 em dev (`:8080`).
 - **Defesa em profundidade no nginx:** `location ~* ^/api/v1/+internal(/|$) { return 404; }`, declarado **antes** do `location /api/`.
 - Comparar o `Playout__Token` com `CryptographicOperations.FixedTimeEquals`. Aceitar dois tokens válidos (`Playout__Token` e `Playout__TokenAnterior`) para permitir rotação sem parar o stream.
 - **Teste (E1-F12):** `/api/v1/internal/x`, `/api/v1/INTERNAL/x`, `/api/v1//internal/x`, `/api/v1/%69nternal/x` e `/api/v1/internal` pelo `:8080` → todos 404. **Mais (v1.1):** uma requisição direta na `:8080` da api (sem o nginx, por exemplo de um contêiner na rede `app`) com `Host: api:8081` → 404; e `curl http://api:8081/health/live` a partir do contêiner `web` → conexão recusada.
@@ -214,7 +214,7 @@ O Liquidsoap interpreta URIs com protocolos como `annotate:`, `process:` (que **
 | **S-M11** | Desativar, rebaixar ou trocar a senha não revoga os refresh tokens; o último Admin pode ser **desativado** (a regra só fala em rebaixar) | Revogar todas as famílias do usuário nesses eventos; bloquear `Desativar` e rebaixamento do último Admin ativo, feitos por qualquer pessoa | E1-F07, `01-dominio §2.1` |
 | **S-M12** | O `docker-compose.override.yml` é carregado **automaticamente**: um `compose up` em produção publica o SQL, o console do MinIO e `Development` | Renomear para `docker-compose.dev.yml` (uso explícito com `-f`) ou criar um `docker-compose.prod.yml`; o README de E1 documenta os dois comandos | E1-F16 |
 | **S-M13** | DDoS/abuso sem limite na borda: o .NET é quem absorve tudo | nginx: `limit_req` em `/api/` (ex.: 20 r/s por IP, burst 40) e mais restrito em `/api/v1/auth/`; `limit_conn` por IP em `/stream/` (ex.: 5) e `/hubs/` (ex.: 10); `client_max_body_size 1m` em `/api/`; `client_header_timeout`/`client_body_timeout` de 10 s (slowloris); `proxy_read_timeout` longo só em `/stream/` e `/hubs/`. No domínio: teto global de `Pendente` (ex.: 300), porque um IPv6 /48 tem 65 mil /64 | E1-P06, Épico 3 |
-| **S-M14** | Headers e CSP pedidos no P06 sem valores definidos; o `add_header` do nginx **não é herdado** quando o `location` filho tem o seu | Snippet `security-headers.conf` incluído em **todo** `location`, com `always`: `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' wss:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests`; `X-Content-Type-Options: nosniff`; `Referrer-Policy: strict-origin-when-cross-origin`; `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()`; `Cross-Origin-Opener-Policy: same-origin`; HSTS (`max-age=31536000; includeSubDomains`) **só** com TLS. Tirar `'unsafe-inline'` de `style-src` se o build não precisar dele. Teste Playwright: zero violações de CSP no console | E1-P06 |
+| **S-M14** | Headers e CSP pedidos no P06 sem valores definidos; o `add_header` do nginx **não é herdado** quando o `location` filho tem o seu | Snippet `security-headers.conf` incluído em **todo** `location`, com `always`: `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'` (revisado no PR #3: sem `wss:`, que libera WebSocket para qualquer host, e `upgrade-insecure-requests` **só com TLS**, como o HSTS); `X-Content-Type-Options: nosniff`; `Referrer-Policy: strict-origin-when-cross-origin`; `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()`; `Cross-Origin-Opener-Policy: same-origin`; HSTS (`max-age=31536000; includeSubDomains`) **só** com TLS. Tirar `'unsafe-inline'` de `style-src` se o build não precisar dele. Teste Playwright: zero violações de CSP no console | E1-P06 |
 | **S-M15** | *(v1.1)* O `web` (o contêiner mais exposto) entra na rede `playout` para alcançar o Icecast e o MinIO e, com isso, também alcança `api:8081` e o harbor do Liquidsoap | Criar a rede **`midia-borda`** (web, icecast, minio) no lugar de pôr o `web` na `playout`. A `playout` fica só com api:8081, liquidsoap, icecast e minio. Junto com o bind do S-A06, o `web` não tem rota até a `:8081` | E1-F16, E1-P06 |
 
 ---
@@ -250,7 +250,7 @@ O Liquidsoap interpreta URIs com protocolos como `annotate:`, `process:` (que **
 | `ICECAST_ADMIN_PASSWORD` (+ `ICECAST_ADMIN_USER` ≠ `admin`) | icecast | `openssl rand -base64 24` | 24 caracteres | 180 dias |
 | `ICECAST_RELAY_PASSWORD` | icecast | `openssl rand -base64 24` | 24 caracteres | junto com a anterior |
 | `LIQUIDSOAP_HARBOR_PASSWORD` | liquidsoap (até o Épico 2; depois, login por locutor, S-A08) | `openssl rand -base64 24` | 24 caracteres | a cada saída de locutor da equipe, e a cada 90 dias |
-| `MSSQL_SA_PASSWORD` | sqlserver, **db-init** | `openssl rand -base64 32` (a política do SQL exige 3 classes de caractere: acrescentar `Aa1!`) | 24 caracteres | anual; nunca nas aplicações |
+| `MSSQL_SA_PASSWORD` | sqlserver, **db-init** | base64url de 32 bytes (ver a nota abaixo da tabela), **gerando de novo** até ter ao menos uma maiúscula, uma minúscula e um dígito (a política do SQL exige 3 classes) | 24 caracteres | anual; nunca nas aplicações |
 | `DB_MIGRATOR_PASSWORD` | db-init (cria), migrator | idem | 24 caracteres | anual |
 | `DB_APP_PASSWORD` | db-init (cria), api, worker | idem | 24 caracteres | 180 dias (`ALTER LOGIN`, e depois recriar os contêineres) |
 | `DB_RELATORIO_PASSWORD` | db-init (cria), ferramenta de relatório | idem | 24 caracteres | 180 dias |
@@ -259,6 +259,8 @@ O Liquidsoap interpreta URIs com protocolos como `annotate:`, `process:` (que **
 | `MINIO_WORKER_ACCESS_KEY`/`SECRET` | worker | criada pelo `minio-init` | 40 caracteres | 180 dias |
 | `REDIS_PASSWORD` | redis, api, worker (se usar) | `openssl rand -base64 32` | 32 caracteres | 180 dias |
 | `Seed__AdminEmail` / `Seed__AdminSenha` | api (só no primeiro boot) | senha: `openssl rand -base64 18` | política de senha (≥ 12) | tirar do ambiente depois do seed (S-B07) |
+
+**Alfabeto dos segredos gerados (v1.1, contrato com o Atlas no `infra/sql/logins.sql`):** todo segredo gerado pelo `gerar-segredos` usa só `[A-Za-z0-9_-]` (base64url sem padding: `openssl rand -base64 N | tr '+/' '-_' | tr -d '=\n'`, ou `Base64Url` do .NET; o `\n` sai porque o `openssl` quebra a linha a cada 64 caracteres). O motivo: as senhas SQL entram no `CREATE LOGIN` por **substituição de texto** do sqlcmd, e uma aspa vira SQL executado como SA. Além disso, `+ / = ; , ! '` quebram connection strings, URLs de source client e o XML do Icecast. Onde a tabela acima diz `-base64`, leia base64url. **Chaves binárias** (`Jwt__SigningKey`, `Seguranca__Pepper`): a API decodifica com `System.Buffers.Text.Base64Url.DecodeFromChars` (.NET 9+), **nunca** com `Convert.FromBase64String`, que rejeita `-`, `_` e a falta de padding. O fail-fast da F06 mede o tamanho **depois** dessa decodificação, e o teste da F06 usa uma chave com `-` e `_` e sem padding. **Revoga a receita da v1** ("acrescentar `Aa1!`"), que o próprio snippet de checagem do Atlas rejeita. A checagem no entrypoint do `db-init` também precisa recusar valor **vazio** (o `case *[!A-Za-z0-9_-]*` sozinho aceita a string vazia) e valor menor que o mínimo da tabela.
 
 Itens que não estavam na lista do Nexus e foram acrescentados: **Redis**, **credenciais de serviço do MinIO**, **senha de relay do Icecast** e o login do **db-init**.
 
@@ -330,19 +332,21 @@ Em nenhum caso o segredo entra em `Dockerfile`, `ARG`, camada de imagem, log ou 
 
 ## 9. CI como gate de segurança (D23, E1-F17)
 
-> Critérios que o Sentinel aplica no PR do workflow. Repositório **privado** `arthur044/webradio`, runners hospedados pelo GitHub, **nenhum segredo cadastrado** no Épico 1.
+> Critérios que o Sentinel aplica no PR do workflow. Runners hospedados pelo GitHub, **nenhum segredo cadastrado** no Épico 1.
+> **Atualização (2026-09-27):** o repositório `arthur044/WebRadio` agora é **público**, com a `main` protegida. Com isso: branch protection e required checks passam a valer no plano Free (o item "exige GitHub Pro" da 9.5 caiu); CodeQL, upload de SARIF e *private vulnerability reporting* ficam gratuitos (ver 9.6); PR de fork roda com token só de leitura e sem segredos, e exige aprovação de todo contribuidor externo.
 
 ### 9.1 Gatilhos e permissões
 - [ ] Gatilhos: só `pull_request` e `push` para `main` (e `workflow_dispatch`, se preciso). **Proibidos:** `pull_request_target`, e `workflow_run` que faça checkout do código do PR. Runner self-hosted também é proibido.
-- [ ] `permissions: {}` no topo do workflow e, em cada job, só o necessário (em geral `contents: read`). Nada de `write-all`. Sem `security-events: write`, porque upload de SARIF em repositório privado exige GHAS.
+- [ ] `permissions: {}` no topo do workflow e, em cada job, só o necessário (em geral `contents: read`). Nada de `write-all`. `security-events: write` **só** no job que sobe SARIF (CodeQL/trivy), e nunca junto com um passo que execute código do PR fora do analisador.
 - [ ] `actions/checkout` com `persist-credentials: false`. `fetch-depth: 0` só no job do gitleaks.
-- [ ] Nas configurações do repositório: *Workflow permissions* = **read**; *Allow GitHub Actions to create and approve pull requests* = **off**; *Run workflows from fork pull requests* = **off** (o padrão em repositório privado; manter).
+- [ ] Nas configurações do repositório: *Workflow permissions* = **read**; *Allow GitHub Actions to create and approve pull requests* = **off**; *Fork pull request workflows from outside collaborators* = **Require approval for all outside collaborators** (em repositório público, PR de fork sempre pode rodar workflow, com token só de leitura e sem segredos; ver 9.6).
 - [ ] `timeout-minutes` em todo job; `concurrency` com `cancel-in-progress` para PR.
 
 ### 9.2 Cadeia de suprimentos das Actions e ferramentas
 - [ ] Toda `uses:` fixada por **SHA completo de 40 caracteres**, com a tag num comentário (`# v4.2.2`). Nada de `@v4` ou `@main`. Actions de terceiros só se não houver alternativa oficial (`actions/*`) ou o binário oficial.
 - [ ] `.github/dependabot.yml` com o ecossistema `github-actions` (além de `nuget`, `npm` e `docker`), para os SHAs não envelhecerem.
-- [ ] Ferramenta baixada como binário (gitleaks, trivy) tem **versão fixa e checksum SHA-256 conferido** (`sha256sum -c`) antes de executar. Nada de `curl ... | sh`.
+- [ ] Ferramenta baixada como binário (gitleaks, trivy) tem **versão fixa e checksum SHA-256 conferido** antes de executar. O hash esperado fica **fixado no próprio workflow** (`echo "<sha256>  arquivo" | sha256sum -c`). Baixar o `checksums.txt` da mesma release só prova que o download não se corrompeu; não protege de uma release adulterada. Nada de `curl ... | sh`.
+- [ ] Nas configurações de Actions do repositório: `sha_pinning_required = true` e `allowed_actions = selected` (Actions do GitHub + a lista explícita), para que a plataforma também imponha a fixação por SHA.
 - [ ] Gitleaks: o repositório é de conta **pessoal**, então a `gitleaks-action` dispensa licença. Mesmo assim, prefiro o binário com checksum, que não depende de licença. Precisa de um `.gitleaks.toml` com allowlist **só** para o valor `__GERAR__`.
 
 ### 9.3 Segredos e logs
@@ -375,5 +379,13 @@ Em nenhum caso o segredo entra em `Dockerfile`, `ARG`, camada de imagem, log ou 
   - `dotnet list package --vulnerable --include-transitive` **retorna 0 mesmo com vulnerabilidade**. O job precisa procurar na saída a frase "has the following vulnerable packages" e falhar. Alternativa: `NuGetAudit` com `NuGetAuditMode=all` + `NuGetAuditLevel=high` + `TreatWarningsAsErrors` (NU1903/NU1904), que já vem com o `Directory.Build.props`.
   - `npm audit --audit-level=high` (sai com código diferente de 0 sozinho).
   - `trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed` em cada imagem construída, mais `trivy fs` nos lockfiles.
-- [ ] **O gate só vale se for obrigatório.** Branch protection e rulesets em repositório **privado** exigem **GitHub Pro** (ou Team). No plano Free, os jobs rodam mas **não bloqueiam** o merge. Decisão para o DJ: assinar o Pro e marcar `seguranca` e `vulnerabilidades` como *required status checks* em `main`, ou aceitar o gate como convenção (a revisão do Sentinel e do Guardian confere se os jobs estão verdes).
-- [ ] Orçamento: repositório privado no plano Free tem 2.000 min/mês de Actions. Trivy, Testcontainers e o compose de teste de fumaça consomem bastante. Rodar o `vulnerabilidades` completo em PR que toca lockfile ou Dockerfile e numa agenda diária (`schedule`), não em todo push.
+- [x] **O gate só vale se for obrigatório.** Com o repositório público, a branch protection funciona no plano Free: a `main` exige `Segurança (gitleaks)` e `Backend (unit + arquitetura)`. O `vulnerabilidades` vira *required* quando o job existir (F17b). (Até 2026-09-27, com o repositório privado, isso exigia GitHub Pro.)
+### 9.6 Repositório público
+- [ ] CodeQL (*default setup*) ligado para `actions`, `csharp` e `javascript-typescript`. A linguagem `actions` pega script injection e gatilhos perigosos nos próprios workflows.
+- [ ] Dependabot *alerts* e *security updates* ligados; o `dependabot.yml` (Forge) cobre `github-actions`, `nuget`, `npm` e `docker`.
+- [ ] *Private vulnerability reporting* ligado + `SECURITY.md` explicando como reportar em privado.
+- [ ] Achados **em código já implementado e ainda não corrigido** vão para um *draft security advisory* privado (ou para o `maestri`), não para arquivo versionado. O `05` descreve requisitos de projeto e continua público.
+
+### 9.7 Orçamento
+- [ ] ~~Orçamento de 2.000 min/mês~~ (não vale mais: Actions em repositório público não consomem minutos). Mesmo assim, manter o escopo abaixo para o PR não ficar lento.
+- [ ] Orçamento (histórico): repositório privado no plano Free tem 2.000 min/mês de Actions. Trivy, Testcontainers e o compose de teste de fumaça consomem bastante. Rodar o `vulnerabilidades` completo em PR que toca lockfile ou Dockerfile e numa agenda diária (`schedule`), não em todo push.

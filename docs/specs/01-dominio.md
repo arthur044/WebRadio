@@ -5,6 +5,7 @@
 > concorrência otimista por `RowVersion` (`byte[]`, exposto na API como ETag); enums gravados como `tinyint`.
 > Collation: o banco é `Latin1_General_100_CI_AI_SC` (busca sem acento). Colunas de **comparação exata** usam `Latin1_General_100_BIN2`: `EmailNormalizado`, `Bucket`, `ChaveStorage`, `MimeTypeDeclarado`, `MimeType`, `EtagUpload`. No EF, `.UseCollation("Latin1_General_100_BIN2")` (decisão do Atlas, A01).
 > Eventos de domínio: padrão D22 (`00-arquitetura.md`).
+> **Estado persistido:** todo estado que influencia comportamento de uma entidade precisa ter coluna no `03` e mapeamento no EF. Campo privado não persistido só serve para cache derivado. Cada regra que depende de estado precisa de um teste que **reidrata** a entidade pelo caminho do EF (construtor sem parâmetros + propriedades), porque um teste que reutiliza a mesma instância não pega esse erro (achado N1 do Guardian no PR #1).
 
 ## 1. Enums (valores fixos: **nunca renumerar**)
 
