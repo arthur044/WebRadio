@@ -29,7 +29,8 @@ function AuthNavItem() {
 
   async function sair() {
     try {
-      await apiFetch<void>('/auth/logout', { method: 'POST', skipRefreshRetry: true })
+      // /auth/logout está no SEM_RETRY central do httpClient (Guardian N2).
+      await apiFetch<void>('/auth/logout', { method: 'POST' })
     } finally {
       useAuthStore.getState().clearSession()
       navigate('/', { replace: true })

@@ -6,7 +6,10 @@ import { useAuthStore } from '../../shared/api/authStore'
 import { LoginPage } from './LoginPage'
 
 function jsonResponse(status: number, body: unknown) {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 describe('LoginPage', () => {
@@ -19,7 +22,11 @@ describe('LoginPage', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
-        jsonResponse(401, { type: '/erros/credenciais', title: 'e-mail ou senha inválidos', status: 401 }),
+        jsonResponse(401, {
+          type: '/erros/credenciais',
+          title: 'e-mail ou senha inválidos',
+          status: 401,
+        }),
       ),
     )
     const user = userEvent.setup()
@@ -65,7 +72,11 @@ describe('LoginPage', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
-        jsonResponse(429, { type: '/erros/muitos-pedidos', title: 'muitas tentativas', status: 429 }),
+        jsonResponse(429, {
+          type: '/erros/muitos-pedidos',
+          title: 'muitas tentativas',
+          status: 429,
+        }),
       ),
     )
     const user = userEvent.setup()

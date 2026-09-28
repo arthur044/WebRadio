@@ -11,6 +11,9 @@ export function LoginPage() {
   const [senha, setSenha] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
+  // Guardian N1: aviso vindo de outra página (ex.: TrocarSenhaPage depois do 204,
+  // se o refresh que troca o token falhar) — não é erro, é informativo.
+  const mensagem = (location.state as { mensagem?: string } | null)?.mensagem ?? null
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -20,9 +23,8 @@ export function LoginPage() {
       const data = await apiFetch<LoginResponse>('/auth/login', {
         method: 'POST',
         skipAuth: true,
-        // Nunca dispara refresh nem retry em /auth/* (Guardian M1): um 401 de senha
-        // errada não pode virar 2 tentativas contadas no bloqueio do D21.
-        skipRefreshRetry: true,
+        // /auth/login está no SEM_RETRY central do httpClient (Guardian N2): um 401 de
+        // senha errada não pode virar 2 tentativas contadas no bloqueio do D21.
         body: { email, senha },
       })
       useAuthStore.getState().setSession(data.accessToken, data.usuario)
@@ -46,6 +48,11 @@ export function LoginPage() {
   return (
     <section className="mx-auto max-w-sm">
       <h1 className="font-display text-2xl font-bold">Entrar</h1>
+      {mensagem && (
+        <p role="status" className="text-text-muted mt-2 text-sm">
+          {mensagem}
+        </p>
+      )}
       <form onSubmit={onSubmit} className="mt-4 flex flex-col gap-3">
         <label className="flex flex-col gap-1 text-sm">
           E-mail

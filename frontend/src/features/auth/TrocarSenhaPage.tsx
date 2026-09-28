@@ -26,16 +26,34 @@ export function TrocarSenhaPage() {
     setErro(null)
     setEnviando(true)
     try {
-      await apiFetch<void>('/auth/trocar-senha', { method: 'POST', body: { senhaAtual, novaSenha } })
+      await apiFetch<void>('/auth/trocar-senha', {
+        method: 'POST',
+        body: { senhaAtual, novaSenha },
+      })
       // Guardian H3: o 204 não devolve token novo, e o access token atual só vale
       // pra /auth/trocar-senha e /auth/me enquanto deveTrocarSenha=true (01 §2.1).
       // Sem trocar de token aqui, toda chamada seguinte (mesmo depois de "trocar a
       // senha com sucesso") recebe 403 até o token expirar sozinho. Passa pelo MESMO
       // lock do refresh comum — a família de refresh não foi revogada, só rotacionada.
-      await refreshSession(useAuthStore.getState().accessToken)
+      const renovou = await refreshSession(useAuthStore.getState().accessToken)
+      if (!renovou) {
+        // Guardian N1: a senha já foi trocada no servidor (204 recebido) mas o
+        // refreshSession limpou a sessão local (clearSession, dentro dele mesmo em
+        // caso de falha). Mandar pra '/' deslogado e sem aviso deixaria o usuário sem
+        // saber por que perdeu a sessão logo depois de "ter sucesso".
+        navigate('/login', {
+          replace: true,
+          state: { mensagem: 'Senha trocada. Entre novamente.' },
+        })
+        return
+      }
       navigate('/', { replace: true })
     } catch (err) {
-      setErro(err instanceof ApiError ? err.problem.detail || err.message : 'Não foi possível trocar a senha')
+      setErro(
+        err instanceof ApiError
+          ? err.problem.detail || err.message
+          : 'Não foi possível trocar a senha',
+      )
     } finally {
       setEnviando(false)
     }

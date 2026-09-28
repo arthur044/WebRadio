@@ -4,7 +4,10 @@ import { useAuthStore } from '../../shared/api/authStore'
 import { useSessionRestore } from './useSessionRestore'
 
 function jsonResponse(status: number, body: unknown) {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 describe('useSessionRestore', () => {
@@ -22,7 +25,13 @@ describe('useSessionRestore', () => {
           accessToken: 'token-restaurado',
           expiraEmUtc: new Date().toISOString(),
           deveTrocarSenha: false,
-          usuario: { id: '1', nome: 'Ouvinte', email: 'a@a.com', role: 'Ouvinte', deveTrocarSenha: false },
+          usuario: {
+            id: '1',
+            nome: 'Ouvinte',
+            email: 'a@a.com',
+            role: 'Ouvinte',
+            deveTrocarSenha: false,
+          },
         }),
       ),
     )
@@ -37,7 +46,9 @@ describe('useSessionRestore', () => {
   it('sem cookie válido, segue anônimo sem travar em "restoring"', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(401, { type: '/erros/credenciais', title: 'sem sessão', status: 401 })),
+      vi.fn(async () =>
+        jsonResponse(401, { type: '/erros/credenciais', title: 'sem sessão', status: 401 }),
+      ),
     )
 
     renderHook(() => useSessionRestore())

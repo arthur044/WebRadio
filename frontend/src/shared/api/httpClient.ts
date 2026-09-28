@@ -19,11 +19,20 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Guardian N2: rotas cujo 401 nunca deve disparar refresh+retry, decidido aqui em vez
+ * de depender de cada call site lembrar de passar `skipRefreshRetry`. Login/registrar
+ * errados não são sessão expirada; /auth/refresh já roda dentro do lock; logout está
+ * encerrando a sessão de propósito. `/auth/trocar-senha` e `/auth/me` ficam FORA disso:
+ * lá um 401 de token expirado deve renovar e repetir normalmente.
+ */
+const SEM_RETRY = new Set(['/auth/login', '/auth/registrar', '/auth/refresh', '/auth/logout'])
+
 interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown
   /** Pula o Authorization automático — usado por /auth/login e /auth/refresh. */
   skipAuth?: boolean
-  /** Pula o retry automático em 401 — sempre true em /auth/* (Guardian M1). */
+  /** Pula o retry automático em 401 além do que SEM_RETRY já cobre. */
   skipRefreshRetry?: boolean
   /**
    * X-Listener-Id só onde o contrato pede (/pedidos, /pedidos/meus, hub) — não em
@@ -117,8 +126,10 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   // Guardian M1: sem token nenhum antes da chamada, não há sessão pra renovar — só
   // faz a rede extra à toa (anônimo) ou, pior, adota um cookie de OUTRO usuário
   // logado enquanto tenta logar com senha errada (conta 2 falhas no D21). Combinado
-  // com skipRefreshRetry:true em /auth/login|registrar|refresh|logout.
-  if (response.status === 401 && !options.skipRefreshRetry && tokenBeforeRequest !== null) {
+  // com SEM_RETRY (Guardian N2), que cobre /auth/login|registrar|refresh|logout sem
+  // depender do call site lembrar da flag.
+  const semRetry = options.skipRefreshRetry || SEM_RETRY.has(path)
+  if (response.status === 401 && !semRetry && tokenBeforeRequest !== null) {
     const refreshed = await refreshSession(tokenBeforeRequest)
     if (refreshed) {
       response = await rawFetch(path, options)
