@@ -1,5 +1,22 @@
 @import 'tailwindcss';
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;600&display=swap');
+
+/* Auto-hospedadas (não CDN): a CSP normativa (05-seguranca-auditoria.md S-M14) trava
+   style-src/font-src em 'self', então fonts.googleapis.com/gstatic.com não são opção. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('./assets/fonts/inter-variable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url('./assets/fonts/space-grotesk-variable.woff2') format('woff2');
+}
 
 @theme {
   --color-surface: oklch(97% 0.006 80);
