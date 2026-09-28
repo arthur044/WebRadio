@@ -58,11 +58,11 @@ public sealed class RefreshToken : Entidade
         UtcGuard.Exigir(criadoEmUtc, nameof(criadoEmUtc));
 
         UsuarioId = usuarioId;
-        TokenHash = tokenHash;
+        TokenHash = (byte[])tokenHash.Clone();
         FamiliaId = familiaId;
         CriadoEmUtc = criadoEmUtc;
         ExpiraEmUtc = criadoEmUtc.Add(duracao);
-        CriadoPorIpHash = criadoPorIpHash;
+        CriadoPorIpHash = (byte[]?)criadoPorIpHash?.Clone();
     }
 
     public bool EstaValido(DateTime agora)

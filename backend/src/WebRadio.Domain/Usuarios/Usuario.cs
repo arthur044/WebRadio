@@ -60,6 +60,12 @@ public sealed class Usuario : Entidade
     public void AlterarRole(Role novoRole, bool ehUltimoAdminAtivo, DateTime agora)
     {
         UtcGuard.Exigir(agora, nameof(agora));
+
+        if (novoRole == Role)
+        {
+            return; // no-op: não revoga sessões nem emite evento à toa.
+        }
+
         GarantirNaoRemoveUltimoAdmin(ehUltimoAdminAtivo, removeAdmin: novoRole != Role.Admin);
 
         Role = novoRole;
@@ -71,6 +77,12 @@ public sealed class Usuario : Entidade
     public void Desativar(bool ehUltimoAdminAtivo, DateTime agora)
     {
         UtcGuard.Exigir(agora, nameof(agora));
+
+        if (!Ativo)
+        {
+            return; // no-op: já está inativo.
+        }
+
         GarantirNaoRemoveUltimoAdmin(ehUltimoAdminAtivo, removeAdmin: true);
 
         Ativo = false;
