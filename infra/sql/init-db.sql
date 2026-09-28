@@ -14,16 +14,21 @@
    exclusividade de banco à toa mesmo já estando correto.
 
    Variável sqlcmd:
-     $(Ambiente)  'Development' (padrão neste script) ou 'Production' — mesmos
-                  valores de ASPNETCORE_ENVIRONMENT (docs/specs/05-seguranca-auditoria.md
-                  §5.1) — decide o recovery model (E1-A04).
+     $(Ambiente)  'Development' ou 'Production' — mesmos valores de
+                  ASPNETCORE_ENVIRONMENT (docs/specs/05-seguranca-auditoria.md §5.1)
+                  — decide o recovery model (E1-A04). OBRIGATÓRIA, sem valor
+                  padrão: um :setvar aqui teria precedência sobre o -v do
+                  invocador e mascararia esse -v silenciosamente (mesma classe de
+                  bug do E1-A06/seed-dev.sql) — sem -v Ambiente, o script falha
+                  (fail-closed) em vez de assumir Development.
 
-   Uso (db-init, senha da SA em arquivo, nunca no docker-compose.yml — S-A10):
-     sqlcmd -b -C -S sqlserver -U sa -P "$(cat /run/secrets/mssql_sa_password)" \
+   Uso (db-init; senha da SA via SQLCMDPASSWORD, nunca em -P — S-A10, fica
+   visível em `ps`/`docker inspect`):
+     export SQLCMDPASSWORD="$(cat /run/secrets/mssql_sa_password)"
+     sqlcmd -b -C -S sqlserver -U sa \
        -v Ambiente="$ASPNETCORE_ENVIRONMENT" -i infra/sql/init-db.sql
    ===================================================================== */
 
-:setvar Ambiente "Development"
 :on error exit
 
 SET NOCOUNT ON;
@@ -87,6 +92,22 @@ BEGIN
         ALTER DATABASE WebRadio SET RECOVERY SIMPLE;
     END
 END
+GO
+
+/* ---------- 3. Schemas (BLOQUEANTE, Sentinel/Guardian) ----------
+   D20/E1-F05: a ordem é init-db.sql -> logins.sql -> migrator. O logins.sql já dá
+   GRANT por schema (seg/grade/interacao/midia/infra) antes de o migrator existir —
+   numa base nova, sem isto, o primeiro GRANT falha porque o schema não existe.
+   Idempotente (IF SCHEMA_ID(...) IS NULL): o EnsureSchema do EF (migrator) é
+   condicional e não conflita ao rodar depois. O 03-schema-sqlserver.sql também
+   precisa do mesmo guard, pela mesma razão, do lado dele. */
+USE WebRadio;
+GO
+IF SCHEMA_ID(N'seg') IS NULL EXEC(N'CREATE SCHEMA seg AUTHORIZATION dbo');
+IF SCHEMA_ID(N'grade') IS NULL EXEC(N'CREATE SCHEMA grade AUTHORIZATION dbo');
+IF SCHEMA_ID(N'interacao') IS NULL EXEC(N'CREATE SCHEMA interacao AUTHORIZATION dbo');
+IF SCHEMA_ID(N'midia') IS NULL EXEC(N'CREATE SCHEMA midia AUTHORIZATION dbo');
+IF SCHEMA_ID(N'infra') IS NULL EXEC(N'CREATE SCHEMA infra AUTHORIZATION dbo');
 GO
 
 PRINT 'init-db.sql concluído.';

@@ -40,12 +40,20 @@ CREATE INDEX IX_Reproducao_Periodo ON midia.Reproducao (IniciadoEmUtc) INCLUDE (
   um range maior — não degrada para scan. Não há necessidade de índice adicional para o
   Épico 1.
 
-## O que falta para fechar de verdade (Épico 3, ligado ao E1-A01/A07)
+## Tentativa de confirmar o plano real (2026-09-28, Docker já disponível — Guardian, L3)
 
-- Confirmar o plano real (`SET STATISTICS XML ON` ou `sys.dm_exec_query_plan`) contra
-  volume representativo, não só análise estática — mesma limitação de ambiente
-  reportada na E1-A01 (sem Docker/WSL2 nesta máquina, D23): fica para o job `ddl-check`
-  da CI ou uma instância com virtualização disponível.
+Rodei a consulta contra SQL Server 2022 de verdade, mas só com **1 linha** em
+`midia.Reproducao` (dado de teste avulso, não volume representativo). O otimizador
+NÃO escolheu `IX_Reproducao_Periodo`: escolheu `IX_Reproducao_MidiaId` (Index Scan) +
+`PK_Reproducao` (Clustered Index Seek por lookup). Isso é esperado e **não invalida**
+a análise estática acima — com estatística de tabela quase vazia, o custo estimado de
+qualquer plano é ~0, e o otimizador pode escolher qualquer índice sem diferença
+prática. Confirmar o seek em `IX_Reproducao_Periodo` de verdade exige volume
+representativo (milhares de linhas, distribuição realista de `MidiaId`), não uma
+tabela vazia — por isso isso continua para o Épico 3, agora só por falta de dado, não
+mais por falta de Docker.
+
+## O que falta para fechar de verdade (Épico 3, ligado ao E1-A01/A07)
 - Decidir se o schema `rel` fica junto de `midia`/`grade`/`interacao` (least privilege
   do `webradio_relatorio`, `infra/sql/logins.sql`) ou schema próprio `rel` como já
   assumido no nome da procedure — se for `rel`, `logins.sql` precisa do

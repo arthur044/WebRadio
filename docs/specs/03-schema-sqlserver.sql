@@ -51,15 +51,18 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 /* ---------- 1. Schemas ---------- */
-CREATE SCHEMA seg;        -- identidade e acesso
+-- [Atlas/Sentinel] Idempotente: infra/sql/init-db.sql já cria estes 5 schemas (para o
+-- GRANT por schema do logins.sql funcionar antes do migrator existir). Rodar este
+-- arquivo depois não pode falhar com "schema já existe".
+IF SCHEMA_ID(N'seg') IS NULL EXEC(N'CREATE SCHEMA seg');        -- identidade e acesso
 GO
-CREATE SCHEMA grade;      -- programação
+IF SCHEMA_ID(N'grade') IS NULL EXEC(N'CREATE SCHEMA grade');    -- programação
 GO
-CREATE SCHEMA interacao;  -- pedidos e divulgações
+IF SCHEMA_ID(N'interacao') IS NULL EXEC(N'CREATE SCHEMA interacao');  -- pedidos e divulgações
 GO
-CREATE SCHEMA midia;      -- arquivos e histórico de reprodução
+IF SCHEMA_ID(N'midia') IS NULL EXEC(N'CREATE SCHEMA midia');    -- arquivos e histórico de reprodução
 GO
-CREATE SCHEMA infra;      -- outbox e mecanismos técnicos
+IF SCHEMA_ID(N'infra') IS NULL EXEC(N'CREATE SCHEMA infra');    -- outbox e mecanismos técnicos
 GO
 
 /* ---------- 2. seg.Usuario ---------- */
@@ -183,7 +186,11 @@ CREATE TABLE midia.ArquivoMidia (
     CONSTRAINT CK_ArquivoMidia_Tipo CHECK (TipoMidia IN (1, 2, 3)),                 -- Vinheta, Comercial, Musica
     CONSTRAINT CK_ArquivoMidia_Status CHECK (StatusSanitizacao IN (1, 2, 3, 4, 5, 6)),
     CONSTRAINT CK_ArquivoMidia_Bucket CHECK (Bucket IN ('quarentena', 'midia')),
-    CONSTRAINT CK_ArquivoMidia_Tamanho CHECK (TamanhoBytes > 0 AND TamanhoBytes <= 262144000),  -- 250 MB
+    -- [Atlas/Guardian] 262144000 = 250 MiB (250×1024×1024), NÃO 250_000_000 (250 MB decimal,
+    -- usado no teste de Domain do PR #1). O Midia:Limites (Forge, appsettings) não pode
+    -- configurar um teto maior que este valor, senão a aplicação aceita um upload que o
+    -- banco rejeita.
+    CONSTRAINT CK_ArquivoMidia_Tamanho CHECK (TamanhoBytes > 0 AND TamanhoBytes <= 262144000),  -- 250 MiB
     CONSTRAINT CK_ArquivoMidia_Duracao CHECK (DuracaoSegundos IS NULL OR DuracaoSegundos > 0),
     CONSTRAINT CK_ArquivoMidia_MimeType CHECK (MimeType IS NULL OR MimeType IN ('audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/flac')),
     -- [Atlas/v1.1] S-M04: janela de tentativas (10 = mesmo teto usado no outbox, por convenção).
