@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch } from '../../shared/api/httpClient'
 import type { DivulgacaoDto } from '../../shared/api/types'
-import { urlHttpSegura } from '../../shared/lib/urlSegura'
+import { imagemSegura, linkSeguro } from '../../shared/lib/urlSegura'
 
 /** Guardian M1-style: /divulgacoes/ativas é público, nunca dispara refresh em 401 — não tem 401 nessa rota. */
 function useDivulgacoesAtivas() {
@@ -12,8 +12,8 @@ function useDivulgacoesAtivas() {
 }
 
 function CardDivulgacao({ divulgacao }: { divulgacao: DivulgacaoDto }) {
-  const imagemUrl = urlHttpSegura(divulgacao.imagemUrl)
-  const linkDestino = urlHttpSegura(divulgacao.linkDestino)
+  const imagemUrl = imagemSegura(divulgacao.imagemUrl)
+  const linkDestino = linkSeguro(divulgacao.linkDestino)
   const conteudo = (
     <article className="border-border bg-surface-raised rounded-lg border p-4">
       {imagemUrl && (

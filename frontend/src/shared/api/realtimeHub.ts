@@ -39,11 +39,11 @@ export async function iniciarComRetry(
 const MAX_EVENTOS_LEMBRADOS = 500
 
 interface EventoBase {
-  eventoId: string
+  eventoId?: string
   ocorridoEmUtc: string
 }
 
-function criarDedupe() {
+export function criarDedupe() {
   const vistos = new Set<string>()
   const ordem: string[] = []
 
@@ -65,14 +65,15 @@ function criarDedupe() {
  * As chaves ('programa-ao-vivo', 'stream-info', ...) são o contrato entre este módulo e as
  * páginas que ainda vão consumi-las — combinar o nome ao criar cada `useQuery`.
  */
-function registrarEventos(
+export function registrarEventos(
   connection: import('@microsoft/signalr').HubConnection,
   queryClient: QueryClient,
   jaProcessado: (eventoId: string) => boolean,
 ) {
   function on<T extends EventoBase>(nomeEvento: string, aoReceber: (dados: T) => void) {
     connection.on(nomeEvento, (dados: T) => {
-      if (jaProcessado(dados.eventoId)) return
+      // Sem eventoId não dá pra deduplicar: processa sempre (invalidar é idempotente).
+      if (dados.eventoId && jaProcessado(dados.eventoId)) return
       aoReceber(dados)
     })
   }
@@ -108,6 +109,8 @@ function registrarEventos(
  */
 export function useRealtimeHub(): void {
   const queryClient = useQueryClient()
+  // A identidade do hub (papel/grupos) vem do token: nova sessão => nova conexão.
+  const usuarioId = useAuthStore((estado) => estado.usuario?.id ?? null)
 
   useEffect(() => {
     const jaProcessado = criarDedupe()
@@ -143,5 +146,5 @@ export function useRealtimeHub(): void {
       cancelado = true
       void connection.stop()
     }
-  }, [queryClient])
+  }, [queryClient, usuarioId])
 }
