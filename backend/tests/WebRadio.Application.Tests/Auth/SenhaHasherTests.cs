@@ -55,3 +55,38 @@ public class SenhaHasherTests
         Assert.True(salvo.DeveTrocarSenha);
     }
 }
+
+public class SenhaHasherSemaforoTests
+{
+    [Fact]
+    public async Task Verificacoes_simultaneas_nunca_passam_do_limite_de_concorrencia()
+    {
+        var h = new SenhaHasher(limiteConcorrencia: 2, esperaMaxima: TimeSpan.FromSeconds(60));
+        var hash = h.Hash("Senha-forte-123");
+        var tarefas = Enumerable.Range(0, 8).Select(_ => Task.Run(() => h.Verificar(hash, "Senha-forte-123"))).ToArray();
+        await Task.WhenAll(tarefas);
+        Assert.All(tarefas, t => Assert.Equal(ResultadoSenha.Ok, t.Result));
+        Assert.True(h.PicoDeConcorrencia <= 2, $"pico {h.PicoDeConcorrencia}");
+    }
+
+    [Fact]
+    public async Task Sem_vaga_dentro_da_espera_lanca_ServidorOcupado()
+    {
+        var h = new SenhaHasher(limiteConcorrencia: 1, esperaMaxima: TimeSpan.FromMilliseconds(1));
+        var hash = h.Hash("Senha-forte-123");
+        using var largada = new Barrier(6);
+        var tarefas = Enumerable.Range(0, 6).Select(_ => Task.Factory.StartNew(() =>
+        {
+            largada.SignalAndWait();
+            try { h.Verificar(hash, "Senha-forte-123"); return false; }
+            catch (WebRadio.Domain.Erros.ServidorOcupadoException) { return true; }
+        }, TaskCreationOptions.LongRunning)).ToArray();
+        var rejeitadas = (await Task.WhenAll(tarefas)).Count(x => x);
+        Assert.True(rejeitadas > 0);
+        Assert.True(h.PicoDeConcorrencia <= 1);
+    }
+
+    [Fact]
+    public void Limite_invalido_e_recusado()
+        => Assert.Throws<ArgumentOutOfRangeException>(() => new SenhaHasher(limiteConcorrencia: 0, esperaMaxima: TimeSpan.FromSeconds(1)));
+}

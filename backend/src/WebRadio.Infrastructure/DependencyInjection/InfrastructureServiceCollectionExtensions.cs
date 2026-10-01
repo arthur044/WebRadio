@@ -37,7 +37,11 @@ public static class InfrastructureServiceCollectionExtensions
         // Segurança. Chaves lidas sob demanda (1º uso), depois do ValidateOnStart da Api, que já recusou segredo
         // vazio/curto/__GERAR__. Decodificação base64url, nunca Convert.FromBase64String (05 §5.1).
         services.AddSingleton<IClock, SistemaRelogio>();
-        services.AddSingleton<ISenhaHasher, SenhaHasher>();
+        // Teto global de PBKDF2 simultâneos; vazio = uma vaga por CPU visível (cgroup). Ajustável: Seguranca__HashMaxConcorrencia.
+        services.AddSingleton<ISenhaHasher>(sp =>
+            int.TryParse(sp.GetRequiredService<IConfiguration>()["Seguranca:HashMaxConcorrencia"], out var max) && max >= 1
+                ? new SenhaHasher(max, TimeSpan.FromSeconds(5))
+                : new SenhaHasher());
         services.AddSingleton<ISenhasVazadas, SenhasVazadas>();
         services.AddSingleton<ILoginThrottle, MemoryLoginThrottle>();
         services.AddSingleton<IIpHasher>(sp =>
