@@ -51,6 +51,48 @@ describe('MuralPage', () => {
     expect(screen.getByText('Não perca')).toBeInTheDocument()
   })
 
+  it('não renderiza link nem imagem com esquema perigoso (javascript:/data:)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(200, [
+          {
+            id: '1',
+            titulo: 'Maliciosa',
+            mensagem: 'x',
+            imagemUrl: 'data:image/svg+xml,<svg onload=alert(1)>',
+            linkDestino: 'javascript:alert(1)',
+            prioridade: 1,
+            inicioExibicaoUtc: null,
+            fimExibicaoUtc: null,
+            ativo: true,
+          },
+          {
+            id: '2',
+            titulo: 'Legítima',
+            mensagem: 'y',
+            imagemUrl: 'https://cdn.exemplo.com/a.png',
+            linkDestino: 'https://exemplo.com/p',
+            prioridade: 1,
+            inicioExibicaoUtc: null,
+            fimExibicaoUtc: null,
+            ativo: true,
+          },
+        ]),
+      ),
+    )
+
+    const { container } = renderMural()
+
+    expect(await screen.findByText('Maliciosa')).toBeInTheDocument()
+    const links = container.querySelectorAll('a')
+    expect(links).toHaveLength(1)
+    expect(links[0].getAttribute('href')).toBe('https://exemplo.com/p')
+    const imagens = container.querySelectorAll('img')
+    expect(imagens).toHaveLength(1)
+    expect(imagens[0].getAttribute('src')).toBe('https://cdn.exemplo.com/a.png')
+  })
+
   it('mostra aviso quando não há divulgações ativas', async () => {
     vi.stubGlobal(
       'fetch',

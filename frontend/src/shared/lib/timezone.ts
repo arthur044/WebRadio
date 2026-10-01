@@ -68,16 +68,11 @@ export function semanaAtualBrasiliaParaUtc(referencia: Date = new Date()): {
   }
 }
 
-/** Formata um instante UTC (ISO, ex. de `ProgramaDto.inicioUtc`) como horário de Brasília. */
-export function formatarHorarioBrasilia(isoUtc: string): string {
-  return new Intl.DateTimeFormat('pt-BR', {
-    timeZone: FUSO_BRASILIA,
-    weekday: 'short',
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(isoUtc))
+/** Hora (HH:mm) de um instante UTC em Brasília — via `formatToParts`, sem depender do separador do ICU. */
+export function formatarHoraBrasilia(isoUtc: string): string {
+  const partes = partesData(new Date(isoUtc), { hour: '2-digit', minute: '2-digit', hour12: false })
+  const hora = partes.hour === '24' ? '00' : partes.hour
+  return `${hora}:${partes.minute}`
 }
 
 /** Chave `YYYY-MM-DD` do dia em Brasília — pra agrupar itens que caem no mesmo dia local. */

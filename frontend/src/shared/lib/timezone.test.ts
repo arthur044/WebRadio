@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatarHorarioBrasilia, semanaAtualBrasiliaParaUtc } from './timezone'
+import { formatarHoraBrasilia, semanaAtualBrasiliaParaUtc } from './timezone'
 
 describe('semanaAtualBrasiliaParaUtc', () => {
   it('segunda a domingo da semana, para uma referência em horário comercial de Brasília', () => {
@@ -31,9 +31,9 @@ describe('semanaAtualBrasiliaParaUtc', () => {
   })
 })
 
-describe('formatarHorarioBrasilia', () => {
+describe('formatarHoraBrasilia', () => {
   it('formata um horário UTC como horário de Brasília', () => {
     // 2026-01-14T14:00:00Z = 2026-01-14 11:00 em Brasília (UTC-3).
-    expect(formatarHorarioBrasilia('2026-01-14T14:00:00Z')).toMatch(/11:00/)
+    expect(formatarHoraBrasilia('2026-01-14T14:00:00Z')).toBe('11:00')
   })
 })

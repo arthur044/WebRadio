@@ -1,10 +1,39 @@
-import { HubConnectionBuilder } from '@microsoft/signalr'
+import { HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr'
 import { useEffect } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useAuthStore } from './authStore'
 import { getListenerId } from './listenerId'
 
 const HUB_URL = '/hubs/radio'
+
+const ATRASO_MAX_MS = 30_000
+
+/** Backoff exponencial 0s, 2s, 4s, ... com teto de 30s — nunca desiste (nunca devolve null). */
+export function atrasoDeRetry(tentativa: number): number {
+  return tentativa <= 0 ? 0 : Math.min(2 ** tentativa * 1000, ATRASO_MAX_MS)
+}
+
+/**
+ * `withAutomaticReconnect` só cobre queda DEPOIS de conectado, e a política padrão desiste após
+ * 4 tentativas. Aqui o `start()` inicial (e a retomada após `onclose`) repete com backoff até
+ * conseguir ou até `cancelado()` virar true (unmount).
+ */
+export async function iniciarComRetry(
+  connection: Pick<import('@microsoft/signalr').HubConnection, 'start' | 'state'>,
+  cancelado: () => boolean,
+  esperar: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<void> {
+  for (let tentativa = 0; !cancelado(); tentativa++) {
+    if (connection.state !== HubConnectionState.Disconnected) return
+    try {
+      await connection.start()
+      return
+    } catch {
+      // Sem hub (deploy/rede) — a UI segue só com REST; tenta de novo com backoff.
+    }
+    await esperar(atrasoDeRetry(tentativa + 1))
+  }
+}
 
 /** Teto do dedupe por eventoId (02-api-rest.md §10) — evita crescer sem limite numa aba aberta por dias. */
 const MAX_EVENTOS_LEMBRADOS = 500
@@ -89,7 +118,9 @@ export function useRealtimeHub(): void {
           accessTokenFactory: () => useAuthStore.getState().accessToken ?? '',
         },
       )
-      .withAutomaticReconnect()
+      .withAutomaticReconnect({
+        nextRetryDelayInMilliseconds: (ctx) => atrasoDeRetry(ctx.previousRetryCount),
+      })
       .build()
 
     registrarEventos(connection, queryClient, jaProcessado)
@@ -101,11 +132,15 @@ export function useRealtimeHub(): void {
       queryClient.invalidateQueries({ queryKey: ['stream-info'] })
     })
 
-    connection.start().catch(() => {
-      // Sem hub ainda (F10 não mergeado) ou rede fora — a UI segue funcionando só com REST.
+    let cancelado = false
+    // Rede de segurança: se mesmo assim a conexão fechar, volta a tentar com backoff.
+    connection.onclose(() => {
+      void iniciarComRetry(connection, () => cancelado)
     })
+    void iniciarComRetry(connection, () => cancelado)
 
     return () => {
+      cancelado = true
       void connection.stop()
     }
   }, [queryClient])

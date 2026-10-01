@@ -4,7 +4,7 @@ import type { ProgramaDto } from '../../shared/api/types'
 import {
   chaveDataBrasilia,
   formatarDiaBrasilia,
-  formatarHorarioBrasilia,
+  formatarHoraBrasilia,
   semanaAtualBrasiliaParaUtc,
 } from '../../shared/lib/timezone'
 
@@ -42,7 +42,7 @@ function LinhaPrograma({ programa }: { programa: ProgramaDto }) {
       }`}
     >
       <span className="font-display text-text-muted w-24 shrink-0 text-sm tabular-nums">
-        {formatarHorarioBrasilia(programa.inicioUtc).split(', ')[1]}
+        {formatarHoraBrasilia(programa.inicioUtc)}
       </span>
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">
