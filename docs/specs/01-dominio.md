@@ -182,6 +182,7 @@ Invariante: `Aprovado ⇒ MimeType, HashSHA256, DuracaoSegundos, SanitizadoEmUtc
 | Sem permissão | 403 | `/erros/proibido` |
 | Não encontrado | 404 | `/erros/nao-encontrado` |
 | `ConflitoDeGrade` | 409 | `/erros/conflito-grade` (+ `programaConflitanteId`) |
+| E-mail já cadastrado (`/auth/registrar`) | 409 | `/erros/conflito-cadastro` (F07a; o registro é aberto e limitado a 3/h por IP, então o 409 é o custo aceito) |
 | `TransicaoInvalida` / `PedidoJaModerado` | 409 | `/erros/transicao-invalida` |
 | `RowVersion` divergente (`If-Match`) | 412 | `/erros/versao-desatualizada` |
 | Throttle de pedido | 429 | `/erros/muitos-pedidos` (+ `retryAfterSeconds`) |

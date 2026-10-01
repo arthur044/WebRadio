@@ -20,6 +20,8 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
         var problema = ex switch
         {
             ValidationException v => Validacao(v),
+            CredenciaisInvalidasException => Credenciais(),
+            EmailJaCadastradoException e => Criar(409, "/erros/conflito-cadastro", "Cadastro duplicado.", e.Message),
             ConflitoDeGradeException c => Criar(409, "/erros/conflito-grade", "Conflito de horário na grade.", c.Message,
                 ("programaConflitanteId", c.ProgramaConflitanteId)),
             PedidoJaModeradoException p => Criar(409, "/erros/transicao-invalida", "Transição inválida.", p.Message),
@@ -41,6 +43,10 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
         await http.Response.WriteAsJsonAsync(problema, options: null, contentType: "application/problem+json", ct);
         return true;
     }
+
+    /// <summary>Corpo ÚNICO de todo 401 de login (credencial errada, e-mail inexistente, inativo, bloqueado, limite).</summary>
+    public static ProblemDetails Credenciais()
+        => Criar(401, "/erros/credenciais", "Não autorizado.", "E-mail ou senha inválidos.");
 
     private static ProblemDetails Criar(int status, string type, string titulo, string detalhe, params (string Chave, object Valor)[] extras)
     {

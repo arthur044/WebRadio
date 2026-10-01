@@ -18,6 +18,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <ProjectReference Include="..\..\src\WebRadio.Infrastructure\WebRadio.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\WebRadio.Application\WebRadio.Application.csproj" />
   </ItemGroup>
 

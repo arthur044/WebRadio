@@ -235,6 +235,8 @@ O Liquidsoap interpreta URIs com protocolos como `annotate:`, `process:` (que **
 | **S-B10** | *(v1.1)* A recodificação de imagem (S-A05) roda **dentro da API**, que tem JWT e pepper: é a mesma classe de risco de parser do S-C01, só que menor (só Admin, ≤ 2 MB) | Épico 3: aceitável na API com o `RequestSizeLimit` e as dimensões conferidas no **cabeçalho** antes de decodificar (limite de pixels). Quando o sanitizer existir (Épico 4), mover a recodificação de imagem para ele | Épico 3/4 |
 | **S-B11** | *(v1.1)* Healthcheck do Redis com `redis-cli -a <senha>` expõe a senha nos argumentos do processo (e o redis-cli avisa isso) | `REDISCLI_AUTH="$(cat /run/secrets/redis_password)" redis-cli ping` | E1-F16 |
 
+> **Riscos aceitos e restrições da F07a (decisões do Nexus, revisão do PR #8):** (1) `/auth/registrar` revela se um e-mail já existe (409), limitado a 3/h por /64 de IP; é o custo de um cadastro aberto. (2) O throttle de login (D21) e os limiters do ASP.NET vivem **na memória de cada instância**: **não escalar a API além de 1 réplica antes da F09 (Redis)**, senão N réplicas dão N vezes mais tentativas. (3) Role e `Ativo` só são relidos do banco em `/auth/me`; o JWT de um usuário desativado vale até 15 min nas outras rotas (risco aceito; o refresh falha na hora). (4) A lista de senhas vazadas é a top 100 mil do SecLists (MIT), embutida em `senhas-vazadas.txt`.
+
 ---
 
 ## 5. Política de segredos
