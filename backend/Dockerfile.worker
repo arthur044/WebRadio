@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1
+# E1-F13 — imagem do Worker. Contexto de build = RAIZ do repositório:
+#   docker build -f backend/Dockerfile.worker -t webradio-worker .
+# Imagens fixadas por digest (sdk/runtime 10.0-alpine); atualizar via Dependabot/PR.
+
+FROM mcr.microsoft.com/dotnet/sdk@sha256:3cc3bbbbf93d82104892f42aa9106b6be4d120346dea0649643a97c801525256 AS build
+WORKDIR /src
+COPY backend/ backend/
+RUN dotnet publish backend/src/WebRadio.Worker/WebRadio.Worker.csproj -c Release -o /out --no-self-contained \
+    -p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/runtime@sha256:c13f5945240d31ae6cdc99e2c7d48c355d3e78bc98ef1415e9482ce193eef32e
+# InvariantGlobalization está DESLIGADO de propósito (Microsoft.Data.SqlClient quebra, ver Directory.Build.props):
+# a imagem Alpine vem com a variável ligada e sem ICU.
+RUN apk add --no-cache icu-libs
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
+WORKDIR /app
+COPY --from=build /out .
+USER app
+ENTRYPOINT ["dotnet", "WebRadio.Worker.dll"]
