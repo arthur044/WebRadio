@@ -629,6 +629,53 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                         });
                 });
 
+            modelBuilder.Entity("WebRadio.Infrastructure.Persistencia.Outbox.EventoOutbox", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CriadoEmUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2(3)")
+                        .HasDefaultValueSql("SYSUTCDATETIME()", "DF_EventoOutbox_CriadoEmUtc");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ProcessadoEmUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<short>("Tentativas")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0, "DF_EventoOutbox_Tentativas");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("UltimoErro")
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id")
+                        .HasName("PK_EventoOutbox");
+
+                    b.HasIndex("Id")
+                        .HasDatabaseName("IX_EventoOutbox_Pendentes")
+                        .HasFilter("ProcessadoEmUtc IS NULL");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("Id"), new[] { "Tentativas" });
+
+                    b.ToTable("EventoOutbox", "infra", t =>
+                        {
+                            t.HasCheckConstraint("CK_EventoOutbox_Payload", "ISJSON(Payload) = 1");
+                        });
+                });
+
             modelBuilder.Entity("WebRadio.Domain.Autenticacao.RefreshToken", b =>
                 {
                     b.HasOne("WebRadio.Domain.Autenticacao.RefreshToken", null)
