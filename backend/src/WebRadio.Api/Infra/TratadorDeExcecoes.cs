@@ -26,6 +26,7 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
                 ("programaConflitanteId", c.ProgramaConflitanteId)),
             PedidoJaModeradoException p => Criar(409, "/erros/transicao-invalida", "Transição inválida.", p.Message),
             TransicaoInvalidaException t => Criar(409, "/erros/transicao-invalida", "Transição inválida.", t.Message),
+            ServidorOcupadoException o => Criar(503, "/erros/servidor-ocupado", "Servidor ocupado.", o.Message),
             _ => null,
         };
 
@@ -40,6 +41,7 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
         }
 
         http.Response.StatusCode = problema.Status!.Value;
+        if (ex is ServidorOcupadoException) http.Response.Headers.RetryAfter = "5";
         await http.Response.WriteAsJsonAsync(problema, options: null, contentType: "application/problem+json", ct);
         return true;
     }
