@@ -4,6 +4,7 @@ import { RequireSenhaAtualizada } from '../../features/auth/RequireSenhaAtualiza
 import { useSessionRestore } from '../../features/auth/useSessionRestore'
 import { useAuthStore } from '../api/authStore'
 import { apiFetch } from '../api/httpClient'
+import { useRealtimeHub } from '../api/realtimeHub'
 
 const navItems = [
   { to: '/', label: 'Mural', end: true },
@@ -49,6 +50,7 @@ function AuthNavItem() {
 
 export function RootLayout() {
   useSessionRestore()
+  useRealtimeHub()
 
   return (
     <div className="bg-surface text-text flex min-h-svh flex-col">
