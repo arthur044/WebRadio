@@ -48,11 +48,12 @@ builder.Services.AddOpenApi();
 //  - Rede:SubnetApp ausente faria todo cliente dividir o IP do nginx (um balde de 100/min só = auto-DoS);
 //  - AllowedHosts precisa listar o host público (o nginx repassa Host = PUBLIC_AUTHORITY), `api` e 127.0.0.1.
 var subnet = builder.Configuration["Rede:SubnetApp"];
-var subnetValida = System.Net.IPNetwork.TryParse(subnet ?? "", out _);
+// Prefixo < 8 (ex.: 0.0.0.0/0) confiaria em qualquer X-Forwarded-For e burlaria o limiter por IP.
+var subnetValida = System.Net.IPNetwork.TryParse(subnet ?? "", out var rede) && rede.PrefixLength >= 8;
 if (!builder.Environment.IsDevelopment())
 {
     if (!subnetValida)
-        throw new InvalidOperationException("Rede:SubnetApp (CIDR da rede `app`) é obrigatória fora de Development.");
+        throw new InvalidOperationException("Rede:SubnetApp (CIDR da rede `app`, prefixo ≥ 8) é obrigatória fora de Development.");
     var hosts = builder.Configuration["AllowedHosts"];
     if (string.IsNullOrWhiteSpace(hosts) || hosts.Contains('*'))
         throw new InvalidOperationException("AllowedHosts precisa listar os hosts permitidos (sem '*') fora de Development.");

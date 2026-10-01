@@ -204,6 +204,17 @@ public class HostTests
         Assert.ThrowsAny<Exception>(() => f.CreateClient());
     }
 
+    [Theory]
+    [InlineData("0.0.0.0/0")]
+    [InlineData("10.0.0.0/7")]
+    [InlineData("lixo")]
+    public void Producao_com_SubnetApp_larga_demais_ou_invalida_falha_no_boot(string cidr)
+    {
+        var f = new ApiFactory { Ambiente = "Production" };
+        f.Config["Rede:SubnetApp"] = cidr;
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
+
     [Fact]
     public void Producao_com_AllowedHosts_curinga_falha_no_boot()
     {
