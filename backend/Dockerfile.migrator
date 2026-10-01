@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+# E1-F13/F05 — migrator: efbundle self-contained (linux-musl-x64) + infra/migrator/entrypoint.sh.
+# Contexto de build = RAIZ do repositório:  docker build -f backend/Dockerfile.migrator -t webradio-migrator .
+
+FROM mcr.microsoft.com/dotnet/sdk@sha256:3cc3bbbbf93d82104892f42aa9106b6be4d120346dea0649643a97c801525256 AS build
+WORKDIR /src
+# Versão do dotnet-ef = a do EF Core em Directory.Packages.props.
+RUN dotnet tool install dotnet-ef --version 10.0.0 --tool-path /tools
+COPY backend/ backend/
+RUN dotnet restore backend/src/WebRadio.Infrastructure -r linux-musl-x64 && \
+    /tools/dotnet-ef migrations bundle --project backend/src/WebRadio.Infrastructure \
+    --self-contained -r linux-musl-x64 --force -o /out/efbundle
+
+FROM mcr.microsoft.com/dotnet/runtime@sha256:c13f5945240d31ae6cdc99e2c7d48c355d3e78bc98ef1415e9482ce193eef32e
+RUN apk add --no-cache bash icu-libs
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
+WORKDIR /app
+COPY --from=build /out/efbundle ./efbundle
+COPY --chmod=0555 infra/migrator/entrypoint.sh ./entrypoint.sh
+USER app
+ENTRYPOINT ["./entrypoint.sh"]

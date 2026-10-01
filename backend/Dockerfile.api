@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+# E1-F13 — imagem do Api. Contexto de build = RAIZ do repositório:
+#   docker build -f backend/Dockerfile.api -t webradio-api .
+# Imagens fixadas por digest (sdk/aspnet 10.0-alpine); atualizar via Dependabot/PR.
+
+FROM mcr.microsoft.com/dotnet/sdk@sha256:3cc3bbbbf93d82104892f42aa9106b6be4d120346dea0649643a97c801525256 AS build
+WORKDIR /src
+COPY backend/ backend/
+RUN dotnet publish backend/src/WebRadio.Api/WebRadio.Api.csproj -c Release -o /out --no-self-contained \
+    -p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet@sha256:f62a272ac1b46e83f56b8ed0416572f31cd1128e2c4a5e63eb34d348e4a36095
+# InvariantGlobalization está DESLIGADO de propósito (Microsoft.Data.SqlClient quebra, ver Directory.Build.props):
+# a imagem Alpine vem com a variável ligada e sem ICU.
+RUN apk add --no-cache icu-libs
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false \
+    ASPNETCORE_ENVIRONMENT=Production
+WORKDIR /app
+COPY --from=build /out .
+USER app
+ENTRYPOINT ["dotnet", "WebRadio.Api.dll"]
