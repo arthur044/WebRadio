@@ -11,7 +11,7 @@ public class MemoryLoginThrottleTests
     private readonly MemoryLoginThrottle _t;
     private static readonly byte[] Ip2 = Enumerable.Repeat((byte)2, 32).ToArray();
 
-    public MemoryLoginThrottleTests() => _t = new(_relogio, NullLogger<MemoryLoginThrottle>.Instance);
+    public MemoryLoginThrottleTests() => _t = new(_relogio, new IpHasher(new byte[32]), NullLogger<MemoryLoginThrottle>.Instance);
 
     private async Task Falhar(int n, string email = "A@X.COM", byte[]? ip = null)
     {
@@ -61,5 +61,27 @@ public class MemoryLoginThrottleTests
 
         _relogio.UtcNow = Agora.AddHours(2);
         Assert.Equal(TimeSpan.Zero, (await _t.AvaliarAsync("A@X.COM", Ip2, default)).Atraso);
+    }
+
+    [Fact]
+    public async Task Teto_duro_de_entradas_a_memoria_nao_cresce_com_emails_inventados()
+    {
+        for (var i = 0; i < MemoryLoginThrottle.LimiteDeEntradas + 1000; i++)
+        {
+            _relogio.UtcNow = Agora.AddMilliseconds(i); // limpeza "cheia" roda no máximo 1x/s
+            await _t.RegistrarFalhaAsync($"U{i}@X.COM", IpHash, default);
+        }
+
+        Assert.True(_t.Entradas <= MemoryLoginThrottle.LimiteDeEntradas, $"Entradas = {_t.Entradas}");
+    }
+
+    [Fact]
+    public async Task Limpeza_por_tempo_remove_entradas_vencidas_sem_custo_por_falha()
+    {
+        await Falhar(1, "VELHO@X.COM");
+        var antes = _t.Entradas;
+        _relogio.UtcNow = Agora.AddHours(3);
+        await Falhar(1, "NOVO@X.COM");
+        Assert.Equal(antes, _t.Entradas); // as 2 entradas antigas saíram (≥ 1 min desde a última limpeza), entraram 2 novas
     }
 }

@@ -32,24 +32,26 @@ public sealed class LoginHandler(
 {
     public async Task<LoginResultado> Handle(LoginCommand cmd, CancellationToken ct)
     {
-        var emailNormalizado = cmd.Email.Trim().ToUpperInvariant();
+        var emailNormalizado = EmailChave.Normalizar(cmd.Email);
         var avaliacao = await throttle.AvaliarAsync(emailNormalizado, cmd.IpHash, ct);
         if (avaliacao.Atraso > TimeSpan.Zero)
             await Task.Delay(avaliacao.Atraso, ct);
 
         // Bloqueado: nem consulta o banco; o custo de uma verificação de senha é pago do mesmo jeito (abaixo).
+        // A busca usa o e-mail tal como o banco normaliza (collation CI_AI); a chave do throttle é a de EmailChave.
+        var emailBusca = cmd.Email.Trim().ToUpperInvariant();
         var usuario = avaliacao.Bloqueado
             ? null
-            : await db.Usuarios.FirstOrDefaultAsync(u => u.EmailNormalizado == emailNormalizado, ct);
+            : await db.Usuarios.FirstOrDefaultAsync(u => u.EmailNormalizado == emailBusca, ct);
 
         // Exatamente UMA verificação PBKDF2 em todos os caminhos (mesmo tempo, S-A12).
-        var ok = false;
+        var resultado = ResultadoSenha.Falhou;
         if (usuario is { Ativo: true })
-            ok = hasher.Verificar(usuario.SenhaHash, cmd.Senha);
+            resultado = hasher.Verificar(usuario.SenhaHash, cmd.Senha);
         else
             hasher.VerificarFicticio(cmd.Senha);
 
-        if (!ok || usuario is null)
+        if (resultado == ResultadoSenha.Falhou || usuario is null)
         {
             if (!avaliacao.Bloqueado)
                 await throttle.RegistrarFalhaAsync(emailNormalizado, cmd.IpHash, ct);
@@ -59,12 +61,16 @@ public sealed class LoginHandler(
         await throttle.LimparAsync(emailNormalizado, cmd.IpHash, ct);
 
         var agora = clock.UtcNow;
+        // Hash com parâmetros antigos: regrava com o custo atual (mesma transação do refresh abaixo).
+        if (resultado == ResultadoSenha.OkRehash)
+            usuario.AtualizarHashSenha(hasher.Hash(cmd.Senha), agora);
+
         var refresh = tokens.NovoRefresh();
         db.RefreshTokens.Add(new RefreshToken(Guid.NewGuid(), usuario.Id, refresh.Hash, Guid.NewGuid(), agora,
             tokens.DuracaoDoRefresh, cmd.IpHash));
         await db.SaveChangesAsync(ct);
 
         var access = tokens.EmitirAccessToken(usuario);
-        return new LoginResultado(access.Valor, access.ExpiraEmUtc, usuario.DeveTrocarSenha, UsuarioDto.De(usuario), refresh);
+        return new LoginResultado(access.Token, access.ExpiraEmUtc, usuario.DeveTrocarSenha, UsuarioDto.De(usuario), refresh);
     }
 }

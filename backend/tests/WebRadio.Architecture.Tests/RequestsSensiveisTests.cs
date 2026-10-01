@@ -61,4 +61,47 @@ public class RequestsSensiveisTests
         Assert.Equal([typeof(SemOverride).FullName], Violadores([typeof(SemOverride)]));
         Assert.Empty(Violadores([typeof(ComToString), typeof(ComPrintMembers), typeof(Inofensivo)]));
     }
+
+    // ---- I5: guarda ampla (não só IBaseRequest) ----
+
+    internal static List<string?> TiposSensiveisSemToString(IEnumerable<Type> tipos)
+        => tipos
+            .Where(t => t is { IsClass: true, IsAbstract: false } && t.GetCustomAttribute<CompilerGeneratedAttribute>() is null)
+            .Where(t => !typeof(Exception).IsAssignableFrom(t) && !typeof(Delegate).IsAssignableFrom(t))
+            // Só propriedades que CARREGAM segredo (texto ou bytes); um TimeSpan "DuracaoDoRefresh" ou um DbSet
+            // "RefreshTokens" não vazam nada ao imprimir.
+            .Where(t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Any(p => (p.PropertyType == typeof(string) || p.PropertyType == typeof(byte[])) && MascaraSegredosPolicy.EhSensivel(p.Name)))
+            .Where(t => !Redefine(t, "ToString") && !Redefine(t, "PrintMembers"))
+            .Select(t => t.FullName)
+            .ToList();
+
+    [Fact]
+    public void Todo_tipo_de_Application_Infrastructure_e_Api_com_propriedade_sensivel_redefine_ToString()
+    {
+        var tipos = new[] { typeof(AssemblyMarker).Assembly, typeof(WebRadio.Infrastructure.Persistencia.RadioDbContext).Assembly, typeof(MascaraSegredosPolicy).Assembly }
+            .SelectMany(a => a.GetTypes());
+        var violadores = TiposSensiveisSemToString(tipos);
+        Assert.True(violadores.Count == 0, "Tipos com campo sensível e ToString sintetizado (vazam com {Obj} sem @): " + string.Join(", ", violadores));
+    }
+
+    private sealed record Credencial(string Token);
+
+    private sealed record CredencialSegura(string Token)
+    {
+        public override string ToString() => nameof(CredencialSegura);
+    }
+
+    private sealed class ClasseSensivel
+    {
+        public string Senha { get; set; } = "";
+    }
+
+    [Fact]
+    public void A_guarda_ampla_pega_records_e_classes_sensiveis_sem_override()
+    {
+        Assert.Equal(
+            [typeof(Credencial).FullName, typeof(ClasseSensivel).FullName],
+            TiposSensiveisSemToString([typeof(Credencial), typeof(CredencialSegura), typeof(ClasseSensivel)]));
+    }
 }

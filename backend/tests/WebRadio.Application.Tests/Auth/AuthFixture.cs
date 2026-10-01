@@ -18,7 +18,7 @@ public sealed class HasherContador : ISenhaHasher
     private readonly SenhaHasher _real = new();
     public int Verificacoes { get; private set; }
     public string Hash(string senha) => _real.Hash(senha);
-    public bool Verificar(string hash, string senha) { Verificacoes++; return _real.Verificar(hash, senha); }
+    public ResultadoSenha Verificar(string hash, string senha) { Verificacoes++; return _real.Verificar(hash, senha); }
     public void VerificarFicticio(string senha) { Verificacoes++; _real.VerificarFicticio(senha); }
 }
 
@@ -26,7 +26,8 @@ public sealed class ThrottleFalso : ILoginThrottle
 {
     public bool Bloqueado { get; set; }
     public int Falhas { get; private set; }
-    public Task<AvaliacaoDeLogin> AvaliarAsync(string e, byte[] i, CancellationToken ct) => Task.FromResult(new AvaliacaoDeLogin(Bloqueado, TimeSpan.Zero));
+    public List<string> Chaves { get; } = [];
+    public Task<AvaliacaoDeLogin> AvaliarAsync(string e, byte[] i, CancellationToken ct) { Chaves.Add(e); return Task.FromResult(new AvaliacaoDeLogin(Bloqueado, TimeSpan.Zero)); }
     public Task RegistrarFalhaAsync(string e, byte[] i, CancellationToken ct) { Falhas++; return Task.CompletedTask; }
     public Task LimparAsync(string e, byte[] i, CancellationToken ct) => Task.CompletedTask;
 }

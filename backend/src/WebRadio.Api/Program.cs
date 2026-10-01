@@ -96,7 +96,7 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
             ClockSkew = TimeSpan.FromSeconds(30),
             RoleClaimType = "role",
             NameClaimType = "name",
-            IssuerSigningKeys = ChavesDeValidacao(jwt.Value),
+            IssuerSigningKeys = ChavesDeValidacao(jwt.Value).ToList(),
         };
     });
 builder.Services.AddAuthorizationBuilder()
@@ -119,15 +119,18 @@ builder.Services.AddRateLimiter(o =>
         var http = ctx.HttpContext;
         if (http.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName == AuthEndpoints.PoliticaLogin)
         {
-            // Excedeu o limite de login: MESMO 401, mesmo corpo e custo equivalente (uma verificação de senha)
-            // que credencial errada ou e-mail inexistente. Um 429 distinto serviria de oráculo (D21 / S-A12).
-            http.RequestServices.GetRequiredService<ISenhaHasher>().VerificarFicticio("limite-excedido");
+            // Excedeu o limite de login: MESMO 401, mesmo corpo e mesmos headers (sem Retry-After) que credencial
+            // errada. Um 429 distinto serviria de oráculo (D21 / S-A12). SEM hash aqui: esta rota roda em TODA requisição
+            // rejeitada, e PBKDF2 nela viraria amplificador de DoS (1 IP a 100 req/s saturaria a CPU). Ser limitado
+            // depende só do IP, então não há oráculo de timing por conta.
             http.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await http.Response.WriteAsJsonAsync(TratadorDeExcecoes.Credenciais(), options: null, contentType: "application/problem+json", ct);
             return;
         }
 
-        http.Response.Headers.RetryAfter = "60";
+        // Retry-After real: o que o limiter informa (a janela de registrar é de 1 h, a global de 1 min).
+        var segundos = ctx.Lease.TryGetMetadata(MetadataName.RetryAfter, out var espera) ? (int)Math.Ceiling(espera.TotalSeconds) : 60;
+        http.Response.Headers.RetryAfter = Math.Max(1, segundos).ToString(System.Globalization.CultureInfo.InvariantCulture);
     };
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
         ctx.Connection.LocalPort == ListenerInterno.PortaInterna
@@ -158,6 +161,7 @@ app.UseForwardedHeaders();
 app.UseSerilogRequestLogging();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+app.UseLimiteDeCorpoDeAuth();
 app.UseRouting();
 app.UseListenerInternoGuard();
 app.UseRateLimiter();

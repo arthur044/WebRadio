@@ -222,4 +222,70 @@ public class AuthEndpointsTests
         f3.Config["Jwt:SigningKey"] = f2.Config["Jwt:SigningKey"];
         Assert.Equal(HttpStatusCode.Unauthorized, (await Get(Cliente(f3), "/api/v1/teste/qualquer", token)).StatusCode);
     }
+
+    private sealed class HasherContado(WebRadio.Application.Abstracoes.ISenhaHasher real) : WebRadio.Application.Abstracoes.ISenhaHasher
+    {
+        public int Chamadas;
+        public string Hash(string senha) => real.Hash(senha);
+        public WebRadio.Application.Abstracoes.ResultadoSenha Verificar(string hash, string senha) { Interlocked.Increment(ref Chamadas); return real.Verificar(hash, senha); }
+        public void VerificarFicticio(string senha) { Interlocked.Increment(ref Chamadas); real.VerificarFicticio(senha); }
+    }
+
+    [Fact]
+    public async Task Requisicao_rejeitada_pelo_limiter_NAO_gasta_hash_de_senha()
+    {
+        var contado = new HasherContado(new WebRadio.Infrastructure.Seguranca.SenhaHasher());
+        var c = NovaFactory("203.0.113.40")
+            .WithWebHostBuilder(b => b.ConfigureServices(s => s.AddSingleton<WebRadio.Application.Abstracoes.ISenhaHasher>(contado)))
+            .CreateClient(new() { BaseAddress = new Uri("http://localhost") });
+
+        for (var i = 0; i < 5; i++) await Login(c, "naoexiste@example.com", Senha);
+        Assert.Equal(5, contado.Chamadas); // 1 PBKDF2 por tentativa que chegou ao handler
+
+        for (var i = 0; i < 20; i++)
+        {
+            var r = await Login(c, "naoexiste@example.com", Senha);
+            Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode);
+        }
+
+        Assert.Equal(5, contado.Chamadas); // as 20 rejeitadas pelo limiter não custaram CPU de hash
+    }
+
+    [Fact]
+    public async Task Respostas_de_auth_sao_no_store()
+    {
+        var f = NovaFactory();
+        f.CriarUsuario("ana@example.com", Role.Locutor);
+        var c = Cliente(f);
+        var login = await Login(c, "ana@example.com", Senha);
+        Assert.Contains("no-store", login.Headers.CacheControl?.ToString());
+        var token = (await login.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accessToken").GetString()!;
+        Assert.Contains("no-store", (await Get(c, "/api/v1/auth/me", token)).Headers.CacheControl?.ToString());
+    }
+
+    [Fact]
+    public async Task Corpo_acima_de_8KB_nas_rotas_de_auth_e_413()
+    {
+        var r = await Login(Cliente(NovaFactory()), "a@example.com", new string('x', 20_000));
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Retry_After_do_registrar_reflete_a_janela_de_1h_e_nao_60s()
+    {
+        var c = Cliente(NovaFactory("203.0.113.90"));
+        HttpResponseMessage r = null!;
+        for (var i = 0; i < 4; i++)
+            r = await c.PostAsJsonAsync("/api/v1/auth/registrar", new { nome = "N", email = $"r{i}@example.com", senha = Senha });
+        Assert.Equal(HttpStatusCode.TooManyRequests, r.StatusCode);
+        Assert.True(r.Headers.RetryAfter!.Delta!.Value.TotalSeconds > 60);
+    }
+
+    [Fact]
+    public void Chave_anterior_igual_a_atual_derruba_o_boot()
+    {
+        var f = NovaFactory();
+        f.Config["Jwt:SigningKeyAnterior"] = ApiFactory.ChaveValida;
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
 }

@@ -26,7 +26,7 @@ public class LoginHandlerTests
         Assert.Equal(u.Id, guardado.UsuarioId);
         Assert.Equal(32, guardado.TokenHash.Length);
         Assert.Equal(r.Refresh.Hash, guardado.TokenHash);
-        Assert.NotEqual(r.Refresh.Valor, Convert.ToBase64String(guardado.TokenHash)); // o valor opaco não vai para o banco
+        Assert.NotEqual(r.Refresh.Token, Convert.ToBase64String(guardado.TokenHash)); // o valor opaco não vai para o banco
     }
 
     [Fact]

@@ -15,7 +15,7 @@ public class EmissorDeTokensTests
         var chave = System.Security.Cryptography.RandomNumberGenerator.GetBytes(48);
         var u = CriarUsuario(NovoDb(), new HasherContador(), role: Role.Admin, deveTrocar: true);
         var t = new EmissorDeTokens(chave, new RelogioFalso(Agora)).EmitirAccessToken(u);
-        var jwt = new JsonWebToken(t.Valor);
+        var jwt = new JsonWebToken(t.Token);
 
         Assert.Equal(u.Id.ToString(), jwt.GetClaim("sub").Value);
         Assert.Equal("Admin", jwt.GetClaim("role").Value);
@@ -34,7 +34,7 @@ public class EmissorDeTokensTests
     public void Token_sem_DeveTrocarSenha_nao_carrega_o_claim()
     {
         var u = CriarUsuario(NovoDb(), new HasherContador());
-        Assert.Null(new JsonWebToken(Emissor().EmitirAccessToken(u).Valor).TryGetClaim(EmissorDeTokens.ClaimDeveTrocarSenha, out var c) ? c : null);
+        Assert.Null(new JsonWebToken(Emissor().EmitirAccessToken(u).Token).TryGetClaim(EmissorDeTokens.ClaimDeveTrocarSenha, out var c) ? c : null);
     }
 
     [Fact]
@@ -43,9 +43,9 @@ public class EmissorDeTokensTests
         var e = Emissor();
         var a = e.NovoRefresh();
         var b = e.NovoRefresh();
-        Assert.NotEqual(a.Valor, b.Valor);
+        Assert.NotEqual(a.Token, b.Token);
         Assert.Equal(32, a.Hash.Length);
-        Assert.Equal(a.Hash, System.Security.Cryptography.SHA256.HashData(System.Buffers.Text.Base64Url.DecodeFromChars(a.Valor)));
+        Assert.Equal(a.Hash, System.Security.Cryptography.SHA256.HashData(System.Buffers.Text.Base64Url.DecodeFromChars(a.Token)));
         Assert.Equal(TimeSpan.FromDays(7), e.DuracaoDoRefresh);
     }
 }

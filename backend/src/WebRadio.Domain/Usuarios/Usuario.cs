@@ -33,6 +33,9 @@ public sealed class Usuario : Entidade
     {
     }
 
+    // Nunca imprimir e-mail nem hash (a máscara do Serilog só vale para {@Obj}).
+    public override string ToString() => $"Usuario {Id}";
+
     public Usuario(Guid id, string nome, string email, string senhaHash, Role role, bool deveTrocarSenha, DateTime agora)
         : base(id)
     {
@@ -99,6 +102,19 @@ public sealed class Usuario : Entidade
         DeveTrocarSenha = false;
         AtualizadoEmUtc = agora;
         AddDomainEvent(new UsuarioCredenciaisAlteradas(Id, MotivoAlteracaoCredenciais.SenhaTrocada));
+    }
+
+    /// <summary>
+    /// Regrava o hash com parâmetros novos depois de um login correto. Diferente de <see cref="TrocarSenha"/>:
+    /// a senha é a mesma, então não zera DeveTrocarSenha nem dispara a revogação de sessões.
+    /// </summary>
+    public void AtualizarHashSenha(string novoSenhaHash, DateTime agora)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(novoSenhaHash);
+        UtcGuard.Exigir(agora, nameof(agora));
+
+        SenhaHash = novoSenhaHash;
+        AtualizadoEmUtc = agora;
     }
 
     private void GarantirNaoRemoveUltimoAdmin(bool ehUltimoAdminAtivo, bool removeAdmin)

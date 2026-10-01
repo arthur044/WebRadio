@@ -24,7 +24,7 @@ public class RegistrarHandlerTests
         Assert.Equal(Role.Ouvinte, u.Role);
         Assert.Equal("BIA@EXAMPLE.COM", u.EmailNormalizado);
         Assert.NotEqual(SenhaOk, u.SenhaHash);
-        Assert.True(_hasher.Verificar(u.SenhaHash, SenhaOk));
+        Assert.Equal(WebRadio.Application.Abstracoes.ResultadoSenha.Ok, _hasher.Verificar(u.SenhaHash, SenhaOk));
     }
 
     [Fact]

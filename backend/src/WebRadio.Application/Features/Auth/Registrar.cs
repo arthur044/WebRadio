@@ -37,7 +37,19 @@ public sealed class RegistrarHandler(IRadioDbContext db, ISenhaHasher hasher, IC
         var usuario = new Usuario(Guid.NewGuid(), cmd.Nome.Trim(), email, hasher.Hash(cmd.Senha), Role.Ouvinte,
             deveTrocarSenha: false, clock.UtcNow);
         db.Usuarios.Add(usuario);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Corrida entre o AnyAsync acima e o índice único: mesma resposta 409 de quem chegou depois.
+            // Qualquer outra falha de banco segue como erro (500 genérico).
+            if (await db.Usuarios.AsNoTracking().AnyAsync(u => u.EmailNormalizado == normalizado && u.Id != usuario.Id, ct))
+                throw new EmailJaCadastradoException();
+            throw;
+        }
+
         return UsuarioDto.De(usuario);
     }
 }

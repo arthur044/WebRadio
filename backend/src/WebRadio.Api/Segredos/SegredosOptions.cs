@@ -5,6 +5,9 @@ namespace WebRadio.Api.Segredos;
 
 public sealed class JwtOptions
 {
+    // Nunca imprimir segredos (a máscara do Serilog só vale para {@Obj}).
+    public override string ToString() => nameof(JwtOptions);
+
     public const string Secao = "Jwt";
     public string? SigningKey { get; set; }
 
@@ -14,12 +17,18 @@ public sealed class JwtOptions
 
 public sealed class SegurancaOptions
 {
+    // Nunca imprimir segredos (a máscara do Serilog só vale para {@Obj}).
+    public override string ToString() => nameof(SegurancaOptions);
+
     public const string Secao = "Seguranca";
     public string? Pepper { get; set; }
 }
 
 public sealed class PlayoutOptions
 {
+    // Nunca imprimir segredos (a máscara do Serilog só vale para {@Obj}).
+    public override string ToString() => nameof(PlayoutOptions);
+
     public const string Secao = "Playout";
     public string? Token { get; set; }
 }
@@ -59,7 +68,9 @@ public sealed class JwtOptionsValidator : IValidateOptions<JwtOptions>
             RegraSegredo.Verificar("Jwt:SigningKey", options.SigningKey, 32, base64Url: true)
             ?? (string.IsNullOrWhiteSpace(options.SigningKeyAnterior)
                 ? null
-                : RegraSegredo.Verificar("Jwt:SigningKeyAnterior", options.SigningKeyAnterior, 32, base64Url: true)));
+                : options.SigningKeyAnterior == options.SigningKey
+                    ? "Jwt:SigningKeyAnterior é igual à Jwt:SigningKey: remova a anterior ou use a chave antiga de verdade."
+                    : RegraSegredo.Verificar("Jwt:SigningKeyAnterior", options.SigningKeyAnterior, 32, base64Url: true)));
 }
 
 public sealed class SegurancaOptionsValidator : IValidateOptions<SegurancaOptions>
