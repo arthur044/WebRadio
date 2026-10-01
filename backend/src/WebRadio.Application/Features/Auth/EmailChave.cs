@@ -4,9 +4,11 @@ using System.Text;
 namespace WebRadio.Application.Features.Auth;
 
 /// <summary>
-/// Chave de conta para o throttle. A coluna usa collation <c>Latin1_General_100_CI_AI_SC</c> (sem diferenciar
-/// maiúsculas NEM acentos), então "José@x.com", "jose@x.com" e "ｊｏｓｅ@x.com" são a MESMA conta no banco. A chave
-/// do throttle precisa colapsar igual (NFKC + sem diacríticos + maiúsculas), senão cada variante ganharia 5 tentativas.
+/// Chave de conta para o throttle. ATENÇÃO: <c>EmailNormalizado</c> usa a collation <c>Latin1_General_100_BIN2</c>
+/// (comparação binária), então "jose@x.com" e "josé@x.com" são contas DISTINTAS no banco. Esta chave é de propósito
+/// MAIS GROSSA que a conta (NFKD, sem diacríticos, maiúsculas): é defesa em profundidade, para que variantes
+/// visualmente idênticas ou de largura total não ganhem 5 tentativas cada. O custo é inofensivo: duas contas
+/// "parecidas" compartilham o mesmo contador de falhas.
 /// </summary>
 public static class EmailChave
 {

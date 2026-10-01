@@ -109,4 +109,34 @@ public class UsuarioTests
 
         Assert.Empty(usuario.DomainEvents);
     }
+
+    [Fact]
+    public void AtualizarHashSenha_troca_o_hash_sem_zerar_DeveTrocarSenha_e_sem_evento()
+    {
+        var usuario = CriarAdmin(deveTrocarSenha: true);
+        var depois = Agora.AddHours(1);
+
+        usuario.AtualizarHashSenha("hash-novo-210k", depois);
+
+        Assert.Equal("hash-novo-210k", usuario.SenhaHash);
+        Assert.True(usuario.DeveTrocarSenha);       // a senha é a mesma: não vale como troca
+        Assert.Empty(usuario.DomainEvents);          // nada de revogação de sessões
+        Assert.Equal(depois, usuario.AtualizadoEmUtc);
+    }
+
+    [Fact]
+    public void AtualizarHashSenha_exige_hash_e_data_utc()
+    {
+        var usuario = CriarAdmin();
+        Assert.Throws<ArgumentException>(() => usuario.AtualizarHashSenha(" ", Agora));
+        Assert.Throws<ArgumentException>(() => usuario.AtualizarHashSenha("h", DateTime.Now));
+    }
+
+    [Fact]
+    public void ToString_nao_vaza_email_nem_hash()
+    {
+        var texto = CriarAdmin().ToString();
+        Assert.DoesNotContain("ana@", texto);
+        Assert.DoesNotContain("hash-1", texto);
+    }
 }

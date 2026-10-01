@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using WebRadio.Application.Abstracoes;
 using WebRadio.Application.Features.Auth;
@@ -30,7 +31,8 @@ public class SenhaHasherTests
     [Fact]
     public async Task Login_com_hash_antigo_regrava_o_hash_com_o_custo_atual_sem_mexer_em_DeveTrocarSenha_nem_emitir_evento()
     {
-        var db = NovoDb();
+        var nome = Guid.NewGuid().ToString();
+        var db = NovoDb(nome);
         var hasher = new HasherContador();
         var u = new Usuario(Guid.NewGuid(), "Ana", "ana@example.com", HashAntigo(SenhaOk, 10_000), WebRadio.Domain.Enums.Role.Admin, true, Agora);
         db.Usuarios.Add(u);
@@ -44,5 +46,12 @@ public class SenhaHasherTests
         Assert.Equal(ResultadoSenha.Ok, new SenhaHasher().Verificar(u.SenhaHash, SenhaOk));
         Assert.True(u.DeveTrocarSenha);
         Assert.Empty(u.DomainEvents);
+
+        // Persistido de verdade (SaveChanges): um contexto NOVO, sem o rastreamento do anterior, enxerga o hash novo.
+        await using var outro = NovoDb(nome);
+        var salvo = await outro.Usuarios.AsNoTracking().SingleAsync();
+        Assert.NotEqual(antigo, salvo.SenhaHash);
+        Assert.Equal(ResultadoSenha.Ok, new SenhaHasher().Verificar(salvo.SenhaHash, SenhaOk));
+        Assert.True(salvo.DeveTrocarSenha);
     }
 }

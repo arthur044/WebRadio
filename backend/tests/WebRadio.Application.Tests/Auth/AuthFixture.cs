@@ -38,8 +38,8 @@ public static class AuthFixture
     public static readonly byte[] IpHash = new byte[32];
     public const string SenhaOk = "uma-senha-bem-longa-123";
 
-    public static RadioDbContext NovoDb()
-        => new(new DbContextOptionsBuilder<RadioDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+    public static RadioDbContext NovoDb(string? nome = null)
+        => new(new DbContextOptionsBuilder<RadioDbContext>().UseInMemoryDatabase(nome ?? Guid.NewGuid().ToString()).Options);
 
     public static Usuario CriarUsuario(RadioDbContext db, ISenhaHasher hasher, string email = "ana@example.com", bool ativo = true,
         Role role = Role.Locutor, bool deveTrocar = false)

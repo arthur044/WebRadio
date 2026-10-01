@@ -42,7 +42,7 @@ public sealed class AuthEndpoints : IEndpointModule
             {
                 var usuario = await mediator.Send(new RegistrarCommand(req.Nome, req.Email, req.Senha), ct);
                 SemCache(http);
-                return Results.Created($"/api/v1/auth/me", usuario);
+                return Results.Json(usuario, statusCode: StatusCodes.Status201Created); // sem Location: não há recurso público do usuário
             })
             .AllowAnonymous()
             .RequireRateLimiting(PoliticaRegistrar);

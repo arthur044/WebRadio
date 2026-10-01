@@ -15,11 +15,11 @@ public class NormalizacaoTests
     [InlineData("  josé@X.com ")]
     [InlineData("ｊｏｓｅ@x.com")]           // largura total (NFKC)
     [InlineData("jose\u0301@x.com")]        // e + acento combinante
-    public void Variantes_que_o_banco_trata_como_a_mesma_conta_dao_a_mesma_chave(string email)
+    public void Variantes_visualmente_iguais_dao_a_mesma_chave_do_throttle_mais_grossa_que_a_conta(string email)
         => Assert.Equal("JOSE@X.COM", EmailChave.Normalizar(email));
 
     [Fact]
-    public async Task Handler_usa_a_chave_normalizada_no_throttle_para_todas_as_variantes()
+    public async Task Handler_usa_a_chave_grossa_no_throttle_para_todas_as_variantes()
     {
         var throttle = new ThrottleFalso();
         var handler = new LoginHandler(NovoDb(), new HasherContador(), Emissor(), throttle, new RelogioFalso(Agora));
