@@ -36,16 +36,15 @@
    O gerar-segredos (E1-F18) já não gera fora desse alfabeto; isso é a
    defesa de segundo nível caso alguém troque uma senha à mão.
 
-   Uso (senha da SA via SQLCMDPASSWORD — nunca em -P, que fica visível em `ps`/
-   `docker inspect`; as três variáveis de -v abaixo são script vars do sqlcmd,
-   não a senha de conexão, e não têm equivalente por env var nativo — o
-   contêiner db-init precisa continuar efêmero e sem outro processo rodando):
+   Uso (senha da SA via SQLCMDPASSWORD — nunca em -P). As três senhas deste
+   script também NÃO vão por -v (ficariam em argv, visível em `ps`/`docker
+   inspect`): o sqlcmd resolve $(VAR) a partir de variáveis de AMBIENTE quando
+   a variável não foi definida por -v nem por :setvar. Exporte e não passe -v:
      export SQLCMDPASSWORD="$(cat /run/secrets/mssql_sa_password)"
-     sqlcmd -b -C -S sqlserver -U sa \
-       -v DB_APP_PASSWORD="$(cat /run/secrets/db_app_password)" \
-          DB_MIGRATOR_PASSWORD="$(cat /run/secrets/db_migrator_password)" \
-          DB_RELATORIO_PASSWORD="$(cat /run/secrets/db_relatorio_password)" \
-       -i infra/sql/logins.sql
+     export DB_APP_PASSWORD="$(cat /run/secrets/db_app_password)"
+     export DB_MIGRATOR_PASSWORD="$(cat /run/secrets/db_migrator_password)"
+     export DB_RELATORIO_PASSWORD="$(cat /run/secrets/db_relatorio_password)"
+     sqlcmd -b -C -I -S sqlserver -U sa -i infra/sql/logins.sql
    ===================================================================== */
 
 :on error exit

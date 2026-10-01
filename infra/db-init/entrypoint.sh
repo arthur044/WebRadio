@@ -9,8 +9,8 @@
 # seguidas não falha nem duplica nada (os próprios .sql garantem isso).
 #
 # Contrato de segurança (docs/specs/05-seguranca-auditoria.md §5):
-#   - Toda senha entra por SQLCMDPASSWORD (conexão) ou -v (script vars do
-#     sqlcmd para logins.sql), NUNCA por -P (fica visível em `ps`/`docker
+#   - Toda senha entra por SQLCMDPASSWORD (conexão) ou variável de ambiente
+#     (logins.sql), NUNCA por -P nem -v (fica visível em `ps`/`docker
 #     inspect`).
 #   - O alfabeto de TODA senha é validado AQUI, com LC_ALL=C, ANTES de
 #     qualquer chamada ao sqlcmd — inclusive rejeitando string vazia. O
@@ -95,11 +95,12 @@ echo "entrypoint: rodando init-db.sql (Ambiente=$AMBIENTE)..."
 sqlcmd -b -C -I -S "$DB_SERVER" -U sa -v Ambiente="$AMBIENTE" -i "$DIR_SQL/init-db.sql"
 
 echo "entrypoint: rodando logins.sql..."
-sqlcmd -b -C -I -S "$DB_SERVER" -U sa \
-  -v DB_APP_PASSWORD="$APP_PASSWORD" \
-     DB_MIGRATOR_PASSWORD="$MIGRATOR_PASSWORD" \
-     DB_RELATORIO_PASSWORD="$RELATORIO_PASSWORD" \
-  -i "$DIR_SQL/logins.sql"
+# As senhas vão por ambiente (o sqlcmd resolve $(VAR) do ambiente), nunca por -v:
+# argumentos ficam visíveis em `ps` e `docker inspect`. Exportadas só para este sqlcmd.
+DB_APP_PASSWORD="$APP_PASSWORD" \
+DB_MIGRATOR_PASSWORD="$MIGRATOR_PASSWORD" \
+DB_RELATORIO_PASSWORD="$RELATORIO_PASSWORD" \
+  sqlcmd -b -C -I -S "$DB_SERVER" -U sa -i "$DIR_SQL/logins.sql"
 
 if [[ "${SEED_DEV:-}" == "true" && "$AMBIENTE" == "Development" ]]; then
   echo "entrypoint: SEED_DEV=true em Development — rodando seed-dev.sql..."
