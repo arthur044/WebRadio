@@ -14,9 +14,9 @@
    exclusividade de banco à toa mesmo já estando correto.
 
    Variável sqlcmd:
-     $(Ambiente)  'Development' ou 'Production' (lista branca — qualquer outro
-                  valor, incluindo vazio, aborta com RAISERROR; ver N1 abaixo) —
-                  mesmos valores de ASPNETCORE_ENVIRONMENT
+     $(Ambiente)  'Development' ou 'Production' (lista branca, checada ANTES de
+                  qualquer CREATE/ALTER — qualquer outro valor, incluindo vazio,
+                  aborta com RAISERROR) — mesmos valores de ASPNETCORE_ENVIRONMENT
                   (docs/specs/05-seguranca-auditoria.md §5.1) — decide o recovery
                   model (E1-A04). OBRIGATÓRIA, sem valor padrão: um :setvar aqui
                   teria precedência sobre o -v do invocador e mascararia esse -v
@@ -34,6 +34,17 @@
 :on error exit
 
 SET NOCOUNT ON;
+
+-- [Atlas/Nexus, LOW pendente do PR #2] Lista branca ANTES de qualquer CREATE/ALTER
+-- (fail-fast antes de qualquer mudança, não só antes do recovery model). Só
+-- Development ou Production. Sem isso, um valor vazio ou digitado errado (ex.:
+-- "Prod") cairia no ELSE do recovery model e ligaria RECOVERY SIMPLE em silêncio —
+-- em produção isso perde a recuperação point-in-time sem nenhum aviso.
+IF (N'$(Ambiente)' NOT IN (N'Development', N'Production'))
+BEGIN
+    RAISERROR(N'init-db.sql: Ambiente inválido ("$(Ambiente)"). Esperado Development ou Production. Abortando.', 16, 1);
+    RETURN;
+END
 
 /* ---------- 1. Banco: collation fixa (03-schema-sqlserver.sql), cria só se não existir ---------- */
 IF DB_ID(N'WebRadio') IS NULL
@@ -74,16 +85,6 @@ BEGIN
     ALTER DATABASE WebRadio SET COMPATIBILITY_LEVEL = 160;
 END
 GO
-
--- [Atlas/Guardian, N1] Lista branca: só Development ou Production. Sem isso, um
--- valor vazio ou digitado errado (ex.: "Prod") caía no ELSE abaixo e ligava RECOVERY
--- SIMPLE em silêncio — em produção isso perde a recuperação point-in-time sem
--- nenhum aviso.
-IF (N'$(Ambiente)' NOT IN (N'Development', N'Production'))
-BEGIN
-    RAISERROR(N'init-db.sql: Ambiente inválido ("$(Ambiente)"). Esperado Development ou Production. Abortando.', 16, 1);
-    RETURN;
-END
 
 -- Recovery model por ambiente (E1-A04): SIMPLE em dev/CI (sem estratégia de
 -- backup no Épico 1; log não precisa crescer) e FULL em produção (prepara
