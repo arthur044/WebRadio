@@ -1,8 +1,10 @@
+using System.Buffers.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using WebRadio.Application.Abstracoes;
 using WebRadio.Infrastructure.Persistencia;
+using WebRadio.Infrastructure.Seguranca;
 
 namespace WebRadio.Infrastructure.DependencyInjection;
 
@@ -31,6 +33,18 @@ public static class InfrastructureServiceCollectionExtensions
             }));
 
         services.AddScoped<IRadioDbContext>(sp => sp.GetRequiredService<RadioDbContext>());
+
+        // Segurança. Chaves lidas sob demanda (1º uso), depois do ValidateOnStart da Api, que já recusou segredo
+        // vazio/curto/__GERAR__. Decodificação base64url, nunca Convert.FromBase64String (05 §5.1).
+        services.AddSingleton<IClock, SistemaRelogio>();
+        services.AddSingleton<ISenhaHasher, SenhaHasher>();
+        services.AddSingleton<ISenhasVazadas, SenhasVazadas>();
+        services.AddSingleton<ILoginThrottle, MemoryLoginThrottle>();
+        services.AddSingleton<IIpHasher>(sp =>
+            new IpHasher(Base64Url.DecodeFromChars(sp.GetRequiredService<IConfiguration>()["Seguranca:Pepper"]!)));
+        services.AddSingleton<IEmissorDeTokens>(sp =>
+            new EmissorDeTokens(Base64Url.DecodeFromChars(sp.GetRequiredService<IConfiguration>()["Jwt:SigningKey"]!),
+                sp.GetRequiredService<IClock>()));
 
         return services;
     }

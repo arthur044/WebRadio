@@ -8,7 +8,11 @@ using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Formatting.Compact;
+using WebRadio.Api.Features.Auth;
 using WebRadio.Api.Infra;
+using WebRadio.Application.Abstracoes;
+using WebRadio.Infrastructure.Seguranca;
+using Microsoft.AspNetCore.RateLimiting;
 using WebRadio.Api.Segredos;
 using WebRadio.Application;
 using WebRadio.Infrastructure.DependencyInjection;
@@ -82,9 +86,9 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
         {
             ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
             ValidateIssuer = true,
-            ValidIssuer = "webradio-api",
+            ValidIssuer = EmissorDeTokens.Issuer,
             ValidateAudience = true,
-            ValidAudience = "webradio",
+            ValidAudience = EmissorDeTokens.Audience,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
             RequireExpirationTime = true,
@@ -92,10 +96,12 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
             ClockSkew = TimeSpan.FromSeconds(30),
             RoleClaimType = "role",
             NameClaimType = "name",
-            IssuerSigningKey = new SymmetricSecurityKey(Base64Url.DecodeFromChars(jwt.Value.SigningKey!)),
+            IssuerSigningKeys = ChavesDeValidacao(jwt.Value),
         };
     });
 builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("PodeModerar", p => p.RequireRole("Locutor", "Admin"))
+    .AddPolicy("SomenteAdmin", p => p.RequireRole("Admin"))
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 
 // Limite global de 100/min por IP (00-arquitetura.md §164). O IP só serve de chave de partição; nunca é logado.
@@ -103,25 +109,42 @@ builder.Services.AddAuthorizationBuilder()
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    o.OnRejected = (ctx, _) =>
+    // Login e registro: limite ESTRITO por IP, num balde separado do global (a chave é a mesma IpChave).
+    o.AddPolicy(AuthEndpoints.PoliticaLogin, ctx => RateLimitPartition.GetFixedWindowLimiter(IpChave.De(ctx.Connection.RemoteIpAddress),
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(1) }));
+    o.AddPolicy(AuthEndpoints.PoliticaRegistrar, ctx => RateLimitPartition.GetFixedWindowLimiter(IpChave.De(ctx.Connection.RemoteIpAddress),
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 3, Window = TimeSpan.FromHours(1) }));
+    o.OnRejected = async (ctx, ct) =>
     {
-        ctx.HttpContext.Response.Headers.RetryAfter = "60";
-        return ValueTask.CompletedTask;
+        var http = ctx.HttpContext;
+        if (http.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName == AuthEndpoints.PoliticaLogin)
+        {
+            // Excedeu o limite de login: MESMO 401, mesmo corpo e custo equivalente (uma verificação de senha)
+            // que credencial errada ou e-mail inexistente. Um 429 distinto serviria de oráculo (D21 / S-A12).
+            http.RequestServices.GetRequiredService<ISenhaHasher>().VerificarFicticio("limite-excedido");
+            http.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await http.Response.WriteAsJsonAsync(TratadorDeExcecoes.Credenciais(), options: null, contentType: "application/problem+json", ct);
+            return;
+        }
+
+        http.Response.Headers.RetryAfter = "60";
     };
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
         ctx.Connection.LocalPort == ListenerInterno.PortaInterna
             ? RateLimitPartition.GetNoLimiter("interno")
-            : RateLimitPartition.GetFixedWindowLimiter(ChaveDoIp(ctx.Connection.RemoteIpAddress),
+            : RateLimitPartition.GetFixedWindowLimiter(IpChave.De(ctx.Connection.RemoteIpAddress),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 100, Window = TimeSpan.FromMinutes(1) }));
 });
 
-static string ChaveDoIp(System.Net.IPAddress? ip)
+static IEnumerable<SecurityKey> ChavesDeValidacao(JwtOptions jwt)
 {
-    if (ip is null) return "desconhecido";
-    if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
-    if (ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6) return ip.ToString();
-    // IPv6: um cliente controla um /64 inteiro; particionar por endereço completo o deixaria burlar o limite.
-    return Convert.ToHexString(ip.GetAddressBytes().AsSpan(0, 8));
+    // Cada chave com o kid derivado dela mesma; a anterior (se houver) só valida, durante a rotação (05 §5.1).
+    foreach (var texto in new[] { jwt.SigningKey, jwt.SigningKeyAnterior })
+    {
+        if (string.IsNullOrWhiteSpace(texto)) continue;
+        var bytes = Base64Url.DecodeFromChars(texto);
+        yield return new SymmetricSecurityKey(bytes) { KeyId = EmissorDeTokens.KidDe(bytes) };
+    }
 }
 
 var app = builder.Build();
@@ -139,6 +162,7 @@ app.UseRouting();
 app.UseListenerInternoGuard();
 app.UseRateLimiter();
 app.UseAuthentication();
+app.UseTrocaDeSenhaObrigatoria();
 app.UseAuthorization();
 
 app.MapEndpointModules();

@@ -37,7 +37,7 @@ Políticas ASP.NET: `PodeModerar` (Locutor, Admin), `SomenteAdmin` (Admin). Quem
 
 Cliente HTTP: as rotas `/auth/login`, `/auth/registrar`, `/auth/refresh` e `/auth/logout` **nunca** passam pela lógica de "401 → refresh → repetir". Um login errado não pode disparar refresh nem ser reenviado, porque contaria 2 falhas no bloqueio do D21. A restauração de sessão no boot usa o **mesmo lock** entre abas do refresh.
 
-Limites: `/auth/login` 5/min por IP; `/auth/registrar` 3/h por IP; senha de 12 a 128 caracteres, checada contra uma lista local de senhas vazadas (S-B02).
+Limites: `/auth/login` 5/min por IP (**a 6ª tentativa no minuto também responde 401 genérico**, com o mesmo corpo e o mesmo custo de uma senha errada, nunca 429: um status distinto serviria de oráculo; F07a); `/auth/registrar` 3/h por IP; senha de 12 a 128 caracteres, checada contra uma lista local de senhas vazadas (S-B02).
 
 Claims do JWT: `sub` (id), `name`, `role`, `jti`, `iat`, `exp`; `iss = webradio-api`, `aud = webradio`; tolerância de relógio de 30 s.
 
