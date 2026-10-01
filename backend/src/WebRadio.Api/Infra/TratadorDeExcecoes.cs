@@ -29,8 +29,10 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
 
         if (problema is null)
         {
-            // Só o tipo: a mensagem pode ter dado do usuário (e a stack vai para o log estruturado, não para o cliente).
-            logger.LogError(ex, "Exceção não tratada em {Metodo} {Caminho}", http.Request.Method, http.Request.Path.Value);
+            // Nada vindo do cliente no log (CodeQL: log forging): nem path nem método. O padrão da rota é do
+            // código, não da requisição; a stack vai para o log estruturado, não para o cliente.
+            var rota = (http.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText ?? "(sem rota)";
+            logger.LogError(ex, "Exceção não tratada na rota {Rota}", rota);
             problema = Criar(500, "/erros/interno", "Erro interno.", "Ocorreu um erro inesperado.",
                 ("traceId", System.Diagnostics.Activity.Current?.Id ?? http.TraceIdentifier));
         }
