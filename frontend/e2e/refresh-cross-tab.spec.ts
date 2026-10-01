@@ -1,3 +1,7 @@
+// L6 (Guardian, PR #3): em produção o cookie é `__Secure-wr_refresh` (AuthEndpoints.CookieRefresh),
+// mas aqui o nome fica `wr_refresh` de propósito: o prefixo `__Secure-` exige `Secure`, e o
+// Chromium recusa (`Invalid cookie fields`) injetar cookie Secure via addCookies em
+// http://localhost:4173. É um mock do backend — o nome não afeta o que o teste prova (single-flight).
 import { expect, test, type BrowserContext } from '@playwright/test'
 
 declare global {
