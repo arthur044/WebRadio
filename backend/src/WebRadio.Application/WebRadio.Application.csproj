@@ -12,6 +12,8 @@
     <PackageReference Include="MediatR" />
     <PackageReference Include="FluentValidation" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+    <!-- Só as abstrações (DbSet&lt;T&gt;) para IRadioDbContext; nenhum provider concreto aqui. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
   </ItemGroup>
 
 </Project>
