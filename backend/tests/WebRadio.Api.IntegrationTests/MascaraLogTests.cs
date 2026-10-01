@@ -30,4 +30,20 @@ public class MascaraLogTests
         Assert.DoesNotContain("a@b.c", texto);
         Assert.Contains("Ana", texto);
     }
+
+    [Fact]
+    public void Dicionarios_e_tipos_anonimos_tambem_sao_mascarados()
+    {
+        var sink = new Captura();
+        using var log = new LoggerConfiguration().Destructure.With<MascaraSegredosPolicy>().WriteTo.Sink(sink).CreateLogger();
+
+        log.Information("{@D} {@A}",
+            new Dictionary<string, string> { ["Authorization"] = "Bearer abc", ["ok"] = "visivel" },
+            new { RefreshToken = "r-xyz", ClientSecret = "cs", Linha = "visivel2" });
+
+        var texto = string.Join(" ", sink.Eventos.Single().Properties.Values.Select(v => v.ToString()));
+        foreach (var segredo in new[] { "Bearer abc", "r-xyz", "\"cs\"" }) Assert.DoesNotContain(segredo, texto);
+        Assert.Contains("visivel", texto);
+        Assert.Contains("visivel2", texto);
+    }
 }

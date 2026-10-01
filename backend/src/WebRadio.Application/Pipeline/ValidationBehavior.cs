@@ -13,8 +13,15 @@ public sealed class ValidationBehavior<TRequest, TResponse>(IEnumerable<IValidat
         if (validadores.Any())
         {
             var contexto = new ValidationContext<TRequest>(request);
-            var resultados = await Task.WhenAll(validadores.Select(v => v.ValidateAsync(contexto, cancellationToken)));
-            var falhas = resultados.SelectMany(r => r.Errors).Where(f => f is not null).ToList();
+            // Sequencial de propósito: um validador que consulta o DbContext (scoped) estoura com
+            // "a second operation was started" se rodar em paralelo no mesmo contexto.
+            var falhas = new List<FluentValidation.Results.ValidationFailure>();
+            foreach (var validador in validadores)
+            {
+                var resultado = await validador.ValidateAsync(contexto, cancellationToken);
+                falhas.AddRange(resultado.Errors.Where(f => f is not null));
+            }
+
             if (falhas.Count > 0)
                 throw new ValidationException(falhas);
         }

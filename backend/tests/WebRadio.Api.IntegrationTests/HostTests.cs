@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Tokens;
 using WebRadio.Api.Infra;
 using WebRadio.Domain.Erros;
 using Xunit;
@@ -73,7 +75,7 @@ public class HostTests
     }
 
     [Fact]
-    public async Task Erro_de_validacao_via_MediatR_vira_400_com_errors()
+    public async Task ValidationException_vira_400_ProblemDetails_com_errors()
     {
         var r = await Cliente(new ApiFactory(), e => e.MapGet("/api/v1/v", (Func<string>)(() =>
             throw new FluentValidation.ValidationException([new FluentValidation.Results.ValidationFailure("Nome", "Nome é obrigatório.")]))).AllowAnonymous()).GetAsync("/api/v1/v");
@@ -162,5 +164,101 @@ public class HostTests
         HttpStatusCode ultimo = default;
         for (var i = 0; i < 101; i++) ultimo = (await c.GetAsync("/rl")).StatusCode;
         Assert.Equal(HttpStatusCode.TooManyRequests, ultimo);
+    }
+
+    [Fact]
+    public async Task Endpoint_interno_sem_token_na_porta_publica_e_404_e_nao_401()
+    {
+        var c = Cliente(new ApiFactory(), e => e.MapPost("/api/v1/internal/x", () => "ok").RequireInternalListener());
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsync("/api/v1/internal/x", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Listener_interno_e_isento_do_RateLimiter()
+    {
+        var c = Cliente(new ApiFactory { RemoteIp = IPAddress.Parse("203.0.113.60") }, e => e.MapGet("/rl", () => "x").AllowAnonymous());
+        for (var i = 0; i < 120; i++)
+        {
+            var req = new HttpRequestMessage(HttpMethod.Get, "/rl");
+            req.Headers.Add("X-Test-LocalPort", "8081");
+            Assert.Equal(HttpStatusCode.OK, (await c.SendAsync(req)).StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Resposta_429_traz_Retry_After_e_corpo_ProblemDetails()
+    {
+        var c = Cliente(new ApiFactory { RemoteIp = IPAddress.Parse("203.0.113.70") }, e => e.MapGet("/rl", () => "x").AllowAnonymous());
+        HttpResponseMessage r = null!;
+        for (var i = 0; i < 101; i++) r = await c.GetAsync("/rl");
+        Assert.Equal(HttpStatusCode.TooManyRequests, r.StatusCode);
+        Assert.True(r.Headers.Contains("Retry-After"));
+        Assert.Equal("application/problem+json", r.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public void Producao_sem_SubnetApp_falha_no_boot()
+    {
+        var f = new ApiFactory { Ambiente = "Production" };
+        f.Config.Remove("Rede:SubnetApp");
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
+
+    [Fact]
+    public void Producao_com_AllowedHosts_curinga_falha_no_boot()
+    {
+        var f = new ApiFactory { Ambiente = "Production" };
+        f.Config["AllowedHosts"] = "*";
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
+
+    [Fact]
+    public void Producao_com_rede_e_hosts_explicitos_sobe()
+        => new ApiFactory { Ambiente = "Production" }.CreateClient().Dispose();
+
+    // ---- JWT (parâmetros do 05 §6) ----
+
+    private static string Token(string chaveBase64Url, string iss = "webradio-api", string aud = "webradio", DateTime? exp = null, string alg = SecurityAlgorithms.HmacSha256)
+    {
+        var chave = new SymmetricSecurityKey(System.Buffers.Text.Base64Url.DecodeFromChars(chaveBase64Url));
+        return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+        {
+            Issuer = iss,
+            Audience = aud,
+            Expires = exp ?? DateTime.UtcNow.AddMinutes(5),
+            Claims = new Dictionary<string, object> { ["sub"] = "u1", ["role"] = "Locutor" },
+            SigningCredentials = new SigningCredentials(chave, alg),
+        });
+    }
+
+    private static async Task<HttpStatusCode> ComToken(string token)
+    {
+        var c = Cliente(new ApiFactory(), e => e.MapGet("/api/v1/protegido", () => "ok"));
+        var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/protegido");
+        req.Headers.Authorization = new("Bearer", token);
+        return (await c.SendAsync(req)).StatusCode;
+    }
+
+    [Fact]
+    public async Task Jwt_valido_acessa_rota_protegida()
+        => Assert.Equal(HttpStatusCode.OK, await ComToken(Token(ApiFactory.ChaveValida)));
+
+    [Fact]
+    public async Task Jwt_com_outra_chave_audience_errada_ou_expirado_e_401()
+    {
+        var outra = System.Buffers.Text.Base64Url.EncodeToString(Enumerable.Range(0, 48).Select(i => (byte)(i * 3 + 1)).ToArray());
+        Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(Token(outra)));
+        Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(Token(ApiFactory.ChaveValida, aud: "outra")));
+        Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(Token(ApiFactory.ChaveValida, iss: "outro")));
+        Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(Token(ApiFactory.ChaveValida, exp: DateTime.UtcNow.AddMinutes(-5))));
+    }
+
+    [Fact]
+    public async Task Jwt_alg_none_e_401()
+    {
+        static string B64(string j) => System.Buffers.Text.Base64Url.EncodeToString(System.Text.Encoding.UTF8.GetBytes(j));
+        var exp = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds();
+        var token = $"{B64("""{"alg":"none","typ":"JWT"}""")}.{B64($$"""{"sub":"u1","role":"Admin","iss":"webradio-api","aud":"webradio","exp":{{exp}}}""")}.";
+        Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(token));
     }
 }

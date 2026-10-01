@@ -28,10 +28,11 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     /// <summary>IP do socket simulado e porta local (TestServer não tem socket de verdade).</summary>
     public IPAddress? RemoteIp { get; set; }
     public int LocalPort { get; set; } = 8080;
+    public string Ambiente { get; set; } = "Development";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Development");
+        builder.UseEnvironment(Ambiente);
         // UseSetting (e não AddInMemoryCollection): o Program lê builder.Configuration no topo, antes
         // de ConfigureAppConfiguration ser aplicado.
         foreach (var (chave, valor) in Config) builder.UseSetting(chave, valor);

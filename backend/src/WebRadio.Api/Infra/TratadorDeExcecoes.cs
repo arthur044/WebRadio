@@ -10,6 +10,13 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
 {
     public async ValueTask<bool> TryHandleAsync(HttpContext http, Exception ex, CancellationToken ct)
     {
+        // Cliente desistiu: não é erro do servidor nem merece LogError.
+        if (ex is OperationCanceledException && http.RequestAborted.IsCancellationRequested)
+        {
+            http.Response.StatusCode = 499;
+            return true;
+        }
+
         var problema = ex switch
         {
             ValidationException v => Validacao(v),
@@ -24,7 +31,8 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
         {
             // Só o tipo: a mensagem pode ter dado do usuário (e a stack vai para o log estruturado, não para o cliente).
             logger.LogError(ex, "Exceção não tratada em {Metodo} {Caminho}", http.Request.Method, http.Request.Path.Value);
-            problema = Criar(500, "/erros/interno", "Erro interno.", "Ocorreu um erro inesperado.");
+            problema = Criar(500, "/erros/interno", "Erro interno.", "Ocorreu um erro inesperado.",
+                ("traceId", System.Diagnostics.Activity.Current?.Id ?? http.TraceIdentifier));
         }
 
         http.Response.StatusCode = problema.Status!.Value;

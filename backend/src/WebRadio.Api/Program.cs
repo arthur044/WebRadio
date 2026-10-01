@@ -44,6 +44,20 @@ builder.Services.AddExceptionHandler<TratadorDeExcecoes>();
 builder.Services.AddEndpointModules();
 builder.Services.AddOpenApi();
 
+// Produção exige configuração explícita de rede e hosts (sem isso o stack subiria "aberto" ou quebrado):
+//  - Rede:SubnetApp ausente faria todo cliente dividir o IP do nginx (um balde de 100/min só = auto-DoS);
+//  - AllowedHosts precisa listar o host público (o nginx repassa Host = PUBLIC_AUTHORITY), `api` e 127.0.0.1.
+var subnet = builder.Configuration["Rede:SubnetApp"];
+var subnetValida = System.Net.IPNetwork.TryParse(subnet ?? "", out _);
+if (!builder.Environment.IsDevelopment())
+{
+    if (!subnetValida)
+        throw new InvalidOperationException("Rede:SubnetApp (CIDR da rede `app`) é obrigatória fora de Development.");
+    var hosts = builder.Configuration["AllowedHosts"];
+    if (string.IsNullOrWhiteSpace(hosts) || hosts.Contains('*'))
+        throw new InvalidOperationException("AllowedHosts precisa listar os hosts permitidos (sem '*') fora de Development.");
+}
+
 // S-A11: só o proxy da rede `app` pode dizer o IP do cliente; um salto só (nginx). Sem a subnet configurada,
 // nenhum proxy é confiável e o X-Forwarded-For é ignorado (falha fechada).
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
@@ -52,9 +66,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
     o.ForwardLimit = 1;
     o.KnownProxies.Clear();
     o.KnownIPNetworks.Clear();
-    var subnet = builder.Configuration["Rede:SubnetApp"];
-    if (!string.IsNullOrWhiteSpace(subnet))
-        o.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(subnet));
+    if (subnetValida)
+        o.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(subnet!));
 });
 
 // JWT (parâmetros do 05 §6). Emissão, refresh e políticas entram na F07; aqui só a validação que a
@@ -85,19 +98,44 @@ builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 
 // Limite global de 100/min por IP (00-arquitetura.md §164). O IP só serve de chave de partição; nunca é logado.
+// O listener interno :8081 é isento: healthcheck e polling do Liquidsoap vêm de poucos IPs fixos.
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.OnRejected = (ctx, _) =>
+    {
+        ctx.HttpContext.Response.Headers.RetryAfter = "60";
+        return ValueTask.CompletedTask;
+    };
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
-        RateLimitPartition.GetFixedWindowLimiter(ctx.Connection.RemoteIpAddress?.ToString() ?? "desconhecido",
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 100, Window = TimeSpan.FromMinutes(1) }));
+        ctx.Connection.LocalPort == ListenerInterno.PortaInterna
+            ? RateLimitPartition.GetNoLimiter("interno")
+            : RateLimitPartition.GetFixedWindowLimiter(ChaveDoIp(ctx.Connection.RemoteIpAddress),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 100, Window = TimeSpan.FromMinutes(1) }));
 });
+
+static string ChaveDoIp(System.Net.IPAddress? ip)
+{
+    if (ip is null) return "desconhecido";
+    if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+    if (ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6) return ip.ToString();
+    // IPv6: um cliente controla um /64 inteiro; particionar por endereço completo o deixaria burlar o limite.
+    return Convert.ToHexString(ip.GetAddressBytes().AsSpan(0, 8));
+}
 
 var app = builder.Build();
 
+if (!subnetValida)
+    app.Logger.LogWarning("Rede:SubnetApp ausente: X-Forwarded-For será ignorado (aceitável só em Development).");
+
 app.UseForwardedHeaders();
-app.UseExceptionHandler();
+// Request logging ANTES do exception handler: erros de domínio (409/400) viram resposta tratada e saem como
+// Information; só exceção inesperada é logada como Error (uma vez, pelo TratadorDeExcecoes).
 app.UseSerilogRequestLogging();
+app.UseExceptionHandler();
+app.UseStatusCodePages();
+app.UseRouting();
+app.UseListenerInternoGuard();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
