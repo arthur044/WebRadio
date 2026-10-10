@@ -35,12 +35,17 @@ builder.Host.UseSerilog((ctx, cfg) => cfg
 builder.Services.AddOptions<JwtOptions>().BindConfiguration(JwtOptions.Secao).ValidateOnStart();
 builder.Services.AddOptions<SegurancaOptions>().BindConfiguration(SegurancaOptions.Secao).ValidateOnStart();
 builder.Services.AddOptions<PlayoutOptions>().BindConfiguration(PlayoutOptions.Secao).ValidateOnStart();
+builder.Services.AddOptions<RedisOptions>().BindConfiguration(RedisOptions.Secao).ValidateOnStart();
+builder.Services.AddOptions<SeedOptions>().BindConfiguration(SeedOptions.Secao).ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<RedisOptions>, RedisOptionsValidator>();
+builder.Services.AddSingleton<IValidateOptions<SeedOptions>, SeedOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<SegurancaOptions>, SegurancaOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<PlayoutOptions>, PlayoutOptionsValidator>();
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+if (builder.Environment.IsDevelopment()) builder.Services.AddDevDataSeeder();
 
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddProblemDetails();
@@ -58,16 +63,23 @@ if (!builder.Environment.IsDevelopment())
 {
     if (!subnetValida)
         throw new InvalidOperationException("Rede:SubnetApp (CIDR da rede `app`, prefixo ≥ 8) é obrigatória fora de Development.");
+    // Sem Redis o bloqueio de login ficaria por réplica (N réplicas = N vezes mais tentativas): exigido fora de Development.
+    if (string.IsNullOrWhiteSpace(builder.Configuration["Redis:Host"]))
+        throw new InvalidOperationException("Redis:Host é obrigatório fora de Development (bloqueio de login compartilhado, D21).");
     var hosts = builder.Configuration["AllowedHosts"];
     if (string.IsNullOrWhiteSpace(hosts) || hosts.Contains('*'))
         throw new InvalidOperationException("AllowedHosts precisa listar os hosts permitidos (sem '*') fora de Development.");
+    // O HostFiltering compara só o NOME (ignora a porta do cabeçalho): uma entrada "host:porta" nunca casa e toda requisição
+    // viraria 400. Lista-se "localhost", não "localhost:8080".
+    if (hosts.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(h => !h.StartsWith('[') && h.Contains(':')))
+        throw new InvalidOperationException("AllowedHosts não pode ter porta (use só o nome do host: o filtro ignora a porta e uma entrada com porta nunca casa).");
 }
 
 // S-A11: só o proxy da rede `app` pode dizer o IP do cliente; um salto só (nginx). Sem a subnet configurada,
 // nenhum proxy é confiável e o X-Forwarded-For é ignorado (falha fechada).
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
-    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
     o.ForwardLimit = 1;
     o.KnownProxies.Clear();
     o.KnownIPNetworks.Clear();
@@ -114,6 +126,10 @@ builder.Services.AddRateLimiter(o =>
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(1) }));
     o.AddPolicy(AuthEndpoints.PoliticaRegistrar, ctx => RateLimitPartition.GetFixedWindowLimiter(IpChave.De(ctx.Connection.RemoteIpAddress),
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 3, Window = TimeSpan.FromHours(1) }));
+    o.AddPolicy(AuthEndpoints.PoliticaTrocarSenha, ctx => RateLimitPartition.GetFixedWindowLimiter(IpChave.De(ctx.Connection.RemoteIpAddress),
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+    o.AddPolicy(AuthEndpoints.PoliticaSessao, ctx => RateLimitPartition.GetFixedWindowLimiter(IpChave.De(ctx.Connection.RemoteIpAddress),
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1) }));
     o.OnRejected = async (ctx, ct) =>
     {
         var http = ctx.HttpContext;
@@ -176,6 +192,11 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi().AllowAnonymous();
     app.MapScalarApiReference().AllowAnonymous();
 }
+
+// Seeders (Admin inicial; locutores de dev). Idempotentes e sob applock; sem configuração não tocam no banco.
+await using (var escopo = app.Services.CreateAsyncScope())
+    foreach (var inicializador in escopo.ServiceProvider.GetServices<IInicializadorDeDados>())
+        await inicializador.ExecutarAsync(app.Lifetime.ApplicationStopping);
 
 app.Run();
 

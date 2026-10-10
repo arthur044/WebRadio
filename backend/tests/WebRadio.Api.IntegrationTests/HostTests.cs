@@ -223,9 +223,49 @@ public class HostTests
         Assert.ThrowsAny<Exception>(() => f.CreateClient());
     }
 
+    private static ApiFactory ProducaoCompleta()
+    {
+        var f = new ApiFactory { Ambiente = "Production" };
+        f.Config["Redis:Host"] = "redis-inexistente";
+        f.Config["Redis:Password"] = new string('r', 32);
+        return f;
+    }
+
     [Fact]
-    public void Producao_com_rede_e_hosts_explicitos_sobe()
-        => new ApiFactory { Ambiente = "Production" }.CreateClient().Dispose();
+    public void Producao_com_rede_hosts_e_redis_explicitos_sobe()
+        => ProducaoCompleta().CreateClient().Dispose();
+
+    [Fact]
+    public void Producao_sem_Redis_falha_no_boot()
+    {
+        var f = ProducaoCompleta();
+        f.Config.Remove("Redis:Host");
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
+
+    [Theory]
+    [InlineData("__GERAR__")]
+    [InlineData("")]
+    [InlineData("curta")]
+    public void Redis_com_senha_de_exemplo_vazia_ou_curta_falha_no_boot(string senha)
+    {
+        var f = ProducaoCompleta();
+        f.Config["Redis:Password"] = senha;
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
+
+    [Theory]
+    [InlineData("admin@example.com", "")]
+    [InlineData("admin@example.com", "__GERAR__")]
+    [InlineData("nao-e-email", "uma-senha-forte-123")]
+    [InlineData("", "uma-senha-forte-123")]
+    public void Seed_do_Admin_pela_metade_ou_com_valor_de_exemplo_falha_no_boot(string email, string senha)
+    {
+        var f = new ApiFactory();
+        f.Config["Seed:AdminEmail"] = email;
+        f.Config["Seed:AdminSenha"] = senha;
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
 
     // ---- JWT (parâmetros do 05 §6) ----
 
