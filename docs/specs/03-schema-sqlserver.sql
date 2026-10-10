@@ -2,6 +2,16 @@
    WebRadio — Schema de referência v1 (SQL Server 2022)
    Autor: Nexus (Planejador) · 2026-09-27 · Dono da revisão: Atlas (DBA)
 
+   Pré-revisão E1-A03 (Atlas, 2026-09-28): Forge reportou 2 gaps entre a migration
+   Inicial (F04) e este arquivo. Aceitos os dois, decisão do Nexus: (1) 5 índices que
+   a ForeignKeyIndexConvention do EF cria em FKs sem índice cobrindo — acrescentados
+   aqui com o nome exato do EF (ver comentários "-- [Atlas] EF ForeignKeyIndexConvention"
+   nas seções 3/6/7/8); suprimir geraria PendingModelChangesWarning no EF 10 sem ganho
+   real. (2) 9 DEFAULT de tinyint/bit onde o SQL Server re-renderiza o literal como
+   CONVERT([tinyint],(1)) em vez de (1) — mesmo valor, sem mudança de schema aqui.
+   Revisão completa acontece quando o Forge abrir o PR da F04 (script gerado ainda não
+   visto por inteiro).
+
    Revisão E1-A01 (Atlas, 2026-09-27): aprovado com ajustes — ver comentários
    "-- [Atlas]" (achados da revisão de tipos/CHECKs/índices/collation) e
    "-- [Atlas/v1.1]" (S-A12/S-B07/S-M02/S-M03/S-M04, auditoria do Sentinel em
@@ -110,6 +120,10 @@ CREATE TABLE seg.RefreshToken (
 CREATE UNIQUE INDEX UX_RefreshToken_TokenHash ON seg.RefreshToken (TokenHash);
 CREATE INDEX IX_RefreshToken_UsuarioId ON seg.RefreshToken (UsuarioId);
 CREATE INDEX IX_RefreshToken_FamiliaId ON seg.RefreshToken (FamiliaId) WHERE RevogadoEmUtc IS NULL;
+-- [Atlas] EF ForeignKeyIndexConvention (E1-A03, 2026-09-28): índice automático na FK
+-- auto-referenciada SubstituidoPorId. Aceito — suprimir gera PendingModelChangesWarning
+-- no EF 10 sem ganho real, e é uma FK sem índice cobrindo, então não é redundante.
+CREATE INDEX IX_RefreshToken_SubstituidoPorId ON seg.RefreshToken (SubstituidoPorId);
 GO
 
 /* ---------- 4. grade.Programa ---------- */
@@ -269,6 +283,9 @@ CREATE INDEX IX_PedidoMusica_Ip ON interacao.PedidoMusica (ListenerIpHash, Criad
 CREATE INDEX IX_PedidoMusica_Usuario ON interacao.PedidoMusica (UsuarioId, CriadoEmUtc DESC) WHERE UsuarioId IS NOT NULL;
 CREATE INDEX IX_PedidoMusica_ProgramaId ON interacao.PedidoMusica (ProgramaId) WHERE ProgramaId IS NOT NULL;
 CREATE INDEX IX_PedidoMusica_MidiaId ON interacao.PedidoMusica (MidiaId) WHERE MidiaId IS NOT NULL;
+-- [Atlas] EF ForeignKeyIndexConvention (E1-A03, 2026-09-28): aceito, mesmo motivo do
+-- IX_RefreshToken_SubstituidoPorId acima.
+CREATE INDEX IX_PedidoMusica_ModeradoPorUsuarioId ON interacao.PedidoMusica (ModeradoPorUsuarioId);
 GO
 
 /* ---------- 7. interacao.Divulgacao ---------- */
@@ -294,6 +311,9 @@ CREATE TABLE interacao.Divulgacao (
 );
 CREATE INDEX IX_Divulgacao_Ativas ON interacao.Divulgacao (Prioridade DESC)
     INCLUDE (Titulo, Mensagem, ImagemChaveStorage, LinkDestino, InicioExibicaoUtc, FimExibicaoUtc) WHERE Ativo = 1;
+-- [Atlas] EF ForeignKeyIndexConvention (E1-A03, 2026-09-28): aceito, mesmo motivo do
+-- IX_RefreshToken_SubstituidoPorId acima.
+CREATE INDEX IX_Divulgacao_CriadoPorUsuarioId ON interacao.Divulgacao (CriadoPorUsuarioId);
 GO
 
 /* ---------- 8. midia.Reproducao (histórico de playout, só inserção) ---------- */
@@ -311,6 +331,10 @@ CREATE TABLE midia.Reproducao (
 -- Relatório "mais tocadas no período" (Atlas: rel.usp_MaisTocadas @DeUtc, @AteUtc — Épico 3).
 CREATE INDEX IX_Reproducao_Periodo ON midia.Reproducao (IniciadoEmUtc) INCLUDE (MidiaId);
 CREATE INDEX IX_Reproducao_MidiaId ON midia.Reproducao (MidiaId);
+-- [Atlas] EF ForeignKeyIndexConvention (E1-A03, 2026-09-28): aceito, mesmo motivo do
+-- IX_RefreshToken_SubstituidoPorId acima (2 índices, um por FK nullable).
+CREATE INDEX IX_Reproducao_PedidoId ON midia.Reproducao (PedidoId);
+CREATE INDEX IX_Reproducao_ProgramaId ON midia.Reproducao (ProgramaId);
 GO
 
 /* ---------- 9. infra.EventoOutbox ---------- */
