@@ -12,7 +12,7 @@ using WebRadio.Infrastructure.Persistencia;
 namespace WebRadio.Infrastructure.Persistencia.Migrations
 {
     [DbContext(typeof(RadioDbContext))]
-    [Migration("20260928054449_Inicial")]
+    [Migration("20261001013339_Inicial")]
     partial class Inicial
     {
         /// <inheritdoc />
@@ -629,6 +629,53 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                     b.ToTable("Usuario", "seg", t =>
                         {
                             t.HasCheckConstraint("CK_Usuario_Role", "Role IN (1, 2, 3)");
+                        });
+                });
+
+            modelBuilder.Entity("WebRadio.Infrastructure.Persistencia.Outbox.EventoOutbox", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CriadoEmUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2(3)")
+                        .HasDefaultValueSql("SYSUTCDATETIME()", "DF_EventoOutbox_CriadoEmUtc");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ProcessadoEmUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<short>("Tentativas")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0, "DF_EventoOutbox_Tentativas");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("UltimoErro")
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id")
+                        .HasName("PK_EventoOutbox");
+
+                    b.HasIndex("Id")
+                        .HasDatabaseName("IX_EventoOutbox_Pendentes")
+                        .HasFilter("ProcessadoEmUtc IS NULL");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("Id"), new[] { "Tentativas" });
+
+                    b.ToTable("EventoOutbox", "infra", t =>
+                        {
+                            t.HasCheckConstraint("CK_EventoOutbox_Payload", "ISJSON(Payload) = 1");
                         });
                 });
 

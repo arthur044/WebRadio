@@ -5,6 +5,7 @@ using WebRadio.Domain.Grade;
 using WebRadio.Domain.Interacao;
 using WebRadio.Domain.Midia;
 using WebRadio.Domain.Usuarios;
+using WebRadio.Infrastructure.Persistencia.Outbox;
 
 namespace WebRadio.Infrastructure.Persistencia;
 
@@ -24,6 +25,8 @@ public sealed class RadioDbContext(DbContextOptions<RadioDbContext> options) : D
     public DbSet<Divulgacao> Divulgacoes => Set<Divulgacao>();
 
     public DbSet<Reproducao> Reproducoes => Set<Reproducao>();
+
+    public DbSet<EventoOutbox> EventosOutbox => Set<EventoOutbox>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
