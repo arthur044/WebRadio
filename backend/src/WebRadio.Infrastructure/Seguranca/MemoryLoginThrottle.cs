@@ -20,6 +20,9 @@ public sealed class MemoryLoginThrottle(IClock clock, IIpHasher pseudonimizador,
     public const int FalhasPorContaParaAtraso = 50;
     public static readonly TimeSpan DuracaoDoBloqueio = TimeSpan.FromMinutes(15);
     public static readonly TimeSpan JanelaDaConta = TimeSpan.FromHours(1);
+
+    /// <summary>Teto do atraso progressivo (D21). O atraso vale só para o par (conta, IP) que já falhou; nunca para a conta inteira.</summary>
+    public static readonly TimeSpan AtrasoMaximo = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan IntervaloDeLimpeza = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan IntervaloDeLimpezaCheio = TimeSpan.FromSeconds(1);
 
@@ -52,10 +55,12 @@ public sealed class MemoryLoginThrottle(IClock clock, IIpHasher pseudonimizador,
         var bloqueado = _pares.TryGetValue(ChavePar(emailNormalizado, ipHash), out var par)
                         && par.BloqueadoAte is { } ate && ate > agora;
 
+        // O alerta/atraso nasce do contador da CONTA, mas só paga o atraso quem já falhou nesta conta (o par). Atraso para a conta
+        // inteira deixaria um atacante com vários IPs travar o login da vítima e do Admin (DoS de disponibilidade).
         var atraso = TimeSpan.Zero;
-        if (_contas.TryGetValue(emailNormalizado, out var conta) && agora - conta.InicioDaJanelaUtc < JanelaDaConta
+        if (par is { Falhas: > 0 } && _contas.TryGetValue(emailNormalizado, out var conta) && agora - conta.InicioDaJanelaUtc < JanelaDaConta
             && conta.Falhas >= FalhasPorContaParaAtraso)
-            atraso = TimeSpan.FromMilliseconds(Math.Min(5000, (conta.Falhas - FalhasPorContaParaAtraso + 1) * 100));
+            atraso = TimeSpan.FromMilliseconds(Math.Min(AtrasoMaximo.TotalMilliseconds, (conta.Falhas - FalhasPorContaParaAtraso + 1) * 100));
 
         return Task.FromResult(new AvaliacaoDeLogin(bloqueado, atraso));
     }

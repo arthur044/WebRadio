@@ -26,11 +26,14 @@ public sealed class RedisLoginThrottle(IConnectionMultiplexer redis, IIpHasher p
         var db = redis.GetDatabase();
         var bloqueioTask = db.KeyExistsAsync(ChaveBloqueio(emailNormalizado, ipHash));
         var contaTask = db.StringGetAsync(ChaveConta(emailNormalizado));
-        await Task.WhenAll(bloqueioTask, contaTask);
+        var parTask = db.StringGetAsync(ChavePar(emailNormalizado, ipHash));
+        await Task.WhenAll(bloqueioTask, contaTask, parTask);
 
+        // Atraso só para o par (conta, IP) que já falhou (D21): para a conta inteira, um atacante travaria a vítima.
         var porConta = contaTask.Result.TryParse(out long n) ? n : 0;
-        var atraso = porConta >= MemoryLoginThrottle.FalhasPorContaParaAtraso
-            ? TimeSpan.FromMilliseconds(Math.Min(5000, (porConta - MemoryLoginThrottle.FalhasPorContaParaAtraso + 1) * 100))
+        var parJaFalhou = parTask.Result.TryParse(out long f) && f > 0;
+        var atraso = parJaFalhou && porConta >= MemoryLoginThrottle.FalhasPorContaParaAtraso
+            ? TimeSpan.FromMilliseconds(Math.Min(MemoryLoginThrottle.AtrasoMaximo.TotalMilliseconds, (porConta - MemoryLoginThrottle.FalhasPorContaParaAtraso + 1) * 100))
             : TimeSpan.Zero;
 
         return new AvaliacaoDeLogin(bloqueioTask.Result, atraso);
