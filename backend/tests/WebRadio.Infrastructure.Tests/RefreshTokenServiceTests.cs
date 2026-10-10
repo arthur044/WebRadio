@@ -100,6 +100,21 @@ public class RefreshTokenServiceTests(BancoDeTeste banco) : IClassFixture<BancoD
     }
 
     [SqlFact]
+    public async Task Sucessor_revogado_por_logout_dentro_da_janela_NAO_e_corrida_e_a_sessao_esta_morta()
+    {
+        var (c, _, t0) = await LogadoAsync(banco);
+        var t1 = await c.NovoRefresh().RotacionarAsync(t0, Cenario.IpA, default);
+
+        // Logout revoga a família (T1 fica revogado SEM filho) e o T0 chega de uma aba atrasada, ainda dentro dos 10 s.
+        await new LogoutHandler(c.NovoRefresh()).Handle(new LogoutCommand(t1.Novo!.Token), default);
+        c.Relogio.Avancar(TimeSpan.FromSeconds(2));
+        var atrasada = await c.NovoRefresh().RotacionarAsync(t0, Cenario.IpA, default);
+
+        Assert.False(atrasada.Sucesso);
+        Assert.False(atrasada.Concorrente); // 401 /erros/credenciais (apaga o cookie), não "tente de novo"
+    }
+
+    [SqlFact]
     public async Task Token_expirado_desconhecido_ou_mal_formado_e_invalido_sem_revogar_nada()
     {
         var (c, _, token) = await LogadoAsync(banco);

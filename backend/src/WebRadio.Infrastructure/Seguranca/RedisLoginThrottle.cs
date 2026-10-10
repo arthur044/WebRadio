@@ -55,9 +55,9 @@ public sealed class RedisLoginThrottle(IConnectionMultiplexer redis, IIpHasher p
         // Só zera o par: o contador por conta continua, para um atacante não zerá-lo logando na própria conta.
         await redis.GetDatabase().KeyDeleteAsync([ChavePar(emailNormalizado, ipHash), ChaveBloqueio(emailNormalizado, ipHash)]);
 
-    private string ChavePar(string email, byte[] ipHash) => $"wr:login:falhas:{pseudonimizador.Pseudonimo(email)}:{Convert.ToHexString(ipHash)}";
+    private string ChavePar(string email, byte[] ipHash) => $"wr:login:falhas:{pseudonimizador.ChaveOpaca(email)}:{Convert.ToHexString(ipHash)}";
 
-    private string ChaveBloqueio(string email, byte[] ipHash) => $"wr:login:bloqueio:{pseudonimizador.Pseudonimo(email)}:{Convert.ToHexString(ipHash)}";
+    private string ChaveBloqueio(string email, byte[] ipHash) => $"wr:login:bloqueio:{pseudonimizador.ChaveOpaca(email)}:{Convert.ToHexString(ipHash)}";
 
-    private string ChaveConta(string email) => $"wr:login:conta:{pseudonimizador.Pseudonimo(email)}";
+    private string ChaveConta(string email) => $"wr:login:conta:{pseudonimizador.ChaveOpaca(email)}";
 }

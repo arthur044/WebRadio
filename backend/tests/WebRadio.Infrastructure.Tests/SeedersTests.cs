@@ -8,8 +8,27 @@ using Xunit;
 
 namespace WebRadio.Infrastructure.Tests;
 
+public sealed class Ambiente(string nome) : Microsoft.Extensions.Hosting.IHostEnvironment
+{
+    public string EnvironmentName { get; set; } = nome;
+    public string ApplicationName { get; set; } = "teste";
+    public string ContentRootPath { get; set; } = ".";
+    public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
+}
+
 public class SeedersTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
 {
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Staging")]
+    public async Task DevDataSeeder_fora_de_Development_falha_alto_e_nao_cria_nada(string ambiente)
+    {
+        var seeder = new DevDataSeeder(null!, null!, null!,
+            Config(("Seed:DevData", "true"), ("Seed:DevSenha", "senha-de-dev-1234")), new Ambiente(ambiente), NullLogger<DevDataSeeder>.Instance);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.ExecutarAsync(default));
+    }
+
     private static IConfiguration Config(params (string, string?)[] valores) =>
         new ConfigurationBuilder().AddInMemoryCollection(valores.ToDictionary(v => v.Item1, v => v.Item2)).Build();
 
@@ -84,7 +103,8 @@ public class SeedersTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
     {
         var c = new Cenario(banco);
         DevDataSeeder Novo(bool ligado) => new(c.NovoDb(), c.Hasher, c.Relogio,
-            Config(("Seed:DevData", ligado ? "true" : "false"), ("Seed:DevSenha", "senha-de-dev-1234")), NullLogger<DevDataSeeder>.Instance);
+            Config(("Seed:DevData", ligado ? "true" : "false"), ("Seed:DevSenha", "senha-de-dev-1234")), new Ambiente("Development"),
+            NullLogger<DevDataSeeder>.Instance);
 
         await Novo(false).ExecutarAsync(default);
         await using (var db = c.NovoDb())

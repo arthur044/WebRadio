@@ -108,12 +108,17 @@ public sealed class RefreshTokenService(
             var sucessor = await db.RefreshTokens.AsNoTracking().FirstOrDefaultAsync(t => t.Id == sucessorId, ct);
             if (sucessor is { EstaRevogado: false }) return new ResultadoRotacao(true, revogado.UsuarioId, DerivarSucessor(hash));
 
-            // Sucessor já rotacionado por outra aba dentro da janela: uso legítimo concorrente, não roubo.
-            if (sucessor is not null) return ResultadoRotacao.PerdeuCorrida;
+            // Sucessor JÁ ROTACIONADO (tem filho) por outra aba dentro da janela: uso legítimo concorrente, não roubo.
+            // Revogado SEM filho = logout/troca de senha/desativação: sessão morta, não corrida (cai na revogação abaixo).
+            if (sucessor is { SubstituidoPorId: not null }) return ResultadoRotacao.PerdeuCorrida;
         }
 
-        // Reuso fora da janela (ou token revogado por logout/segurança): a família toda cai.
-        logger.LogWarning("Reuso de refresh token revogado; família {FamiliaId} revogada", revogado.FamiliaId);
+        // Rotacionado e reapresentado fora da janela = provável roubo. Sem sucessor (revogado por logout/segurança) é só
+        // sessão encerrada: o efeito é o mesmo (família revogada), o log não acusa roubo.
+        if (revogado.SubstituidoPorId is not null)
+            logger.LogWarning("Reuso de refresh token já rotacionado; família {FamiliaId} revogada", revogado.FamiliaId);
+        else
+            logger.LogInformation("Refresh token revogado reapresentado (logout/troca de senha); família {FamiliaId}", revogado.FamiliaId);
         await RevogarFamiliaInternaAsync(revogado.FamiliaId, agora, ct);
         return ResultadoRotacao.Invalido;
     }

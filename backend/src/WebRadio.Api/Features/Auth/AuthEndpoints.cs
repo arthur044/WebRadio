@@ -111,6 +111,7 @@ public sealed class AuthEndpoints : IEndpointModule
                 SemCache(http);
                 return Results.NoContent();
             })
+            .RequireAuthorization()
             .RequireRateLimiting(PoliticaTrocarSenha);
 
         auth.MapGet("/me", async (ClaimsPrincipal user, HttpContext http, IMediator mediator, CancellationToken ct) =>
@@ -120,7 +121,7 @@ public sealed class AuthEndpoints : IEndpointModule
             return Guid.TryParse(user.FindFirstValue("sub"), out var id)
                 ? Results.Ok(await mediator.Send(new MeQuery(id), ct))
                 : Results.Unauthorized();
-        });
+        }).RequireAuthorization();
     }
 
     private static IResult RespostaDeSessao(HttpContext http, LoginResultado r, IEmissorDeTokens emissor)

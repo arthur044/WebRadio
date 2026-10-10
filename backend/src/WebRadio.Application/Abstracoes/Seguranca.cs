@@ -75,6 +75,9 @@ public interface IIpHasher
 
     /// <summary>Identificador curto e estável de um valor sensível para log (HMAC com o pepper, 8 hex), sem expô-lo.</summary>
     string Pseudonimo(string valor);
+
+    /// <summary>HMAC completo (hex, 64 caracteres) de um valor sensível: para chaves de armazenamento, onde 32 bits colidiriam.</summary>
+    string ChaveOpaca(string valor);
 }
 
 public sealed record AvaliacaoDeLogin(bool Bloqueado, TimeSpan Atraso);

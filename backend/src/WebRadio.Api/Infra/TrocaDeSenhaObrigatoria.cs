@@ -14,7 +14,14 @@ public static class TrocaDeSenhaObrigatoria
     public static IApplicationBuilder UseTrocaDeSenhaObrigatoria(this IApplicationBuilder app)
         => app.Use(async (ctx, next) =>
         {
-            if (ctx.User.Identity?.IsAuthenticated == true
+            // O UseAuthentication popula ctx.User em TODA requisição com Authorization, inclusive nas rotas AllowAnonymous.
+            // Um cliente que anexa o access token a tudo mandaria o token restrito a /auth/refresh e /auth/logout, e o
+            // 403 impediria justamente o fluxo "trocar a senha → refresh para perder a restrição". Rotas anônimas
+            // (login, registrar, refresh, logout, health) não exigem usuário, então a restrição não se aplica a elas.
+            var anonima = ctx.GetEndpoint()?.Metadata.GetMetadata<Microsoft.AspNetCore.Authorization.IAllowAnonymous>() is not null;
+
+            if (!anonima
+                && ctx.User.Identity?.IsAuthenticated == true
                 && ctx.User.HasClaim(EmissorDeTokens.ClaimDeveTrocarSenha, "true")
                 && !Liberadas.Contains(ctx.Request.Path.Value?.TrimEnd('/'), StringComparer.OrdinalIgnoreCase))
             {

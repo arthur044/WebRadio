@@ -326,4 +326,51 @@ public class SessaoEndpointsTests
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
         Assert.Empty(refresh.RevogacoesGerais);
     }
+
+    // ---- Token restrito (DeveTrocarSenha) nas rotas anônimas ----
+
+    [Fact]
+    public async Task Token_restrito_em_Bearer_nao_barra_refresh_nem_logout()
+    {
+        // Um cliente que anexa o access token a TODA chamada levaria 403 aqui se o middleware decidisse só pelo path,
+        // e o Admin recém-semeado não conseguiria renovar nem sair depois de trocar a senha.
+        var f = Nova();
+        f.CriarUsuario("novo@example.com", Role.Admin, deveTrocar: true);
+        var c = Cliente(f, new RefreshFalso());
+        var token = await TokenDe(c, "novo@example.com");
+
+        var refresh = await c.SendAsync(Post("/api/v1/auth/refresh", cookie: TokenValido(), bearer: token));
+        var logout = await c.SendAsync(Post("/api/v1/auth/logout", cookie: TokenValido(), bearer: token));
+
+        Assert.NotEqual(HttpStatusCode.Forbidden, refresh.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, refresh.StatusCode); // o fake devolve inválido; o ponto é não ser 403
+        Assert.Equal(HttpStatusCode.NoContent, logout.StatusCode);
+    }
+
+    [Fact]
+    public async Task Todo_endpoint_nao_anonimo_exige_usuario_autenticado()
+    {
+        var f = Nova();
+        using var host = f.WithWebHostBuilder(_ => { });
+        var fonte = (Microsoft.AspNetCore.Routing.EndpointDataSource)host.Services.GetService(typeof(Microsoft.AspNetCore.Routing.EndpointDataSource))!;
+        var provedor = (Microsoft.AspNetCore.Authorization.IAuthorizationPolicyProvider)host.Services.GetService(typeof(Microsoft.AspNetCore.Authorization.IAuthorizationPolicyProvider))!;
+        var verificados = 0;
+
+        foreach (var endpoint in fonte.Endpoints.OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>())
+        {
+            if (endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Authorization.IAllowAnonymous>() is not null) continue;
+
+            var dados = endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>();
+            var politica = dados.Count > 0
+                ? await Microsoft.AspNetCore.Authorization.AuthorizationPolicy.CombineAsync(provedor, dados)
+                : await provedor.GetFallbackPolicyAsync();
+
+            Assert.True(
+                politica?.Requirements.Any(r => r is Microsoft.AspNetCore.Authorization.Infrastructure.DenyAnonymousAuthorizationRequirement) == true,
+                $"{endpoint.RoutePattern.RawText} não exige usuário autenticado");
+            verificados++;
+        }
+
+        Assert.True(verificados >= 2, "a varredura deveria achar /auth/me e /auth/trocar-senha");
+    }
 }

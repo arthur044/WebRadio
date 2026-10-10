@@ -56,13 +56,14 @@ public sealed class TrocarSenhaHandler(
             throw new ValidationException([new ValidationFailure(nameof(cmd.SenhaAtual), "A senha atual está incorreta.")]);
         }
 
-        await throttle.LimparAsync(chave, cmd.IpHash, ct);
-
         // S-M11: as outras famílias caem primeiro (a atual continua; o cliente chama /auth/refresh para perder a restrição).
         // Nesta ordem, uma falha no meio deixa a senha antiga com sessões revogadas, nunca a nova com sessões roubadas vivas.
         await refresh.RevogarTodasDoUsuarioAsync(usuario.Id, cmd.TokenRefreshAtual, ct);
 
         usuario.TrocarSenha(hasher.Hash(cmd.NovaSenha), clock.UtcNow);
         await db.SaveChangesAsync(ct);
+
+        // Só depois de gravar: se o SaveChanges falhar, o contador de falhas continua valendo.
+        await throttle.LimparAsync(chave, cmd.IpHash, ct);
     }
 }
