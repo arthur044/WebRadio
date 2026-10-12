@@ -145,7 +145,7 @@ public sealed class RedisOptionsValidator : IValidateOptions<RedisOptions>
 }
 
 /// <summary>Storage é opcional em Development; configurado, a credencial segue o fail-fast do S-C02 e a URL pública precisa ser absoluta.</summary>
-public sealed class StorageOptionsValidator : IValidateOptions<StorageOptions>
+public sealed class StorageOptionsValidator(IHostEnvironment ambiente) : IValidateOptions<StorageOptions>
 {
     public ValidateOptionsResult Validate(string? name, StorageOptions options)
     {
@@ -154,9 +154,20 @@ public sealed class StorageOptionsValidator : IValidateOptions<StorageOptions>
         return RegraSegredo.Resultado(
             RegraSegredo.Verificar("Storage:AccessKey", options.AccessKey, 8, base64Url: false)
             ?? RegraSegredo.Verificar("Storage:SecretKey", options.SecretKey, 16, base64Url: false)
-            ?? (Uri.TryCreate(options.PublicEndpoint, UriKind.Absolute, out var url) && (url.Scheme == Uri.UriSchemeHttp || url.Scheme == Uri.UriSchemeHttps)
-                ? null
-                : "Storage:PublicEndpoint precisa ser uma URL http(s) absoluta (ex.: https://radio.example.com/storage)."));
+            ?? UrlPublica(options.PublicEndpoint));
+    }
+
+    /// <summary>
+    /// É a origem das URLs pré-assinadas (POST policy e GET) entregues ao navegador: fora de Development só https, para a
+    /// assinatura não viajar em claro. Em Development o compose local serve em http://localhost.
+    /// </summary>
+    private string? UrlPublica(string? valor)
+    {
+        if (!Uri.TryCreate(valor, UriKind.Absolute, out var url) || (url.Scheme != Uri.UriSchemeHttp && url.Scheme != Uri.UriSchemeHttps))
+            return "Storage:PublicEndpoint precisa ser uma URL http(s) absoluta (ex.: https://radio.example.com/storage).";
+        return url.Scheme == Uri.UriSchemeHttps || ambiente.IsDevelopment()
+            ? null
+            : "Storage:PublicEndpoint precisa ser https fora de Development (as URLs pré-assinadas saem dessa origem).";
     }
 }
 

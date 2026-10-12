@@ -34,7 +34,8 @@ public sealed class ListarUsuariosHandler(IRadioDbContext db) : IRequestHandler<
         var busca = q.Busca?.Trim();
         if (!string.IsNullOrEmpty(busca))
         {
-            // Contains vira LIKE com os curingas do texto escapados pelo EF. O e-mail é comparado pelo normalizado
+            // Contains com parâmetro vira CHARINDEX(@p, coluna) > 0 no SQL Server (não LIKE): %, _ e [ do texto são
+            // literais. É busca no meio do texto (scan), aceitável para a tabela de usuários. O e-mail é comparado pelo normalizado
             // (maiúsculas, collation binária), para "ana@" achar "Ana@".
             var buscaNormalizada = busca.ToUpperInvariant();
             consulta = consulta.Where(u => u.Nome.Contains(busca) || u.EmailNormalizado.Contains(buscaNormalizada));

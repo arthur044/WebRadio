@@ -6,7 +6,10 @@ using WebRadio.Application.Abstracoes;
 
 namespace WebRadio.Infrastructure.Persistencia.Outbox;
 
-public sealed record ResultadoDoLote(int Lidos, int Falhas);
+/// <param name="Lidos">Eventos pegos neste passe.</param>
+/// <param name="Falhas">Falhas que ainda serão tentadas de novo (destino fora, tempo esgotado): fazem o dispatcher esperar mais.</param>
+/// <param name="Parados">Eventos que saíram da fila neste passe sem entrega (payload inválido ou 10 tentativas).</param>
+public sealed record ResultadoDoLote(int Lidos, int Falhas, int Parados = 0);
 
 /// <summary>
 /// Um passe do OutboxDispatcher (00 §fluxos, D22): pega até 50 eventos pendentes com <c>UPDLOCK, READPAST</c> (duas
@@ -51,7 +54,7 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
 
     private async Task<ResultadoDoLote> EntregarAsync(List<EventoOutbox> lote, CancellationToken ct)
     {
-        var falhas = 0;
+        var (falhas, parados) = (0, 0);
         foreach (var evento in lote)
         {
             using var limite = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -61,6 +64,12 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
                 // WaitAsync garante o teto mesmo que o destino ignore o token (o publish do Redis não recebe um).
                 await EntregarAsync(evento, limite.Token).WaitAsync(limite.Token);
                 evento.MarcarProcessado(clock.UtcNow);
+            }
+            catch (JsonException ex)
+            {
+                // Payload fora do envelope não melhora com o tempo: para na hora, sem atrasar os eventos saudáveis com o
+                // backoff do dispatcher.
+                evento.Parar($"{nameof(JsonException)}: {ex.Message}");
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -73,10 +82,17 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
                 logger.LogWarning(ex, "OUTBOX_FALHA: evento {EventoId} ({Tipo}), tentativa {Tentativa} de {Maximo}",
                     evento.Id, evento.Tipo, evento.Tentativas, EventoOutbox.MaximoDeTentativas);
             }
+
+            if (!evento.Parado) continue;
+
+            // Ninguém vai tentar de novo. Para UsuarioSessoesRevogadas isso quer dizer que as conexões do hub daquele
+            // usuário só caem no exp do token: é um alerta para o operador, não um aviso.
+            parados++;
+            logger.LogError("OUTBOX_ESGOTADO: evento {EventoId} ({Tipo}) saiu da fila sem entrega: {Erro}", evento.Id, evento.Tipo, evento.UltimoErro);
         }
 
         if (lote.Count > 0) await db.SaveChangesAsync(ct);
-        return new ResultadoDoLote(lote.Count, falhas);
+        return new ResultadoDoLote(lote.Count, falhas, parados);
     }
 
     private Task EntregarAsync(EventoOutbox evento, CancellationToken ct)

@@ -41,9 +41,8 @@ public static class InfrastructureServiceCollectionExtensions
             }));
 
         services.AddScoped<IRadioDbContext>(sp => sp.GetRequiredService<RadioDbContext>());
-        services.AddScoped<TransacaoComTrava>();
-        services.AddScoped<ITransacaoComTrava>(sp => sp.GetRequiredService<TransacaoComTrava>());
-        services.AddScoped<ISondaDoBanco>(sp => sp.GetRequiredService<TransacaoComTrava>());
+        services.AddScoped<ITransacaoComTrava, TransacaoComTrava>();
+        services.AddScoped<ISondaDoBanco, SondaDoBanco>();
         services.AddScoped<IOutbox, OutboxEf>();
         services.AddMemoryCache();
         services.AddScoped<IVersaoDeSeguranca, VersaoDeSeguranca>();

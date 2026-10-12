@@ -251,6 +251,7 @@ public class HostTests
     [InlineData("Storage:PublicEndpoint", "")]
     [InlineData("Storage:PublicEndpoint", "/storage")]
     [InlineData("Storage:PublicEndpoint", "ftp://radio.example.com/storage")]
+    [InlineData("Storage:PublicEndpoint", "http://radio.example.com/storage")] // http só em Development
     public void Storage_com_credencial_de_exemplo_ou_URL_publica_invalida_falha_no_boot(string chave, string valor)
     {
         var f = ProducaoCompleta();

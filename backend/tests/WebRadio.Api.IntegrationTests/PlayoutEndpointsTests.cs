@@ -197,6 +197,10 @@ public class PlayoutEndpointsTests
         { "NUL no artista", Faixa(artista: "Banda\0") },
         { "ESC no titulo", Faixa(titulo: "\u001b[31mvermelho") },
         { "separador de linha Unicode", Faixa(titulo: "Faixa\u2028outra linha") },
+        { "override de direcao (RLO)", Faixa(titulo: "Faixa\u202E3pm.exe") },
+        { "isolate de direcao", Faixa(artista: "Banda\u2066x") },
+        { "marca RLM", Faixa(titulo: "Faixa\u200F") },
+        { "data uma hora no futuro", Faixa(ocorridoEmUtc: DateTime.UtcNow.AddHours(1)) },
         { "tipo desconhecido", Faixa(tipo: "FaixaTerminada") },
         { "tipo vazio", Faixa(tipo: "") },
         { "sem ocorridoEmUtc", new { tipo = "FaixaIniciada", titulo = "Faixa" } },
@@ -221,10 +225,18 @@ public class PlayoutEndpointsTests
     public async Task Titulo_com_200_caracteres_acento_e_emoji_e_aceito()
     {
         var (_, c) = Novo();
-        var titulo = "Canção 🎵 " + new string('ã', 190);
+        // Inclui um emoji composto com ZWJ (família): caractere de formato legítimo, não é controle de direção.
+        var titulo = "Canção 🎵 👨\u200D👩 " + new string('ã', 184);
         Assert.Equal(200, titulo.Length);
 
         Assert.Equal(HttpStatusCode.Accepted, (await c.SendAsync(Req(HttpMethod.Post, Eventos, token: Token, corpo: Faixa(titulo: titulo)))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Relogio_do_playout_adiantado_dentro_da_tolerancia_e_aceito()
+    {
+        var (_, c) = Novo();
+        Assert.Equal(HttpStatusCode.Accepted, (await c.SendAsync(Req(HttpMethod.Post, Eventos, token: Token, corpo: Faixa(ocorridoEmUtc: DateTime.UtcNow.AddMinutes(2))))).StatusCode);
     }
 
     [Fact]

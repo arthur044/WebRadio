@@ -148,7 +148,9 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         Assert.Contains("backplane fora do ar", ruim.UltimoErro, StringComparison.Ordinal);
         Assert.NotNull((await LerAsync(ids[1])).ProcessadoEmUtc);
 
-        for (var i = 0; i < 9; i++) Assert.Equal(new ResultadoDoLote(1, 1), await Novo(notificador).ProcessarLoteAsync(default));
+        for (var i = 0; i < 8; i++) Assert.Equal(new ResultadoDoLote(1, 1), await Novo(notificador).ProcessarLoteAsync(default));
+        // Décima tentativa: além de falhar, o evento sai da fila (e o processor registra OUTBOX_ESGOTADO).
+        Assert.Equal(new ResultadoDoLote(1, 1, Parados: 1), await Novo(notificador).ProcessarLoteAsync(default));
         Assert.Equal(EventoOutbox.MaximoDeTentativas, (await LerAsync(ids[0])).Tentativas);
 
         // Dez tentativas: parado para análise, fora da fila mesmo que o destino volte.
@@ -188,7 +190,9 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
 
         var notificador = new NotificadorFalso();
 
-        Assert.Equal(new ResultadoDoLote(5, 4), await Novo(notificador).ProcessarLoteAsync(default));
+        // Não contam como falha a repetir (o dispatcher não desacelera por causa deles): param na hora.
+        Assert.Equal(new ResultadoDoLote(5, 0, Parados: 4), await Novo(notificador).ProcessarLoteAsync(default));
+        Assert.Equal(new ResultadoDoLote(0, 0), await Novo(notificador).ProcessarLoteAsync(default));
         Assert.Equal("Bom", Assert.Single(notificador.Envios).Evento);
         Assert.Empty(notificador.Desconectados);
     }
@@ -214,11 +218,12 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
 
         var notificador = new NotificadorFalso();
 
-        Assert.Equal(new ResultadoDoLote(1, 1), await Novo(notificador).ProcessarLoteAsync(default));
+        Assert.Equal(new ResultadoDoLote(1, 0, Parados: 1), await Novo(notificador).ProcessarLoteAsync(default));
 
         Assert.True(notificador.Envios.Count == 0, caso);
         var salvo = await LerAsync(id);
         Assert.Null(salvo.ProcessadoEmUtc);
+        Assert.True(salvo.Parado);
         Assert.Contains("grupos", salvo.UltimoErro, StringComparison.Ordinal);
     }
 

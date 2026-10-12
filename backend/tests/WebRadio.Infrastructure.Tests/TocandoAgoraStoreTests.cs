@@ -25,6 +25,18 @@ public class TocandoAgoraStoreTests
     }
 
     [Fact]
+    public async Task Evento_atrasado_nao_desfaz_a_faixa_mais_nova()
+    {
+        var store = new TocandoAgoraStore(NullLogger<TocandoAgoraStore>.Instance);
+        var nova = Faixa(DateTime.UtcNow);
+
+        await store.DefinirAsync(nova, default);
+        await store.DefinirAsync(Faixa(DateTime.UtcNow.AddMinutes(-3)), default);
+
+        Assert.Equal(nova, await store.ObterAsync(default));
+    }
+
+    [Fact]
     public async Task Faixa_mais_velha_que_a_validade_nao_e_mais_o_que_esta_tocando()
     {
         var store = new TocandoAgoraStore(NullLogger<TocandoAgoraStore>.Instance);

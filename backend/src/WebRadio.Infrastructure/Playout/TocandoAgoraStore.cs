@@ -20,6 +20,9 @@ public sealed class TocandoAgoraStore(ILogger<TocandoAgoraStore> logger, IConnec
 
     public async Task DefinirAsync(TocandoAgora faixa, CancellationToken ct)
     {
+        // Evento atrasado (réplicas ou reenvio fora de ordem) não desfaz a faixa mais nova.
+        if (_local is { } atual && atual.IniciadoEmUtc > faixa.IniciadoEmUtc) return;
+
         _local = faixa;
         if (redis is null) return;
 
@@ -40,7 +43,8 @@ public sealed class TocandoAgoraStore(ILogger<TocandoAgoraStore> logger, IConnec
         try
         {
             var valor = await redis.GetDatabase().StringGetAsync(Chave);
-            return valor.IsNullOrEmpty ? null : JsonSerializer.Deserialize<TocandoAgora>(valor.ToString());
+            // Chave ausente (expirou, ou a gravação no Redis falhou): vale o que esta instância viu por último.
+            return valor.IsNullOrEmpty ? Vigente(_local) : Vigente(JsonSerializer.Deserialize<TocandoAgora>(valor.ToString()));
         }
         catch (Exception ex) when (ex is RedisException or TimeoutException or JsonException)
         {

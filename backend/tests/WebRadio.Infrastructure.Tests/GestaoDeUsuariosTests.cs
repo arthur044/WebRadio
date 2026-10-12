@@ -136,6 +136,30 @@ public class GestaoDeUsuariosTests(BancoDeTeste banco) : IClassFixture<BancoDeTe
     }
 
     [SqlFact]
+    public async Task Busca_trata_curingas_de_LIKE_como_texto_e_ignora_caixa_no_SQL_Server()
+    {
+        var c = new Cenario(banco);
+        var sufixo = Guid.NewGuid().ToString("N")[..8];
+        await using (var db = c.NovoDb())
+        {
+            foreach (var nome in new[] { $"Promo 50% {sufixo}", $"Promo 500 {sufixo}", $"a_b {sufixo}", $"axb {sufixo}", $"[x] {sufixo}" })
+                db.Usuarios.Add(new WebRadio.Domain.Usuarios.Usuario(Guid.CreateVersion7(), nome, Cenario.Email(), "hash", Role.Ouvinte, false, c.Relogio.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        async Task<string[]> Buscar(string texto)
+        {
+            await using var db = c.NovoDb();
+            return (await new ListarUsuariosHandler(db).Handle(new ListarUsuariosQuery(null, texto, 1, 100), default)).Itens.Select(u => u.Nome).ToArray();
+        }
+
+        Assert.Equal([$"Promo 50% {sufixo}"], await Buscar($"50% {sufixo}"));
+        Assert.Equal([$"a_b {sufixo}"], await Buscar($"a_b {sufixo}"));
+        Assert.Equal([$"[x] {sufixo}"], await Buscar($"[x] {sufixo}"));
+        Assert.Equal([$"Promo 50% {sufixo}"], await Buscar($"PROMO 50% {sufixo}")); // collation do banco: sem diferenciar caixa
+    }
+
+    [SqlFact]
     public async Task Usuario_inexistente_e_NaoEncontrado()
     {
         var c = new Cenario(banco);

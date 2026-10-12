@@ -37,6 +37,15 @@ public sealed class EventoOutbox
         UltimoErro = erro.Length > TamanhoMaximoDoErro ? erro[..TamanhoMaximoDoErro] : erro;
     }
 
+    /// <summary>Erro que nenhuma nova tentativa conserta (payload fora do envelope): sai da fila agora, com o motivo.</summary>
+    public void Parar(string erro)
+    {
+        RegistrarFalha(erro);
+        Tentativas = MaximoDeTentativas;
+    }
+
+    public bool Parado => ProcessadoEmUtc is null && Tentativas >= MaximoDeTentativas;
+
     public EventoOutbox(string tipo, string payload)
     {
         Tipo = tipo;

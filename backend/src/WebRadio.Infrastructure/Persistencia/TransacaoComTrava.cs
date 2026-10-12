@@ -9,10 +9,8 @@ namespace WebRadio.Infrastructure.Persistencia;
 /// do EF (com EnableRetryOnFailure, transação manual só é aceita assim). No retry o bloco inteiro roda de novo, com o
 /// ChangeTracker limpo.
 /// </summary>
-public sealed class TransacaoComTrava(RadioDbContext db) : ITransacaoComTrava, ISondaDoBanco
+public sealed class TransacaoComTrava(RadioDbContext db) : ITransacaoComTrava
 {
-    public Task<bool> ConectaAsync(CancellationToken ct) => db.Database.CanConnectAsync(ct);
-
     public const int TimeoutDaTravaMs = 15_000;
 
     public async Task<T> ExecutarAsync<T>(string recurso, Func<CancellationToken, Task<T>> acao, CancellationToken ct)
@@ -41,8 +39,14 @@ public sealed class TransacaoComTrava(RadioDbContext db) : ITransacaoComTrava, I
     }
 
     /// <summary>Exige uma transação aberta em <paramref name="db"/>. O recurso vai como parâmetro, nunca concatenado.</summary>
-    public static Task AdquirirAsync(RadioDbContext db, string recurso, CancellationToken ct) =>
+    internal static Task AdquirirAsync(RadioDbContext db, string recurso, CancellationToken ct) =>
         db.Database.ExecuteSqlInterpolatedAsync(
             $"DECLARE @r int; EXEC @r = sp_getapplock @Resource = {recurso}, @LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = {TimeoutDaTravaMs}; IF @r < 0 THROW 50001, N'applock indisponível', 1;",
             ct);
+}
+
+/// <summary>Sonda do <c>/health/ready</c>: só abre uma conexão; não é responsabilidade da transação com trava.</summary>
+public sealed class SondaDoBanco(RadioDbContext db) : ISondaDoBanco
+{
+    public Task<bool> ConectaAsync(CancellationToken ct) => db.Database.CanConnectAsync(ct);
 }

@@ -23,10 +23,16 @@ public sealed class RegistrarEventoDoPlayoutValidator : AbstractValidator<Regist
     public const string FaixaIniciada = "FaixaIniciada";
     public const int TamanhoMaximoDoMetadado = 200;
 
-    public RegistrarEventoDoPlayoutValidator()
+    /// <summary>Folga para o relógio do contêiner do playout. Além disso, a data é recusada.</summary>
+    public static readonly TimeSpan ToleranciaDeRelogio = TimeSpan.FromMinutes(5);
+
+    public RegistrarEventoDoPlayoutValidator(IClock clock)
     {
         RuleFor(x => x.Tipo).Equal(FaixaIniciada).WithMessage($"Tipo de evento desconhecido (aceito: {FaixaIniciada}).");
-        RuleFor(x => x.OcorridoEmUtc).NotNull().WithMessage("Informe ocorridoEmUtc.");
+        // Sem teto, uma data no futuro deixaria a faixa "vigente" para sempre no tocando agora.
+        RuleFor(x => x.OcorridoEmUtc).NotNull().WithMessage("Informe ocorridoEmUtc.")
+            .Must(quando => quando is null || quando.Value.ToUniversalTime() <= clock.UtcNow + ToleranciaDeRelogio)
+            .WithMessage("ocorridoEmUtc não pode estar no futuro.");
         RuleFor(x => x.MidiaId).NotEqual(Guid.Empty).WithMessage("midiaId inválido.");
         RuleFor(x => x.PedidoId).NotEqual(Guid.Empty).WithMessage("pedidoId inválido.");
         // S-A09: no ao vivo, título e artista vêm do programa do locutor (harbor) e seguem para TODOS os clientes do hub.
@@ -40,10 +46,12 @@ public sealed class RegistrarEventoDoPlayoutValidator : AbstractValidator<Regist
 
     /// <summary>
     /// Controle C0/C1 (inclusive quebra de linha, tab e NUL) e os separadores de linha/parágrafo do Unicode, que também
-    /// quebram linha: servem para forjar linha de log ou de protocolo. Acento, emoji e outros alfabetos passam.
+    /// quebram linha: servem para forjar linha de log ou de protocolo. Também as marcas e os controles de direção
+    /// (LRM/RLM/ALM, embeddings, overrides e isolates): invertem o texto exibido a todos os ouvintes (spoofing visual).
+    /// Acento, emoji (inclusive com ZWJ) e outros alfabetos passam.
     /// </summary>
     private static bool SemCaractereDeControle(string? texto) =>
-        texto is null || !texto.Any(c => char.IsControl(c) || c is '\u2028' or '\u2029');
+        texto is null || !texto.Any(c => char.IsControl(c) || c is '\u2028' or '\u2029' || c is '\u061C' or '\u200E' or '\u200F' or (>= '\u202A' and <= '\u202E') or (>= '\u2066' and <= '\u2069'));
 }
 
 /// <summary>
