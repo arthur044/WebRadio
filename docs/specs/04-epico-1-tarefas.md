@@ -139,3 +139,13 @@ Caminho crítico: **A01 ✅ → F04 → F05 → F16**, e a **F17** (CI) entra lo
 - **Árvore de trabalho compartilhada** (todos os agentes editam a mesma pasta): é proibido rodar `git stash`, `git reset --hard`, `git clean`, `git checkout -- .` ou `git rebase` com alterações de outros agentes sem avisar e combinar antes com o Nexus. Em 2026-09-27, um `stash -u` antes da reescrita do histórico tirou do disco o trabalho de quatro agentes. Cada agente faz `git add` só dos caminhos que criou.
 - **PRs na pasta compartilhada (a `main` é protegida: só entra por PR com checks verdes):** um PR aberto por vez, na ordem que o Nexus define. O dono cria a branch (`git checkout -b <agente>/<tarefa>`), commita só os próprios caminhos, faz o push e abre o PR, e **não volta para a `main` antes do merge**: trocar de branch muda a árvore de todos, e os arquivos commitados só na branch sumiriam do disco. Depois do merge (sem squash), sincronize com `git fetch` + `git checkout main` + `git merge --ff-only origin/main`. Enquanto um PR estiver aberto, os outros agentes não commitam.
 - Mudança de contrato (DTO, rota, coluna) exige editar **primeiro** `docs/specs/` e avisar o Nexus. Código e especificação não podem divergir.
+
+## Agrupamento de entrega do backend restante (2026-10-12)
+
+A pedido do dono do produto, o que falta do backend do Épico 1 entra por **feature grande**, e não por tarefa: um PR por linha, com commits separados por tarefa e **uma** revisão no fim (Guardian; Sentinel nas partes de segurança; Atlas só em migration/SQL). As tarefas `E1-Fxx` acima continuam valendo como critério de aceite.
+
+| PR | Feature | Tarefas | Depende de |
+|---|---|---|---|
+| **B1** | Runtime da API | F08, F09, F10, F12, `/usuarios` + coluna `seg.Usuario.VersaoSeguranca` (claim `sv`, complemento da F07; aceite: desativar, rebaixar ou trocar a senha → access token antigo responde 401 em até 15 s) | F07b (#16) |
+| **B2** | Worker e playout | F11, F14, F15, F16 | B1 |
+| **B3** | CI, segredos e pendências | F17b, F18, sobras do PR #14 (entrypoint do db-init, dependabot), LOWs das issues #10 e #19 | B2 |
