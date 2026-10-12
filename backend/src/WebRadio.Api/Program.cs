@@ -37,6 +37,8 @@ builder.Services.AddOptions<SegurancaOptions>().BindConfiguration(SegurancaOptio
 builder.Services.AddOptions<PlayoutOptions>().BindConfiguration(PlayoutOptions.Secao).ValidateOnStart();
 builder.Services.AddOptions<RedisOptions>().BindConfiguration(RedisOptions.Secao).ValidateOnStart();
 builder.Services.AddOptions<SeedOptions>().BindConfiguration(SeedOptions.Secao).ValidateOnStart();
+builder.Services.AddOptions<StorageOptions>().BindConfiguration(StorageOptions.Secao).ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<StorageOptions>, StorageOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<RedisOptions>, RedisOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<SeedOptions>, SeedOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidator>();
@@ -46,6 +48,7 @@ builder.Services.AddSingleton<IValidateOptions<PlayoutOptions>, PlayoutOptionsVa
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 if (builder.Environment.IsDevelopment()) builder.Services.AddDevDataSeeder();
+builder.Services.AddScannerNoOpSePermitido(builder.Configuration, builder.Environment);
 
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddProblemDetails();
@@ -66,6 +69,9 @@ if (!builder.Environment.IsDevelopment())
     // Sem Redis o bloqueio de login ficaria por réplica (N réplicas = N vezes mais tentativas): exigido fora de Development.
     if (string.IsNullOrWhiteSpace(builder.Configuration["Redis:Host"]))
         throw new InvalidOperationException("Redis:Host é obrigatório fora de Development (bloqueio de login compartilhado, D21).");
+    // Sem storage não há upload nem mídia: a seção inteira é exigida (a credencial é validada pelo StorageOptionsValidator).
+    if (string.IsNullOrWhiteSpace(builder.Configuration["Storage:Endpoint"]))
+        throw new InvalidOperationException("Storage:Endpoint é obrigatório fora de Development (MinIO interno, ex.: minio:9000).");
     var hosts = builder.Configuration["AllowedHosts"];
     if (string.IsNullOrWhiteSpace(hosts) || hosts.Contains('*'))
         throw new InvalidOperationException("AllowedHosts precisa listar os hosts permitidos (sem '*') fora de Development.");

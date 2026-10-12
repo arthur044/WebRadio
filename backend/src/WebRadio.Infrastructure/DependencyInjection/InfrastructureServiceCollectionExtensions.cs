@@ -3,7 +3,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using WebRadio.Application.Abstracoes;
+using Microsoft.Extensions.Hosting;
 using StackExchange.Redis;
+using WebRadio.Infrastructure.Armazenamento;
+using WebRadio.Infrastructure.Triagem;
 using WebRadio.Infrastructure.Persistencia;
 using WebRadio.Infrastructure.Seed;
 using WebRadio.Infrastructure.Seguranca;
@@ -58,9 +61,42 @@ public static class InfrastructureServiceCollectionExtensions
             Base64Url.DecodeFromChars(sp.GetRequiredService<IConfiguration>()["Seguranca:Pepper"]!),
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RefreshTokenService>>()));
 
+        services.AddSingleton<IListenerIdentity>(sp => new ListenerIdentity(
+            Base64Url.DecodeFromChars(sp.GetRequiredService<IConfiguration>()["Seguranca:Pepper"]!), sp.GetRequiredService<IIpHasher>()));
+        AddStorage(services, configuration);
+
         services.AddScoped<IInicializadorDeDados, AdminSeeder>();
 
         return services;
+    }
+
+    /// <summary>
+    /// S-A02: o scanner NoOp exige as DUAS condições (Development E Seguranca:PermitirScannerNoOp=true). Fora delas não há
+    /// IMalwareScanner registrado: quem depende dele falha ao resolver (fail-closed), em vez de aceitar arquivo sem scan.
+    /// </summary>
+    public static IServiceCollection AddScannerNoOpSePermitido(this IServiceCollection services, IConfiguration configuration, IHostEnvironment ambiente)
+    {
+        if (ambiente.IsDevelopment() && bool.TryParse(configuration["Seguranca:PermitirScannerNoOp"], out var permitido) && permitido)
+            services.AddSingleton<IMalwareScanner, NoOpMalwareScanner>();
+        return services;
+    }
+
+    /// <summary>
+    /// Storage é opcional em Development (sem Storage:Endpoint não há IObjectStorage); fora dele a Api exige a seção
+    /// inteira e valida a credencial no boot (S-C02).
+    /// </summary>
+    private static void AddStorage(IServiceCollection services, IConfiguration configuration)
+    {
+        if (string.IsNullOrWhiteSpace(configuration["Storage:Endpoint"])) return;
+
+        services.AddSingleton(_ => new StorageOptions(
+            configuration["Storage:Endpoint"]!,
+            configuration["Storage:PublicEndpoint"]!,
+            configuration["Storage:AccessKey"]!,
+            configuration["Storage:SecretKey"]!,
+            bool.TryParse(configuration["Storage:UsarSsl"], out var ssl) && ssl,
+            string.IsNullOrWhiteSpace(configuration["Storage:Regiao"]) ? "us-east-1" : configuration["Storage:Regiao"]!));
+        services.AddSingleton<IObjectStorage, MinioObjectStorage>();
     }
 
     /// <summary>Seeder de desenvolvimento: a Api só chama isto em Development (o repositório é público).</summary>
@@ -70,12 +106,14 @@ public static class InfrastructureServiceCollectionExtensions
     /// <summary>
     /// Com Redis:Host configurado, o bloqueio de login vai para o Redis (compartilhado entre réplicas) e cai para a memória se
     /// ele falhar. Sem Redis:Host (só aceito em Development, a Api exige fora dele) fica só a memória.
+    /// O IRequestThrottle segue a mesma escolha, mas SEM fallback: falha do Redis propaga e quem chama decide (D6).
     /// </summary>
     private static void AddThrottleDeLogin(IServiceCollection services, IConfiguration configuration)
     {
         if (string.IsNullOrWhiteSpace(configuration["Redis:Host"]))
         {
             services.AddSingleton<ILoginThrottle>(sp => sp.GetRequiredService<MemoryLoginThrottle>());
+            services.AddSingleton<IRequestThrottle, MemoryRequestThrottle>();
             return;
         }
 
@@ -96,6 +134,7 @@ public static class InfrastructureServiceCollectionExtensions
             return ConnectionMultiplexer.Connect(opcoes);
         });
         services.AddSingleton<RedisLoginThrottle>();
+        services.AddSingleton<IRequestThrottle, RedisRequestThrottle>();
         services.AddSingleton<ILoginThrottle>(sp => new LoginThrottleComFallback(
             sp.GetRequiredService<RedisLoginThrottle>(), sp.GetRequiredService<MemoryLoginThrottle>(),
             sp.GetRequiredService<IClock>(), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<LoginThrottleComFallback>>()));

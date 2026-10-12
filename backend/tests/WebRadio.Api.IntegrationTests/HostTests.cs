@@ -228,7 +228,47 @@ public class HostTests
         var f = new ApiFactory { Ambiente = "Production" };
         f.Config["Redis:Host"] = "redis-inexistente";
         f.Config["Redis:Password"] = new string('r', 32);
+        f.Config["Storage:Endpoint"] = "minio-inexistente:9000";
+        f.Config["Storage:PublicEndpoint"] = "https://radio.example.com/storage";
+        f.Config["Storage:AccessKey"] = "svc-api-acesso";
+        f.Config["Storage:SecretKey"] = new string('s', 32);
         return f;
+    }
+
+    [Fact]
+    public void Producao_sem_Storage_falha_no_boot()
+    {
+        var f = ProducaoCompleta();
+        f.Config.Remove("Storage:Endpoint");
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
+
+    [Theory]
+    [InlineData("Storage:SecretKey", "__GERAR__")]
+    [InlineData("Storage:SecretKey", "")]
+    [InlineData("Storage:SecretKey", "curta")]
+    [InlineData("Storage:AccessKey", "")]
+    [InlineData("Storage:PublicEndpoint", "")]
+    [InlineData("Storage:PublicEndpoint", "/storage")]
+    [InlineData("Storage:PublicEndpoint", "ftp://radio.example.com/storage")]
+    public void Storage_com_credencial_de_exemplo_ou_URL_publica_invalida_falha_no_boot(string chave, string valor)
+    {
+        var f = ProducaoCompleta();
+        f.Config[chave] = valor;
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
+
+    [Fact]
+    public void Scanner_NoOp_nao_e_registrado_em_Production_mesmo_com_a_flag()
+    {
+        var f = ProducaoCompleta();
+        f.Config["Seguranca:PermitirScannerNoOp"] = "true";
+        Assert.Null(f.Services.GetService<WebRadio.Application.Abstracoes.IMalwareScanner>());
+
+        var dev = new ApiFactory();
+        dev.Config["Seguranca:PermitirScannerNoOp"] = "true";
+        Assert.NotNull(dev.Services.GetService<WebRadio.Application.Abstracoes.IMalwareScanner>());
+        Assert.Null(new ApiFactory().Services.GetService<WebRadio.Application.Abstracoes.IMalwareScanner>());
     }
 
     [Fact]
