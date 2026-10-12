@@ -45,9 +45,9 @@ Claims do JWT: `sub` (id), `name`, `role`, `jti`, `iat`, `exp`; `iss = webradio-
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/usuarios?role=&busca=&pagina=&tamanho=` | lista paginada de `UsuarioDto & { ativo, criadoEmUtc }` |
-| POST | `/usuarios` | `{ nome, email, senhaInicial, role }` → 201 |
-| PATCH | `/usuarios/{id}` | `{ role?, ativo? }` + `If-Match` → 200. Mudar o papel ou desativar revoga as sessões e derruba o hub do usuário; o último Admin ativo não pode ser rebaixado nem desativado → 409 |
+| GET | `/usuarios?role=&busca=&pagina=&tamanho=` | lista paginada de `UsuarioDto & { ativo, criadoEmUtc, versao }`. **Não existe `GET /usuarios/{id}`**: `versao` (RowVersion em base64) é o valor que o cliente manda no `If-Match` do `PATCH` |
+| POST | `/usuarios` | `{ nome, email, senhaInicial, role }` → 201 + `ETag` |
+| PATCH | `/usuarios/{id}` | `{ role?, ativo? }` + `If-Match` → 200 + `ETag` novo. Mudar o papel ou desativar revoga as sessões e derruba o hub do usuário; o último Admin ativo não pode ser rebaixado nem desativado → 409 |
 | POST | `/usuarios/{id}/desbloquear-login` | → 204; limpa os contadores de falha de login (Redis) da conta |
 
 ## 4. Programas — `/programas`

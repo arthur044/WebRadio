@@ -111,6 +111,8 @@ A regra de dependência é garantida por **teste de arquitetura** (NetArchTest),
    ```
    Rodar de novo não produz nada: é idempotente por construção.
 3. O `OutboxDispatcher` da API lê `UPDATE TOP(50) ... WITH (UPDLOCK, READPAST)` onde `ProcessadoEmUtc IS NULL` e publica `ProgramaStatusAlterado` para todos no hub. A entrega é **pelo menos uma vez**: o cliente ignora `eventoId` repetido.
+   - **Envelope do `Payload` (B1):** todo evento do outbox é o JSON `{ "grupos": [...], "dados": { ... } }`. O destino é **explícito**: `"grupos": null` publica para todos os clientes do hub; uma lista preenchida publica só para esses grupos do SignalR; **lista vazia ou campo ausente é erro** (o evento fica com `UltimoErro` e não vira broadcast por engano), então o `null` precisa estar escrito no JSON. No código, a interface separa as duas intenções (`EnfileirarParaTodos` / `EnfileirarParaGrupos`). Quem insere por SQL (o Worker, passo 2) grava o mesmo envelope.
+   - **Evento interno `UsuarioSessoesRevogadas`** (`dados: { usuarioId }`): não vai para os clientes; o dispatcher o consome para derrubar as conexões do hub daquele usuário quando o papel muda, a conta é desativada ou a senha é trocada.
 4. O frontend troca o selo "Ao Vivo" ao receber o evento. Ao reconectar, chama `GET /programas/ao-vivo` para ressincronizar.
 
 ### Fluxo B — Pedido de música
