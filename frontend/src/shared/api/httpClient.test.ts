@@ -65,4 +65,70 @@ describe('apiFetch — single-flight de refresh (S-M10)', () => {
     expect(refreshCalls).toBe(1)
     expect(useAuthStore.getState().accessToken).toBe('token-novo')
   })
+
+  function refreshOk() {
+    return jsonResponse(200, {
+      accessToken: 'token-novo',
+      expiraEmUtc: new Date().toISOString(),
+      deveTrocarSenha: false,
+      usuario: {
+        id: '1',
+        nome: 'Ouvinte',
+        email: 'a@a.com',
+        role: 'Ouvinte',
+        deveTrocarSenha: false,
+      },
+    })
+  }
+
+  function stubRefreshSequence(refreshResponses: Response[]) {
+    let refreshCalls = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/auth/refresh')) {
+          refreshCalls += 1
+          return refreshResponses.shift() ?? jsonResponse(500, {})
+        }
+        return useAuthStore.getState().accessToken === 'token-expirado'
+          ? jsonResponse(401, { type: '/erros/credenciais', title: 'expirado', status: 401 })
+          : jsonResponse(200, { ok: true })
+      }),
+    )
+    return () => refreshCalls
+  }
+
+  it('refresh-concorrente: refaz o refresh UMA vez e mantém a sessão', async () => {
+    const calls = stubRefreshSequence([
+      jsonResponse(401, { type: '/erros/refresh-concorrente', title: 'concorrente', status: 401 }),
+      refreshOk(),
+    ])
+
+    await expect(apiFetch('/pedidos/meus')).resolves.toEqual({ ok: true })
+    expect(calls()).toBe(2)
+    expect(useAuthStore.getState().accessToken).toBe('token-novo')
+  })
+
+  it('refresh-concorrente duas vezes seguidas: para no retry único e desloga', async () => {
+    const calls = stubRefreshSequence([
+      jsonResponse(401, { type: '/erros/refresh-concorrente', title: 'c', status: 401 }),
+      jsonResponse(401, { type: '/erros/refresh-concorrente', title: 'c', status: 401 }),
+      refreshOk(),
+    ])
+
+    await expect(apiFetch('/pedidos/meus')).rejects.toMatchObject({ status: 401 })
+    expect(calls()).toBe(2)
+    expect(useAuthStore.getState().accessToken).toBeNull()
+  })
+
+  it('/erros/credenciais no refresh = sessão morta: desloga sem retry', async () => {
+    const calls = stubRefreshSequence([
+      jsonResponse(401, { type: '/erros/credenciais', title: 'morta', status: 401 }),
+      refreshOk(),
+    ])
+
+    await expect(apiFetch('/pedidos/meus')).rejects.toMatchObject({ status: 401 })
+    expect(calls()).toBe(1)
+    expect(useAuthStore.getState().accessToken).toBeNull()
+  })
 })

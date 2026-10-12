@@ -86,11 +86,14 @@ export async function refreshSession(tokenAtFailureTime: string | null): Promise
     }
 
     try {
-      const response = await rawFetch('/auth/refresh', {
-        method: 'POST',
-        skipAuth: true,
-        skipRefreshRetry: true,
-      })
+      let response = await postRefresh()
+
+      // Forge F07: 401 /erros/refresh-concorrente (Retry-After: 0) é uma corrida
+      // perdida, não sessão morta — o cookie já foi rotacionado por outro request.
+      // Refaz UMA vez; só /erros/credenciais (ou qualquer outra falha) derruba a sessão.
+      if (response.status === 401 && (await isRefreshConcorrente(response))) {
+        response = await postRefresh()
+      }
 
       if (!response.ok) {
         useAuthStore.getState().clearSession()
@@ -107,6 +110,19 @@ export async function refreshSession(tokenAtFailureTime: string | null): Promise
       return false
     }
   })
+}
+
+function postRefresh(): Promise<Response> {
+  return rawFetch('/auth/refresh', { method: 'POST', skipAuth: true, skipRefreshRetry: true })
+}
+
+async function isRefreshConcorrente(response: Response): Promise<boolean> {
+  try {
+    const problem: ProblemDetails = await response.clone().json()
+    return problem.type === '/erros/refresh-concorrente'
+  } catch {
+    return false
+  }
 }
 
 async function toApiError(response: Response): Promise<ApiError> {
