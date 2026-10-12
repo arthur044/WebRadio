@@ -50,17 +50,31 @@ public class MemoryLoginThrottleTests
     }
 
     [Fact]
-    public async Task Cinquenta_falhas_na_conta_de_IPs_diferentes_dao_atraso_mas_nao_bloqueiam_o_IP_novo()
+    public async Task Cinquenta_falhas_na_conta_atrasam_so_quem_ja_falhou_e_nunca_a_vitima_de_outro_IP()
     {
+        var atacante = BitConverter.GetBytes(0).Concat(new byte[28]).ToArray();
         for (var i = 0; i < 50; i++)
             await Falhar(1, ip: BitConverter.GetBytes(i).Concat(new byte[28]).ToArray());
 
-        var novo = await _t.AvaliarAsync("A@X.COM", Ip2, default);
-        Assert.False(novo.Bloqueado);                 // atacante não tranca o Admin para quem vem de outro IP
-        Assert.True(novo.Atraso > TimeSpan.Zero);     // só atraso progressivo
+        var vitima = await _t.AvaliarAsync("A@X.COM", Ip2, default);
+        Assert.False(vitima.Bloqueado);                      // atacante não tranca o Admin para quem vem de outro IP
+        Assert.Equal(TimeSpan.Zero, vitima.Atraso);          // nem atrasa: a conta inteira não paga pelo atacante (DoS)
+
+        var quemFalhou = await _t.AvaliarAsync("A@X.COM", atacante, default);
+        Assert.True(quemFalhou.Atraso > TimeSpan.Zero);      // só o par que já falhou paga o atraso progressivo
 
         _relogio.UtcNow = Agora.AddHours(2);
-        Assert.Equal(TimeSpan.Zero, (await _t.AvaliarAsync("A@X.COM", Ip2, default)).Atraso);
+        Assert.Equal(TimeSpan.Zero, (await _t.AvaliarAsync("A@X.COM", atacante, default)).Atraso);
+    }
+
+    [Fact]
+    public async Task O_atraso_progressivo_tem_teto_de_2_segundos()
+    {
+        var par = BitConverter.GetBytes(7).Concat(new byte[28]).ToArray();
+        for (var i = 0; i < 400; i++)
+            await Falhar(1, ip: BitConverter.GetBytes(i % 3 == 0 ? 7 : i + 100).Concat(new byte[28]).ToArray());
+
+        Assert.Equal(MemoryLoginThrottle.AtrasoMaximo, (await _t.AvaliarAsync("A@X.COM", par, default)).Atraso);
     }
 
     [Fact]
