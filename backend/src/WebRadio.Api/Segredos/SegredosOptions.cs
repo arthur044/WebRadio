@@ -24,6 +24,28 @@ public sealed class SegurancaOptions
     public string? Pepper { get; set; }
 }
 
+public sealed class RedisOptions
+{
+    // Nunca imprimir segredos (a máscara do Serilog só vale para {@Obj}).
+    public override string ToString() => nameof(RedisOptions);
+
+    public const string Secao = "Redis";
+    public string? Host { get; set; }
+    public int? Porta { get; set; }
+    public string? Password { get; set; }
+}
+
+public sealed class SeedOptions
+{
+    public override string ToString() => nameof(SeedOptions);
+
+    public const string Secao = "Seed";
+    public string? AdminEmail { get; set; }
+    public string? AdminSenha { get; set; }
+    public bool DevData { get; set; }
+    public string? DevSenha { get; set; }
+}
+
 public sealed class PlayoutOptions
 {
     // Nunca imprimir segredos (a máscara do Serilog só vale para {@Obj}).
@@ -84,4 +106,37 @@ public sealed class PlayoutOptionsValidator : IValidateOptions<PlayoutOptions>
     // `openssl rand -hex 32` gera 64 caracteres; 32 caracteres é o piso aceito.
     public ValidateOptionsResult Validate(string? name, PlayoutOptions options)
         => RegraSegredo.Resultado(RegraSegredo.Verificar("Playout:Token", options.Token, 32, base64Url: false));
+}
+
+/// <summary>Redis é opcional em Development (cai para a memória); configurado, a senha segue o fail-fast do S-C02.</summary>
+public sealed class RedisOptionsValidator : IValidateOptions<RedisOptions>
+{
+    public ValidateOptionsResult Validate(string? name, RedisOptions options)
+        => string.IsNullOrWhiteSpace(options.Host)
+            ? ValidateOptionsResult.Success
+            : RegraSegredo.Resultado(RegraSegredo.Verificar("Redis:Password", options.Password, 16, base64Url: false));
+}
+
+/// <summary>Seed é opcional, mas se vier pela metade ou com valor de exemplo o boot é recusado.</summary>
+public sealed class SeedOptionsValidator : IValidateOptions<SeedOptions>
+{
+    public ValidateOptionsResult Validate(string? name, SeedOptions options)
+    {
+        var temEmail = !string.IsNullOrWhiteSpace(options.AdminEmail);
+        var temSenha = !string.IsNullOrWhiteSpace(options.AdminSenha);
+        string? erro = null;
+
+        if (temEmail || temSenha)
+        {
+            erro = !temEmail || options.AdminEmail!.Contains("__GERAR__", StringComparison.Ordinal)
+                    || !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(options.AdminEmail)
+                ? "Seed:AdminEmail está vazio, com valor de exemplo ou não é um e-mail válido."
+                : RegraSegredo.Verificar("Seed:AdminSenha", options.AdminSenha, 12, base64Url: false);
+        }
+
+        if (erro is null && options.DevData)
+            erro = RegraSegredo.Verificar("Seed:DevSenha", options.DevSenha, 12, base64Url: false);
+
+        return RegraSegredo.Resultado(erro);
+    }
 }

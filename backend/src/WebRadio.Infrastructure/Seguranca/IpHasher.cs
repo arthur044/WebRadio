@@ -18,6 +18,9 @@ public sealed class IpHasher(byte[] pepper) : IIpHasher
         return HMACSHA256.HashData(pepper, bytes);
     }
 
+    public string ChaveOpaca(string valor)
+        => Convert.ToHexString(HMACSHA256.HashData(pepper, Encoding.UTF8.GetBytes("chave:" + valor)));
+
     public string Pseudonimo(string valor)
         => Convert.ToHexString(HMACSHA256.HashData(pepper, Encoding.UTF8.GetBytes(valor)))[..8];
 }
