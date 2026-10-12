@@ -209,13 +209,13 @@ public class AuthEndpointsTests
     {
         var antiga = ApiFactory.ChaveValida;
         var f1 = NovaFactory();
-        f1.CriarUsuario("ana@example.com", Role.Locutor);
+        var id = f1.CriarUsuario("ana@example.com", Role.Locutor);
         var token = await TokenDe(Cliente(f1), "ana@example.com"); // emitido com a chave "atual" = antiga
 
         var f2 = NovaFactory();
         f2.Config["Jwt:SigningKey"] = System.Buffers.Text.Base64Url.EncodeToString(Enumerable.Range(0, 48).Select(i => (byte)(i * 5 + 3)).ToArray());
         f2.Config["Jwt:SigningKeyAnterior"] = antiga;
-        f2.CriarUsuario("ana@example.com", Role.Locutor);
+        f2.CriarUsuario("ana@example.com", Role.Locutor, id: id); // o MESMO usuário: a sv do token é conferida no banco
         Assert.Equal(HttpStatusCode.OK, (await Get(Cliente(f2), "/api/v1/teste/qualquer", token)).StatusCode);
 
         var f3 = NovaFactory();

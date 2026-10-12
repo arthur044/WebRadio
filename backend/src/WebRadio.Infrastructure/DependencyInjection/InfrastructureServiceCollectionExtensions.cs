@@ -8,6 +8,7 @@ using StackExchange.Redis;
 using WebRadio.Infrastructure.Armazenamento;
 using WebRadio.Infrastructure.Triagem;
 using WebRadio.Infrastructure.Persistencia;
+using WebRadio.Infrastructure.Persistencia.Outbox;
 using WebRadio.Infrastructure.Seed;
 using WebRadio.Infrastructure.Seguranca;
 
@@ -38,6 +39,12 @@ public static class InfrastructureServiceCollectionExtensions
             }));
 
         services.AddScoped<IRadioDbContext>(sp => sp.GetRequiredService<RadioDbContext>());
+        services.AddScoped<TransacaoComTrava>();
+        services.AddScoped<ITransacaoComTrava>(sp => sp.GetRequiredService<TransacaoComTrava>());
+        services.AddScoped<ISondaDoBanco>(sp => sp.GetRequiredService<TransacaoComTrava>());
+        services.AddScoped<IOutbox, OutboxEf>();
+        services.AddMemoryCache();
+        services.AddScoped<IVersaoDeSeguranca, VersaoDeSeguranca>();
 
         // Segurança. Chaves lidas sob demanda (1º uso), depois do ValidateOnStart da Api, que já recusou segredo
         // vazio/curto/__GERAR__. Decodificação base64url, nunca Convert.FromBase64String (05 §5.1).

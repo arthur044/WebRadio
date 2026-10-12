@@ -4,7 +4,6 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using StackExchange.Redis;
 using WebRadio.Api.Infra;
 using WebRadio.Application.Abstracoes;
-using WebRadio.Infrastructure.Persistencia;
 
 namespace WebRadio.Api.Features.Health;
 
@@ -56,10 +55,10 @@ public sealed class HealthEndpoints : IEndpointModule
     }
 }
 
-public sealed class SqlHealthCheck(RadioDbContext db) : IHealthCheck
+public sealed class SqlHealthCheck(ISondaDoBanco banco) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
-        => await db.Database.CanConnectAsync(cancellationToken)
+        => await banco.ConectaAsync(cancellationToken)
             ? HealthCheckResult.Healthy()
             : new HealthCheckResult(context.Registration.FailureStatus, "SQL Server não responde");
 }

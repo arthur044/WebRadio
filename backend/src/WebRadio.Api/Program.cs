@@ -102,6 +102,7 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
     .Configure<IOptions<JwtOptions>>((o, jwt) =>
     {
         o.MapInboundClaims = false;
+        o.Events = new JwtBearerEvents { OnTokenValidated = VersaoDeSegurancaDoToken.ValidarAsync };
         o.TokenValidationParameters = new TokenValidationParameters
         {
             ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
@@ -120,8 +121,8 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
         };
     });
 builder.Services.AddAuthorizationBuilder()
-    .AddPolicy("PodeModerar", p => p.RequireRole("Locutor", "Admin"))
-    .AddPolicy("SomenteAdmin", p => p.RequireRole("Admin"))
+    .AddPolicy("PodeModerar", p => p.RequireAuthenticatedUser().RequireRole("Locutor", "Admin"))
+    .AddPolicy("SomenteAdmin", p => p.RequireAuthenticatedUser().RequireRole("Admin"))
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 
 // Limite global de 100/min por IP (00-arquitetura.md §164). O IP só serve de chave de partição; nunca é logado.

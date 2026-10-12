@@ -309,7 +309,10 @@ public class HostTests
 
     // ---- JWT (parâmetros do 05 §6) ----
 
-    private static string Token(string chaveBase64Url, string iss = "webradio-api", string aud = "webradio", DateTime? exp = null, string alg = SecurityAlgorithms.HmacSha256)
+    private static readonly Guid UsuarioDoToken = Guid.NewGuid();
+
+    private static string Token(string chaveBase64Url, string iss = "webradio-api", string aud = "webradio", DateTime? exp = null, string alg = SecurityAlgorithms.HmacSha256,
+        object? sv = null, string? sub = null)
     {
         var chave = new SymmetricSecurityKey(System.Buffers.Text.Base64Url.DecodeFromChars(chaveBase64Url));
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
@@ -317,14 +320,16 @@ public class HostTests
             Issuer = iss,
             Audience = aud,
             Expires = exp ?? DateTime.UtcNow.AddMinutes(5),
-            Claims = new Dictionary<string, object> { ["sub"] = "u1", ["role"] = "Locutor" },
+            Claims = new Dictionary<string, object> { ["sub"] = sub ?? UsuarioDoToken.ToString(), ["role"] = "Locutor", ["sv"] = sv ?? 0 },
             SigningCredentials = new SigningCredentials(chave, alg),
         });
     }
 
     private static async Task<HttpStatusCode> ComToken(string token)
     {
-        var c = Cliente(new ApiFactory(), e => e.MapGet("/api/v1/protegido", () => "ok"));
+        var f = new ApiFactory();
+        f.CriarUsuario("dono-do-token@example.com", WebRadio.Domain.Enums.Role.Locutor, id: UsuarioDoToken);
+        var c = Cliente(f, e => e.MapGet("/api/v1/protegido", () => "ok"));
         var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/protegido");
         req.Headers.Authorization = new("Bearer", token);
         return (await c.SendAsync(req)).StatusCode;
@@ -342,6 +347,16 @@ public class HostTests
         Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(Token(ApiFactory.ChaveValida, aud: "outra")));
         Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(Token(ApiFactory.ChaveValida, iss: "outro")));
         Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(Token(ApiFactory.ChaveValida, exp: DateTime.UtcNow.AddMinutes(-5))));
+    }
+
+    [Fact]
+    public async Task Jwt_bem_assinado_mas_com_sv_errada_ausente_ou_de_usuario_inexistente_e_401()
+    {
+        Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(Token(ApiFactory.ChaveValida, sv: 1)));
+        Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(Token(ApiFactory.ChaveValida, sv: "0x0")));
+        Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(Token(ApiFactory.ChaveValida, sv: -1)));
+        Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(Token(ApiFactory.ChaveValida, sub: Guid.NewGuid().ToString())));
+        Assert.Equal(HttpStatusCode.Unauthorized, await ComToken(Token(ApiFactory.ChaveValida, sub: "u1")));
     }
 
     [Fact]
