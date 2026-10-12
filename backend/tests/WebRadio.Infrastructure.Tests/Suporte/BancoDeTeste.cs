@@ -97,6 +97,15 @@ public sealed class BancoDeTeste : IAsyncLifetime
     }
 }
 
+/// <summary>[Theory] que só roda com SQL Server disponível; senão aparece como ignorada.</summary>
+public sealed class SqlTheoryAttribute : TheoryAttribute
+{
+    public SqlTheoryAttribute()
+    {
+        if (!BancoDeTeste.Disponivel) Skip = "SQL Server indisponível (defina WEBRADIO_TEST_SQL ou instale o LocalDB).";
+    }
+}
+
 /// <summary>[Fact] que só roda com SQL Server disponível; senão aparece como ignorado, nunca como verde falso.</summary>
 public sealed class SqlFactAttribute : FactAttribute
 {

@@ -35,6 +35,7 @@ public sealed class RadioHub(IListenerIdentity identidade, ConexoesDoHub conexoe
         }
 
         await base.OnConnectedAsync();
+        conexoes.MarcarPronta(Context.ConnectionId);
     }
 
     public override Task OnDisconnectedAsync(Exception? exception)
@@ -51,12 +52,26 @@ public sealed class RadioHub(IListenerIdentity identidade, ConexoesDoHub conexoe
 public sealed class ConexoesDoHub
 {
     private readonly ConcurrentDictionary<string, (Guid UsuarioId, HubCallerContext Contexto)> _porConexao = new();
+    private readonly ConcurrentDictionary<string, byte> _prontas = new();
 
+    /// <summary>Conexões autenticadas rastreadas (as únicas que podem ser derrubadas por usuário).</summary>
     public int Total => _porConexao.Count;
+
+    /// <summary>
+    /// Conexões (anônimas inclusive) que já terminaram o <c>OnConnectedAsync</c>, ou seja, já estão nos grupos. O handshake
+    /// responde ao cliente ANTES disso: é o número que diz quantas já recebem eventos (diagnóstico e testes).
+    /// </summary>
+    public int Prontas => _prontas.Count;
+
+    public void MarcarPronta(string connectionId) => _prontas[connectionId] = 0;
 
     public void Registrar(Guid usuarioId, HubCallerContext contexto) => _porConexao[contexto.ConnectionId] = (usuarioId, contexto);
 
-    public void Remover(string connectionId) => _porConexao.TryRemove(connectionId, out _);
+    public void Remover(string connectionId)
+    {
+        _porConexao.TryRemove(connectionId, out _);
+        _prontas.TryRemove(connectionId, out _);
+    }
 
     /// <summary>Aborta as conexões locais do usuário e devolve quantas eram. O cliente reconecta e passa pela checagem da <c>sv</c>.</summary>
     public int Derrubar(Guid usuarioId)

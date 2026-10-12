@@ -169,7 +169,7 @@ public class PlayoutEndpointsTests
         var evento = await escopo.ServiceProvider.GetRequiredService<RadioDbContext>().EventosOutbox.SingleAsync();
         Assert.Equal(EventosDoOutbox.TocandoAgora, evento.Tipo);
         var envelope = JsonDocument.Parse(evento.Payload).RootElement;
-        Assert.Equal(0, envelope.GetProperty("grupos").GetArrayLength()); // todos
+        Assert.Equal(JsonValueKind.Null, envelope.GetProperty("grupos").ValueKind); // destino explícito: todos
         Assert.Equal("Garota de Ipanema", envelope.GetProperty("dados").GetProperty("titulo").GetString());
         Assert.Equal("Tom Jobim", envelope.GetProperty("dados").GetProperty("artista").GetString());
         Assert.Equal(pedidoId, envelope.GetProperty("dados").GetProperty("pedidoId").GetGuid());

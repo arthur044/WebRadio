@@ -75,10 +75,24 @@ public class RadioHubTests
             return conexao;
         }
 
+        /// <summary>
+        /// O StartAsync do cliente volta no handshake, ANTES de o servidor terminar o OnConnectedAsync (entrada nos grupos).
+        /// Publicar antes disso perderia o evento: espera o servidor dizer que as conexões estão prontas.
+        /// </summary>
+        public async Task Iniciar(params HubConnection[] conexoes)
+        {
+            var hub = Servicos.GetRequiredService<ConexoesDoHub>();
+            var esperadas = hub.Prontas + conexoes.Length;
+            foreach (var c in conexoes) await c.StartAsync();
+            Assert.True(SpinWait.SpinUntil(() => hub.Prontas >= esperadas, Prazo), $"só {hub.Prontas} de {esperadas} conexões ficaram prontas");
+        }
+
         public async Task Enfileirar(string tipo, object carga, params string[] grupos)
         {
             await using var escopo = Servicos.CreateAsyncScope();
-            escopo.ServiceProvider.GetRequiredService<IOutbox>().Enfileirar(tipo, carga, grupos);
+            var outbox = escopo.ServiceProvider.GetRequiredService<IOutbox>();
+            if (grupos.Length == 0) outbox.EnfileirarParaTodos(tipo, carga);
+            else outbox.EnfileirarParaGrupos(grupos, tipo, carga);
             await escopo.ServiceProvider.GetRequiredService<RadioDbContext>().SaveChangesAsync();
         }
 
@@ -121,7 +135,7 @@ public class RadioHubTests
         await using var cena = Cena.Nova();
         var conexao = cena.Conexao(Listener());
         var escuta = new Escuta(conexao, EventosDoOutbox.TocandoAgora);
-        await conexao.StartAsync();
+        await cena.Iniciar(conexao);
 
         await cena.Enfileirar(EventosDoOutbox.TocandoAgora, new { titulo = "Faixa", artista = "Banda", tipoMidia = TipoMidia.Musica });
         await cena.Enfileirar("Fim", new { });
@@ -151,7 +165,7 @@ public class RadioHubTests
         await using var cena = Cena.Nova(dispatcher: true);
         var conexao = cena.Conexao(Listener());
         var escuta = new Escuta(conexao);
-        await conexao.StartAsync();
+        await cena.Iniciar(conexao);
 
         await cena.Enfileirar("Fim", new { });
 
@@ -203,7 +217,7 @@ public class RadioHubTests
         var tokenLixo = cena.Conexao(Listener(), "isto.nao.e-um-jwt");
         HubConnection[] todas = [locutor, ouvinteLogado, adminRestrito, anonimoDono, anonimoOutro, tokenLixo];
         var escutas = todas.Select(c => new Escuta(c, eventos)).ToArray();
-        foreach (var c in todas) await c.StartAsync();
+        await cena.Iniciar(todas);
 
         var grupoDoDono = cena.Servicos.GetRequiredService<IListenerIdentity>().GrupoListener(meuListener);
         await cena.Enfileirar("PedidoCriado", new { pedidoId = 1 }, GruposDoHub.Locutores);
@@ -233,7 +247,7 @@ public class RadioHubTests
         var anonima = cena.Conexao(Listener());
         var caiu = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         doLocutor.Closed += _ => { caiu.TrySetResult(); return Task.CompletedTask; };
-        foreach (var c in new[] { doLocutor, doAdmin, anonima }) await c.StartAsync();
+        await cena.Iniciar(doLocutor, doAdmin, anonima);
         Assert.Equal(2, cena.Servicos.GetRequiredService<ConexoesDoHub>().Total); // só as autenticadas são rastreadas
 
         var patch = new HttpRequestMessage(HttpMethod.Patch, $"/api/v1/usuarios/{locutorId}") { Content = JsonContent.Create(new { role = "Ouvinte" }) };
@@ -268,7 +282,7 @@ public class RadioHubTests
     {
         await using var cena = Cena.Nova();
         var conexao = cena.Conexao(Listener());
-        await conexao.StartAsync();
+        await cena.Iniciar(conexao);
 
         // Entrar num grupo por conta própria, por exemplo, não existe.
         await Assert.ThrowsAnyAsync<Exception>(() => conexao.InvokeAsync("AddToGroup", GruposDoHub.Locutores));

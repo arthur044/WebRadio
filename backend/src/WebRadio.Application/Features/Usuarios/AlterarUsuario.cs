@@ -53,7 +53,7 @@ public sealed class AlterarUsuarioHandler(
             {
                 // S-M11 / S-M08: papel alterado ou desativação derrubam TODAS as sessões e o hub, na mesma transação.
                 await refresh.RevogarTodasDoUsuarioAsync(usuario.Id, manterFamiliaDoToken: null, ct2);
-                outbox.Enfileirar(EventosDoOutbox.UsuarioSessoesRevogadas, new { usuarioId = usuario.Id });
+                outbox.EnfileirarSessoesRevogadas(usuario.Id);
             }
 
             await db.SaveChangesAsync(ct2);

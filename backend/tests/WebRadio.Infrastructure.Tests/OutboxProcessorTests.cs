@@ -62,10 +62,17 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
     /// <summary>O banco é da classe inteira: cada teste começa sem pendências dos anteriores.</summary>
     private async Task<long[]> EnfileirarAsync(params (string Tipo, object Carga, string[] Grupos)[] eventos)
     {
+        // Atalho dos testes: lista vazia aqui quer dizer "para todos"; o destino real continua explícito no IOutbox.
         await using var db = banco.CriarContexto();
         await db.EventosOutbox.Where(e => e.ProcessadoEmUtc == null).ExecuteUpdateAsync(s => s.SetProperty(e => e.ProcessadoEmUtc, DateTime.UtcNow));
         var outbox = new OutboxEf(db);
-        foreach (var (tipo, carga, grupos) in eventos) outbox.Enfileirar(tipo, carga, grupos);
+        foreach (var (tipo, carga, grupos) in eventos)
+        {
+            if (tipo == EventosDoOutbox.UsuarioSessoesRevogadas) outbox.EnfileirarSessoesRevogadas(JsonSerializer.SerializeToElement(carga).GetProperty("usuarioId").GetGuid());
+            else if (grupos.Length == 0) outbox.EnfileirarParaTodos(tipo, carga);
+            else outbox.EnfileirarParaGrupos(grupos, tipo, carga);
+        }
+
         await db.SaveChangesAsync();
         return await db.EventosOutbox.Where(e => e.ProcessadoEmUtc == null).OrderBy(e => e.Id).Select(e => e.Id).ToArrayAsync();
     }
@@ -164,18 +171,64 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         await using (var db = banco.CriarContexto())
         {
             await db.EventosOutbox.Where(e => e.ProcessadoEmUtc == null).ExecuteUpdateAsync(s => s.SetProperty(e => e.ProcessadoEmUtc, DateTime.UtcNow));
-            db.EventosOutbox.Add(new EventoOutbox("SemDados", """{"grupos":[]}"""));
-            db.EventosOutbox.Add(new EventoOutbox("DadosNaoObjeto", """{"dados":[1,2]}"""));
-            db.EventosOutbox.Add(new EventoOutbox(EventosDoOutbox.UsuarioSessoesRevogadas, """{"dados":{"usuarioId":"nao-e-guid"}}"""));
-            new OutboxEf(db).Enfileirar("Bom", new { n = 1 });
+            db.EventosOutbox.Add(new EventoOutbox("SemDados", """{"grupos":null}"""));
+            db.EventosOutbox.Add(new EventoOutbox("DadosNaoObjeto", """{"grupos":null,"dados":[1,2]}"""));
+            db.EventosOutbox.Add(new EventoOutbox("NaoEObjeto", """[1,2]"""));
+            db.EventosOutbox.Add(new EventoOutbox(EventosDoOutbox.UsuarioSessoesRevogadas, """{"grupos":null,"dados":{"usuarioId":"nao-e-guid"}}"""));
+            new OutboxEf(db).EnfileirarParaTodos("Bom", new { n = 1 });
             await db.SaveChangesAsync();
         }
 
         var notificador = new NotificadorFalso();
 
-        Assert.Equal(new ResultadoDoLote(4, 3), await Novo(notificador).ProcessarLoteAsync(default));
+        Assert.Equal(new ResultadoDoLote(5, 4), await Novo(notificador).ProcessarLoteAsync(default));
         Assert.Equal("Bom", Assert.Single(notificador.Envios).Evento);
         Assert.Empty(notificador.Desconectados);
+    }
+
+    [SqlTheory]
+    [InlineData("""{"dados":{"pedidoId":1}}""", "sem a propriedade grupos")]
+    [InlineData("""{"grupos":[],"dados":{"pedidoId":1}}""", "lista vazia")]
+    [InlineData("""{"grupos":[""],"dados":{"pedidoId":1}}""", "nome em branco")]
+    [InlineData("""{"grupos":["locutores",null],"dados":{"pedidoId":1}}""", "nome nulo")]
+    [InlineData("""{"grupos":"locutores","dados":{"pedidoId":1}}""", "texto em vez de lista")]
+    [InlineData("""{"grupos":[7],"dados":{"pedidoId":1}}""", "numero em vez de nome")]
+    public async Task Destino_ausente_ou_vazio_e_FALHA_com_UltimoErro_e_nunca_vira_broadcast(string payload, string caso)
+    {
+        long id;
+        await using (var db = banco.CriarContexto())
+        {
+            await db.EventosOutbox.Where(e => e.ProcessadoEmUtc == null).ExecuteUpdateAsync(s => s.SetProperty(e => e.ProcessadoEmUtc, DateTime.UtcNow));
+            var evento = new EventoOutbox("PedidoCriado", payload);
+            db.EventosOutbox.Add(evento);
+            await db.SaveChangesAsync();
+            id = evento.Id;
+        }
+
+        var notificador = new NotificadorFalso();
+
+        Assert.Equal(new ResultadoDoLote(1, 1), await Novo(notificador).ProcessarLoteAsync(default));
+
+        Assert.True(notificador.Envios.Count == 0, caso);
+        var salvo = await LerAsync(id);
+        Assert.Null(salvo.ProcessadoEmUtc);
+        Assert.Contains("grupos", salvo.UltimoErro, StringComparison.Ordinal);
+    }
+
+    [SqlFact]
+    public async Task Grupos_null_no_envelope_e_o_unico_jeito_de_publicar_para_todos()
+    {
+        await using (var db = banco.CriarContexto())
+        {
+            await db.EventosOutbox.Where(e => e.ProcessadoEmUtc == null).ExecuteUpdateAsync(s => s.SetProperty(e => e.ProcessadoEmUtc, DateTime.UtcNow));
+            db.EventosOutbox.Add(new EventoOutbox("TocandoAgora", """{"grupos":null,"dados":{"titulo":"Faixa"}}"""));
+            await db.SaveChangesAsync();
+        }
+
+        var notificador = new NotificadorFalso();
+        await Novo(notificador).ProcessarLoteAsync(default);
+
+        Assert.Empty(Assert.Single(notificador.Envios).Grupos); // NotificarTodos
     }
 
     [SqlFact]
@@ -209,6 +262,33 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         Assert.Equal(new ResultadoDoLote(3, 0), await passeLento.WaitAsync(TimeSpan.FromSeconds(30)));
         Assert.Equal(["A", "B", "C"], lenta.Envios.Select(e => e.Evento));
         Assert.Empty(rapida.Envios);
+    }
+
+    [Fact]
+    public void IOutbox_exige_destino_explicito_e_grava_o_envelope_da_spec()
+    {
+        // Nada é gravado: o IOutbox só adiciona ao contexto (quem salva é o handler), então nem precisa de servidor.
+        using var db = new RadioDbContext(new DbContextOptionsBuilder<RadioDbContext>().UseSqlServer("Server=nao-usado").Options);
+        var outbox = new OutboxEf(db);
+        var usuarioId = Guid.NewGuid();
+
+        outbox.EnfileirarParaTodos("TocandoAgora", new { titulo = "Faixa" });
+        outbox.EnfileirarParaGrupos([GruposDoHub.Locutores, "listener:ABC"], "PedidoModerado", new { pedidoId = 1 });
+        outbox.EnfileirarSessoesRevogadas(usuarioId);
+
+        var payloads = db.EventosOutbox.Local.Select(e => e.Payload).ToList();
+        Assert.Equal("""{"grupos":null,"dados":{"titulo":"Faixa"}}""", payloads[0]);
+        Assert.Equal("""{"grupos":["locutores","listener:ABC"],"dados":{"pedidoId":1}}""", payloads[1]);
+        Assert.Equal("""{"grupos":null,"dados":{"usuarioId":"ID"}}""".Replace("ID", usuarioId.ToString(), StringComparison.Ordinal), payloads[2]);
+
+        // Lista vazia ou nome em branco: erro na hora de enfileirar, nunca um broadcast por esquecimento.
+        Assert.Throws<ArgumentException>(() => outbox.EnfileirarParaGrupos([], "PedidoCriado", new { pedidoId = 1 }));
+        Assert.Throws<ArgumentException>(() => outbox.EnfileirarParaGrupos([GruposDoHub.Locutores, " "], "PedidoCriado", new { pedidoId = 1 }));
+        // O tipo interno não pode ser enfileirado com destino de cliente, nem com usuário vazio.
+        Assert.Throws<ArgumentException>(() => outbox.EnfileirarParaTodos(EventosDoOutbox.UsuarioSessoesRevogadas, new { usuarioId }));
+        Assert.Throws<ArgumentException>(() => outbox.EnfileirarParaGrupos([GruposDoHub.Locutores], EventosDoOutbox.UsuarioSessoesRevogadas, new { usuarioId }));
+        Assert.Throws<ArgumentException>(() => outbox.EnfileirarSessoesRevogadas(Guid.Empty));
+        Assert.Equal(3, db.EventosOutbox.Local.Count);
     }
 
     [Theory]

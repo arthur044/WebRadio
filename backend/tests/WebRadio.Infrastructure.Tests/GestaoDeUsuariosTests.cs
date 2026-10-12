@@ -92,7 +92,11 @@ public class GestaoDeUsuariosTests(BancoDeTeste banco) : IClassFixture<BancoDeTe
 
     private sealed class OutboxQueFalha : IOutbox
     {
-        public void Enfileirar(string tipo, object carga, params string[] grupos) => throw new InvalidOperationException("falha simulada depois da revogação");
+        public void EnfileirarParaTodos(string tipo, object carga) => throw new NotSupportedException();
+
+        public void EnfileirarParaGrupos(IReadOnlyCollection<string> grupos, string tipo, object carga) => throw new NotSupportedException();
+
+        public void EnfileirarSessoesRevogadas(Guid usuarioId) => throw new InvalidOperationException("falha simulada depois da revogação");
     }
 
     [SqlFact]

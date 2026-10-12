@@ -63,7 +63,7 @@ public sealed class RegistrarEventoDoPlayoutHandler(ITocandoAgoraStore tocandoAg
 
         // 02 §10: { titulo, artista, tipoMidia, pedidoId? }. O tipo da mídia só é conhecido quando o playout real
         // consultar ArquivoMidia (Épico 4); até lá vai nulo.
-        outbox.Enfileirar(EventosDoOutbox.TocandoAgora, new { titulo, artista, tipoMidia = (string?)null, pedidoId = cmd.PedidoId });
+        outbox.EnfileirarParaTodos(EventosDoOutbox.TocandoAgora, new { titulo, artista, tipoMidia = (string?)null, pedidoId = cmd.PedidoId });
         await db.SaveChangesAsync(ct);
     }
 

@@ -25,10 +25,23 @@ public static class Travas
 /// Outbox transacional (D22): o evento entra no mesmo <c>SaveChanges</c> da mudança de estado e o OutboxDispatcher o
 /// entrega depois. Handlers nunca chamam o SignalR direto.
 /// </summary>
+/// <remarks>
+/// O destino é sempre EXPLÍCITO (00 §fluxos, envelope <c>{ grupos, dados }</c>): não existe "sem grupo = todos". Esquecer o
+/// grupo de um evento com dado pessoal (ex.: <c>PedidoCriado</c>) não pode virar broadcast.
+/// </remarks>
 public interface IOutbox
 {
-    /// <param name="grupos">Destino no hub (02 §10). Vazio = todos os clientes conectados.</param>
-    void Enfileirar(string tipo, object carga, params string[] grupos);
+    /// <summary>Evento público: vai para todos os clientes do hub (<c>"grupos": null</c> no envelope).</summary>
+    void EnfileirarParaTodos(string tipo, object carga);
+
+    /// <summary>Só para os grupos informados (02 §10). Lista vazia ou com nome em branco lança.</summary>
+    void EnfileirarParaGrupos(IReadOnlyCollection<string> grupos, string tipo, object carga);
+
+    /// <summary>
+    /// Evento interno <see cref="EventosDoOutbox.UsuarioSessoesRevogadas"/>: não vai para cliente nenhum; o dispatcher
+    /// derruba as conexões do hub do usuário (papel alterado, desativação, troca de senha; S-M08, S-M11).
+    /// </summary>
+    void EnfileirarSessoesRevogadas(Guid usuarioId);
 }
 
 public static class EventosDoOutbox

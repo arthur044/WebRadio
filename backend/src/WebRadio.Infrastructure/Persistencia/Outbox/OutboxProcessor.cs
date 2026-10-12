@@ -18,8 +18,6 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
 {
     public const int TamanhoDoLote = 50;
 
-    private sealed record Envelope(string[]? Grupos, JsonElement Dados);
-
     public async Task<ResultadoDoLote> ProcessarLoteAsync(CancellationToken ct)
     {
         // Só os testes HTTP usam o provedor em memória (sem transação nem dica de trava); lá há um único consumidor.
@@ -71,20 +69,45 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
 
     private Task EntregarAsync(EventoOutbox evento, CancellationToken ct)
     {
-        var envelope = JsonSerializer.Deserialize<Envelope>(evento.Payload, OutboxEf.Json)
-            ?? throw new JsonException("Payload vazio.");
+        using var documento = JsonDocument.Parse(evento.Payload);
+        var envelope = documento.RootElement;
+        if (envelope.ValueKind != JsonValueKind.Object || !envelope.TryGetProperty("dados", out var dados) || dados.ValueKind != JsonValueKind.Object)
+            throw new JsonException("Envelope sem um objeto em 'dados'.");
 
         // Evento interno: não vai para cliente nenhum, derruba as conexões do usuário (S-M08).
         if (evento.Tipo == EventosDoOutbox.UsuarioSessoesRevogadas)
-            return notifier.DesconectarUsuarioAsync(envelope.Dados.GetProperty("usuarioId").GetGuid(), ct);
+        {
+            if (!dados.TryGetProperty("usuarioId", out var id) || !id.TryGetGuid(out var usuarioId))
+                throw new JsonException("UsuarioSessoesRevogadas sem 'usuarioId' válido.");
+            return notifier.DesconectarUsuarioAsync(usuarioId, ct);
+        }
+
+        var grupos = Destino(envelope);
 
         // 02 §10: todo evento sai com eventoId e ocorridoEmUtc; o id do outbox é estável entre reenvios.
-        var carga = JsonObject.Create(envelope.Dados) ?? throw new JsonException("O evento precisa de um objeto em 'dados'.");
+        var carga = JsonObject.Create(dados.Clone())!;
         carga["eventoId"] = evento.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
         carga["ocorridoEmUtc"] = DateTime.SpecifyKind(evento.CriadoEmUtc, DateTimeKind.Utc);
 
-        return envelope.Grupos is { Length: > 0 } grupos
-            ? notifier.NotificarGruposAsync(grupos, evento.Tipo, carga, ct)
-            : notifier.NotificarTodosAsync(evento.Tipo, carga, ct);
+        return grupos is null
+            ? notifier.NotificarTodosAsync(evento.Tipo, carga, ct)
+            : notifier.NotificarGruposAsync(grupos, evento.Tipo, carga, ct);
+    }
+
+    /// <summary>
+    /// Destino explícito (00 §fluxos): <c>"grupos": null</c> = todos (devolve null); lista preenchida = esses grupos.
+    /// Propriedade ausente, lista vazia ou nome em branco é ERRO: na dúvida o evento falha, nunca vira broadcast.
+    /// </summary>
+    private static string[]? Destino(JsonElement envelope)
+    {
+        if (!envelope.TryGetProperty("grupos", out var grupos))
+            throw new JsonException("Envelope sem 'grupos' (use null para todos os clientes).");
+        if (grupos.ValueKind == JsonValueKind.Null) return null;
+        if (grupos.ValueKind != JsonValueKind.Array || grupos.GetArrayLength() == 0)
+            throw new JsonException("'grupos' precisa ser null (todos) ou uma lista com ao menos um grupo.");
+
+        var nomes = grupos.EnumerateArray().Select(g => g.ValueKind == JsonValueKind.String ? g.GetString() : null).ToArray();
+        if (nomes.Any(string.IsNullOrWhiteSpace)) throw new JsonException("'grupos' tem um nome de grupo inválido.");
+        return nomes!;
     }
 }
