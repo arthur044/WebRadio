@@ -9,6 +9,7 @@ using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Formatting.Compact;
 using WebRadio.Api.Features.Auth;
+using WebRadio.Api.Features.Health;
 using WebRadio.Api.Infra;
 using WebRadio.Application.Abstracoes;
 using WebRadio.Infrastructure.Seguranca;
@@ -54,6 +55,7 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<TratadorDeExcecoes>();
 builder.Services.AddEndpointModules();
+HealthEndpoints.AddHealthChecksDaApi(builder.Services, builder.Configuration);
 builder.Services.AddOpenApi();
 
 // Produção exige configuração explícita de rede e hosts (sem isso o stack subiria "aberto" ou quebrado):
