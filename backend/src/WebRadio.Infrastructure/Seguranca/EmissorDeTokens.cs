@@ -7,12 +7,15 @@ using WebRadio.Domain.Usuarios;
 
 namespace WebRadio.Infrastructure.Seguranca;
 
-/// <summary>Claims do JWT (02 §2): sub, name, role, jti, iat, exp; iss = webradio-api, aud = webradio.</summary>
+/// <summary>Claims do JWT (02 §2): sub, name, role, sv, jti, iat, exp; iss = webradio-api, aud = webradio.</summary>
 public sealed class EmissorDeTokens(byte[] chave, IClock clock) : IEmissorDeTokens
 {
     public const string Issuer = "webradio-api";
     public const string Audience = "webradio";
     public const string ClaimDeveTrocarSenha = "deve_trocar_senha";
+
+    /// <summary>Versão de segurança do usuário no momento da emissão (00 §segurança): conferida a cada requisição.</summary>
+    public const string ClaimVersaoSeguranca = "sv";
     public static readonly TimeSpan DuracaoDoAccess = TimeSpan.FromMinutes(15);
 
     /// <summary>
@@ -34,6 +37,7 @@ public sealed class EmissorDeTokens(byte[] chave, IClock clock) : IEmissorDeToke
             ["sub"] = usuario.Id.ToString(),
             ["name"] = usuario.Nome,
             ["role"] = usuario.Role.ToString(),
+            [ClaimVersaoSeguranca] = usuario.VersaoSeguranca,
             ["jti"] = Guid.NewGuid().ToString("N"),
         };
         // Só presente quando verdadeiro: o token restrito só abre trocar-senha e /auth/me.

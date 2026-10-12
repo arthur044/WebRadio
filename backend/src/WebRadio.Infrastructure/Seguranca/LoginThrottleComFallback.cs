@@ -24,6 +24,16 @@ public sealed class LoginThrottleComFallback(ILoginThrottle redis, ILoginThrottl
     public Task LimparAsync(string emailNormalizado, byte[] ipHash, CancellationToken ct) =>
         Executar(async t => { await t.LimparAsync(emailNormalizado, ipHash, ct); return 0; });
 
+    /// <summary>
+    /// Desbloqueia nos DOIS: a memória pode ter falhas contadas durante uma queda do Redis, e o Admin espera que a conta
+    /// fique livre de qualquer forma. Falha do Redis aqui propaga (o Admin vê o erro e repete), sem abrir o disjuntor.
+    /// </summary>
+    public async Task DesbloquearContaAsync(string emailNormalizado, CancellationToken ct)
+    {
+        await memoria.DesbloquearContaAsync(emailNormalizado, ct);
+        await redis.DesbloquearContaAsync(emailNormalizado, ct);
+    }
+
     private async Task<T> Executar<T>(Func<ILoginThrottle, Task<T>> operacao)
     {
         if (!RedisEmUso) return await operacao(memoria);
