@@ -26,7 +26,7 @@ public sealed class SignalRRealtimeNotifier(IHubContext<RadioHub> hub, ConexoesD
         // Com Redis (várias réplicas possíveis), as outras instâncias ficam sabendo pelo canal. Se a publicação falhar, a
         // exceção sobe e o outbox tenta de novo: a ordem de derrubar não se perde.
         if (servicos.GetService<IConnectionMultiplexer>() is { } redis)
-            await redis.GetSubscriber().PublishAsync(CanalDeDesconexao, usuarioId.ToString("N"));
+            await redis.GetSubscriber().PublishAsync(CanalDeDesconexao, usuarioId.ToString("N")).WaitAsync(ct);
     }
 }
 

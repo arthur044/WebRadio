@@ -18,6 +18,12 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
 {
     public const int TamanhoDoLote = 50;
 
+    /// <summary>
+    /// Teto de cada entrega (SignalR/Redis). Ela roda DENTRO da transação, com as linhas do lote travadas e uma conexão do
+    /// pool ocupada: uma chamada pendurada não pode segurar isso sem limite. Estourou, o evento conta uma falha e o lote segue.
+    /// </summary>
+    public TimeSpan TempoMaximoPorEvento { get; init; } = TimeSpan.FromSeconds(5);
+
     public async Task<ResultadoDoLote> ProcessarLoteAsync(CancellationToken ct)
     {
         // Só os testes HTTP usam o provedor em memória (sem transação nem dica de trava); lá há um único consumidor.
@@ -48,16 +54,22 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
         var falhas = 0;
         foreach (var evento in lote)
         {
+            using var limite = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            limite.CancelAfter(TempoMaximoPorEvento);
             try
             {
-                await EntregarAsync(evento, ct);
+                // WaitAsync garante o teto mesmo que o destino ignore o token (o publish do Redis não recebe um).
+                await EntregarAsync(evento, limite.Token).WaitAsync(limite.Token);
                 evento.MarcarProcessado(clock.UtcNow);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 // Um evento ruim não segura os outros do lote; depois de 10 tentativas ele fica parado para análise.
+                // Cancelamento com o `ct` de fora intacto é o teto por evento, não o desligamento do host.
                 falhas++;
-                evento.RegistrarFalha($"{ex.GetType().Name}: {ex.Message}");
+                evento.RegistrarFalha(ex is OperationCanceledException
+                    ? $"Tempo esgotado: a entrega passou de {TempoMaximoPorEvento.TotalSeconds:0.###} s."
+                    : $"{ex.GetType().Name}: {ex.Message}");
                 logger.LogWarning(ex, "OUTBOX_FALHA: evento {EventoId} ({Tipo}), tentativa {Tentativa} de {Maximo}",
                     evento.Id, evento.Tipo, evento.Tentativas, EventoOutbox.MaximoDeTentativas);
             }

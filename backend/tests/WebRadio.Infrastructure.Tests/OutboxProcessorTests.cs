@@ -27,6 +27,9 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         /// <summary>Evento cujo envio falha sempre (simula o backplane fora só para ele).</summary>
         public string? EventoQueFalha { get; set; }
 
+        /// <summary>Evento cujo envio nunca termina e ignora o cancelamento (destino pendurado).</summary>
+        public string? EventoQuePendura { get; set; }
+
         /// <summary>Quando definido, o primeiro envio avisa <see cref="Entrou"/> e espera esta tarefa antes de concluir.</summary>
         public TaskCompletionSource? Segurar { get; set; }
         public TaskCompletionSource Entrou { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -44,6 +47,7 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         private async Task Registrar(string evento, IReadOnlyList<string> grupos, object? carga)
         {
             if (evento == EventoQueFalha) throw new InvalidOperationException("backplane fora do ar (simulado)");
+            if (evento == EventoQuePendura) await new TaskCompletionSource().Task;
             if (Segurar is { } segurar)
             {
                 Entrou.TrySetResult();
@@ -56,8 +60,11 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
 
     private readonly RelogioFalso _relogio = new(new DateTime(2026, 10, 12, 15, 0, 0, DateTimeKind.Utc));
 
-    private OutboxProcessor Novo(NotificadorFalso notificador) =>
-        new(banco.CriarContexto(), notificador, _relogio, NullLogger<OutboxProcessor>.Instance);
+    private OutboxProcessor Novo(NotificadorFalso notificador, TimeSpan? tempoMaximoPorEvento = null) =>
+        new(banco.CriarContexto(), notificador, _relogio, NullLogger<OutboxProcessor>.Instance)
+        {
+            TempoMaximoPorEvento = tempoMaximoPorEvento ?? TimeSpan.FromSeconds(30),
+        };
 
     /// <summary>O banco é da classe inteira: cada teste começa sem pendências dos anteriores.</summary>
     private async Task<long[]> EnfileirarAsync(params (string Tipo, object Carga, string[] Grupos)[] eventos)
@@ -230,6 +237,44 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
 
         Assert.Empty(Assert.Single(notificador.Envios).Grupos); // NotificarTodos
     }
+
+    [SqlFact]
+    public async Task Entrega_pendurada_estoura_o_teto_por_evento_vira_falha_e_nao_segura_o_lote_nem_a_transacao()
+    {
+        var ids = await EnfileirarAsync(("Pendurado", new { n = 1 }, []), ("Bom", new { n = 2 }, []));
+        var notificador = new NotificadorFalso { EventoQuePendura = "Pendurado" };
+        var relogio = System.Diagnostics.Stopwatch.StartNew();
+
+        var resultado = await Novo(notificador, TimeSpan.FromMilliseconds(300)).ProcessarLoteAsync(default).WaitAsync(TimeSpan.FromSeconds(20));
+
+        Assert.Equal(new ResultadoDoLote(2, 1), resultado);
+        Assert.True(relogio.Elapsed < TimeSpan.FromSeconds(10), $"o passe levou {relogio.Elapsed}");
+        Assert.Equal("Bom", Assert.Single(notificador.Envios).Evento);
+        var pendurado = await LerAsync(ids[0]);
+        Assert.Null(pendurado.ProcessadoEmUtc);
+        Assert.Equal(1, pendurado.Tentativas);
+        Assert.StartsWith("Tempo esgotado", pendurado.UltimoErro, StringComparison.Ordinal);
+        // A transação terminou (as travas de linha caíram): outro passe consegue ler o evento de novo.
+        Assert.Equal(1, (await Novo(new NotificadorFalso()).ProcessarLoteAsync(default)).Lidos);
+    }
+
+    [SqlFact]
+    public async Task Desligamento_do_host_no_meio_da_entrega_cancela_o_passe_sem_contar_falha()
+    {
+        var ids = await EnfileirarAsync(("Pendurado", new { n = 1 }, []));
+        var notificador = new NotificadorFalso { EventoQuePendura = "Pendurado" };
+        using var desligando = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Novo(notificador).ProcessarLoteAsync(desligando.Token));
+
+        var evento = await LerAsync(ids[0]);
+        Assert.Equal(0, evento.Tentativas); // rollback: não foi culpa do evento
+        Assert.Null(evento.ProcessadoEmUtc);
+    }
+
+    [Fact]
+    public void O_teto_padrao_por_evento_e_de_5_segundos()
+        => Assert.Equal(TimeSpan.FromSeconds(5), new OutboxProcessor(null!, null!, null!, null!).TempoMaximoPorEvento);
 
     [SqlFact]
     public async Task Lote_tem_no_maximo_50_e_o_passe_seguinte_pega_o_resto()
