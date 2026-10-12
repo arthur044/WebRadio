@@ -48,4 +48,16 @@ public class NormalizacaoTests
         Assert.Equal(a.Pseudonimo("X@Y.COM"), a.Pseudonimo("X@Y.COM"));
         Assert.NotEqual(a.Pseudonimo("X@Y.COM"), b.Pseudonimo("X@Y.COM"));
     }
+
+    [Fact]
+    public void ChaveOpaca_e_o_HMAC_inteiro_estavel_dependente_do_pepper_e_distinto_do_pseudonimo()
+    {
+        var a = new IpHasher(new byte[32]);
+        var b = new IpHasher(Enumerable.Repeat((byte)1, 32).ToArray());
+
+        Assert.Equal(64, a.ChaveOpaca("X@Y.COM").Length);
+        Assert.Equal(a.ChaveOpaca("X@Y.COM"), a.ChaveOpaca("X@Y.COM"));
+        Assert.NotEqual(a.ChaveOpaca("X@Y.COM"), b.ChaveOpaca("X@Y.COM"));
+        Assert.NotEqual(a.Pseudonimo("X@Y.COM"), a.ChaveOpaca("X@Y.COM")[..8]); // domínios separados: o log não revela a chave
+    }
 }

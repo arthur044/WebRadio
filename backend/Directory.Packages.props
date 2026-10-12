@@ -33,6 +33,8 @@
   <!-- Worker (E1-F11): host generico fora do ciclo de vida da Api -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageVersion Include="StackExchange.Redis" Version="2.8.16" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
   </ItemGroup>
 
   <!-- Infrastructure/EF (E1-F04). IRadioDbContext (Application) usa DbSet&lt;T&gt; da mesma versão. -->

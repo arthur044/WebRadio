@@ -54,7 +54,6 @@ public sealed class EmissorDeTokens(byte[] chave, IClock clock) : IEmissorDeToke
 
     public RefreshOpaco NovoRefresh()
     {
-        var bytes = RandomNumberGenerator.GetBytes(32);
-        return new RefreshOpaco(Base64Url.EncodeToString(bytes), SHA256.HashData(bytes));
+        return RefreshOpaco.De(RandomNumberGenerator.GetBytes(RefreshOpaco.TamanhoEmBytes));
     }
 }

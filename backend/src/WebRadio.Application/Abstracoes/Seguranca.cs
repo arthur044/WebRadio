@@ -1,4 +1,6 @@
+using System.Buffers.Text;
 using System.Net;
+using System.Security.Cryptography;
 using WebRadio.Domain.Usuarios;
 
 namespace WebRadio.Application.Abstracoes;
@@ -37,7 +39,19 @@ public sealed record AccessToken(string Token, DateTime ExpiraEmUtc)
 /// <summary>Valor opaco do refresh (vai no cookie) e o SHA-256 dele (o que fica no banco).</summary>
 public sealed record RefreshOpaco(string Token, byte[] Hash)
 {
+    public const int TamanhoEmBytes = 32;
+
     public override string ToString() => nameof(RefreshOpaco);
+
+    public static RefreshOpaco De(ReadOnlySpan<byte> bytes) => new(Base64Url.EncodeToString(bytes), SHA256.HashData(bytes));
+
+    /// <summary>SHA-256 do valor do cookie, ou null se não tem o formato de um refresh (nem chega ao banco).</summary>
+    public static byte[]? HashDe(string? token)
+    {
+        if (token is null || token.Length != Base64Url.GetEncodedLength(TamanhoEmBytes) || !Base64Url.IsValid(token))
+            return null;
+        return SHA256.HashData(Base64Url.DecodeFromChars(token));
+    }
 }
 
 public interface IEmissorDeTokens
@@ -61,6 +75,9 @@ public interface IIpHasher
 
     /// <summary>Identificador curto e estável de um valor sensível para log (HMAC com o pepper, 8 hex), sem expô-lo.</summary>
     string Pseudonimo(string valor);
+
+    /// <summary>HMAC completo (hex, 64 caracteres) de um valor sensível: para chaves de armazenamento, onde 32 bits colidiriam.</summary>
+    string ChaveOpaca(string valor);
 }
 
 public sealed record AvaliacaoDeLogin(bool Bloqueado, TimeSpan Atraso);
