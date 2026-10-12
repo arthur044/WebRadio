@@ -34,6 +34,7 @@ public sealed class TrocarSenhaHandler(
     IRefreshTokenService refresh,
     ILoginThrottle throttle,
     IVersaoDeSeguranca versaoDeSeguranca,
+    IOutbox outbox,
     IClock clock) : IRequestHandler<TrocarSenhaCommand>
 {
     public async Task Handle(TrocarSenhaCommand cmd, CancellationToken ct)
@@ -62,6 +63,10 @@ public sealed class TrocarSenhaHandler(
         await refresh.RevogarTodasDoUsuarioAsync(usuario.Id, cmd.TokenRefreshAtual, ct);
 
         usuario.TrocarSenha(hasher.Hash(cmd.NovaSenha), clock.UtcNow);
+        // S-M08 / S-M11: a sv só é conferida ao conectar. Um WebSocket já aberto com o token antigo (inclusive roubado)
+        // continuaria recebendo os eventos de `locutores` até o exp; o dispatcher derruba as conexões do usuário. Vai no
+        // MESMO SaveChanges da senha nova: ou as duas coisas, ou nenhuma.
+        outbox.EnfileirarSessoesRevogadas(usuario.Id);
         await db.SaveChangesAsync(ct);
 
         // A troca incrementa a versão de segurança: o access token em uso (e qualquer cópia roubada) para de valer agora

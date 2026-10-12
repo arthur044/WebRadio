@@ -7,6 +7,7 @@ using WebRadio.Application.Features.Usuarios;
 using WebRadio.Domain.Enums;
 using WebRadio.Domain.Erros;
 using WebRadio.Infrastructure.Persistencia;
+using WebRadio.Infrastructure.Persistencia.Outbox;
 using WebRadio.Infrastructure.Seguranca;
 using WebRadio.Infrastructure.Tests.Suporte;
 using Xunit;
@@ -152,6 +153,55 @@ public class GestaoDeUsuariosTests(BancoDeTeste banco) : IClassFixture<BancoDeTe
         await c.NovoTrocarSenha().Handle(new TrocarSenhaCommand(usuario.Id, Cenario.Senha, "outra-senha-bem-longa-456", null, Cenario.IpA), default);
 
         Assert.Equal(1, await c.NovaVersaoDeSeguranca().AtualAsync(usuario.Id, default));
+    }
+
+    [SqlFact]
+    public async Task Trocar_a_senha_enfileira_a_queda_do_hub_junto_com_a_senha_nova_e_senha_errada_nao_enfileira_nada()
+    {
+        var c = new Cenario(banco);
+        var usuario = await c.CriarUsuarioAsync(Cenario.Email());
+
+        await Assert.ThrowsAsync<FluentValidation.ValidationException>(() =>
+            c.NovoTrocarSenha().Handle(new TrocarSenhaCommand(usuario.Id, "senha-errada-000", "outra-senha-bem-longa-456", null, Cenario.IpA), default));
+        Assert.Equal(0, await OutboxDeAsync(c, usuario.Id));
+
+        await c.NovoTrocarSenha().Handle(new TrocarSenhaCommand(usuario.Id, Cenario.Senha, "outra-senha-bem-longa-456", null, Cenario.IpA), default);
+
+        // Uma linha de UsuarioSessoesRevogadas para este usuário, pendente para o dispatcher.
+        Assert.Equal(1, await OutboxDeAsync(c, usuario.Id));
+    }
+
+    [SqlFact]
+    public async Task Se_gravar_a_senha_nova_falhar_o_evento_de_queda_do_hub_tambem_nao_existe()
+    {
+        var c = new Cenario(banco);
+        var usuario = await c.CriarUsuarioAsync(Cenario.Email());
+        var db = c.NovoDb();
+
+        // Outra sessão altera a linha depois de o handler tê-la lido: o SaveChanges perde no RowVersion.
+        var handler = new TrocarSenhaHandler(db, new SenhaHasherQueAlteraALinha(c, usuario.Id), c.NovoRefresh(db), c.ThrottleReal(),
+            c.NovaVersaoDeSeguranca(db), new OutboxEf(db), c.Relogio);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() =>
+            handler.Handle(new TrocarSenhaCommand(usuario.Id, Cenario.Senha, "outra-senha-bem-longa-456", null, Cenario.IpA), default));
+
+        Assert.Equal(0, await OutboxDeAsync(c, usuario.Id));
+        await using var conferencia = c.NovoDb();
+        Assert.Equal(0, (await conferencia.Usuarios.AsNoTracking().SingleAsync(u => u.Id == usuario.Id)).VersaoSeguranca);
+    }
+
+    /// <summary>Hasher real que, ao gerar o hash da senha NOVA, faz outra sessão tocar na linha do usuário (muda o RowVersion).</summary>
+    private sealed class SenhaHasherQueAlteraALinha(Cenario c, Guid usuarioId) : ISenhaHasher
+    {
+        public string Hash(string senha)
+        {
+            using var outra = c.NovoDb();
+            outra.Usuarios.Where(u => u.Id == usuarioId).ExecuteUpdate(s => s.SetProperty(u => u.Nome, "Alterado por outra sessão"));
+            return c.Hasher.Hash(senha);
+        }
+
+        public ResultadoSenha Verificar(string hash, string senha) => c.Hasher.Verificar(hash, senha);
+
+        public void VerificarFicticio(string senha) => c.Hasher.VerificarFicticio(senha);
     }
 
     // ---- cache da versão de segurança ----

@@ -266,6 +266,37 @@ public class RadioHubTests
     }
 
     [Fact]
+    public async Task Trocar_a_senha_derruba_as_conexoes_do_hub_abertas_com_o_token_antigo()
+    {
+        await using var cena = Cena.Nova();
+        cena.F.CriarUsuario("locutor@example.com", Role.Locutor);
+        cena.F.CriarUsuario("outro@example.com", Role.Locutor);
+        var token = await cena.TokenDe("locutor@example.com");
+
+        // Duas abas (ou a aba do dono e a de quem roubou o token) e um colega que não tem nada com isso.
+        var aba1 = cena.Conexao(Listener(), token);
+        var aba2 = cena.Conexao(Listener(), token);
+        var doColega = cena.Conexao(Listener(), await cena.TokenDe("outro@example.com"));
+        var cairam = new[] { aba1, aba2 }.Select(c =>
+        {
+            var caiu = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            c.Closed += _ => { caiu.TrySetResult(); return Task.CompletedTask; };
+            return caiu.Task;
+        }).ToArray();
+        await cena.Iniciar(aba1, aba2, doColega);
+
+        var troca = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/trocar-senha") { Content = JsonContent.Create(new { senhaAtual = Senha, novaSenha = "outra-senha-bem-longa-456" }) };
+        troca.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        Assert.Equal(HttpStatusCode.NoContent, (await cena.Http.SendAsync(troca)).StatusCode);
+
+        Assert.Equal(new ResultadoDoLote(1, 0), await cena.PasseDoOutbox());
+
+        await Task.WhenAll(cairam).WaitAsync(Prazo);
+        Assert.Equal(HubConnectionState.Connected, doColega.State);
+        Assert.Equal(1, cena.Servicos.GetRequiredService<ConexoesDoHub>().Total);
+    }
+
+    [Fact]
     public async Task Token_na_query_so_vale_no_hub_nunca_na_REST()
     {
         await using var cena = Cena.Nova();
