@@ -54,7 +54,10 @@ public sealed class BancoDeTeste : IAsyncLifetime
         var candidatos = new[]
         {
             Environment.GetEnvironmentVariable("WEBRADIO_TEST_SQL"),
-            "Server=(localdb)\\MSSQLLocalDB;Integrated Security=true;Initial Catalog=master;Connect Timeout=15;TrustServerCertificate=true",
+            // LocalDB só existe no Windows: no runner Linux o SqlClient lança PlatformNotSupportedException (não SqlException).
+            OperatingSystem.IsWindows()
+                ? "Server=(localdb)\\MSSQLLocalDB;Integrated Security=true;Initial Catalog=master;Connect Timeout=15;TrustServerCertificate=true"
+                : null,
         };
 
         foreach (var candidato in candidatos.Where(c => !string.IsNullOrWhiteSpace(c)))
@@ -65,8 +68,9 @@ public sealed class BancoDeTeste : IAsyncLifetime
                 conexao.Open();
                 return candidato;
             }
-            catch (SqlException)
+            catch (Exception e) when (e is SqlException or PlatformNotSupportedException or InvalidOperationException)
             {
+                // Sem servidor alcançável: os [SqlFact] ficam ignorados; a descoberta dos testes nunca pode estourar.
             }
         }
 
