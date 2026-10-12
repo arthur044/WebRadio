@@ -63,9 +63,7 @@ src/
     ├── fonts/             # Web fonts customizadas
     └── images/            # Logos, ícones
 
-tests/
-├── unit/                  # Vitest (unitários)
-└── e2e/                   # Playwright (e2e)
+e2e/                       # Playwright (E2E)
 ```
 
 ## Desenvolvimento local
