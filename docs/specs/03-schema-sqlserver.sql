@@ -81,6 +81,8 @@ CREATE TABLE seg.Usuario (
     -- BloqueadoAteUtc saem do banco — bloqueio de login passa a ser por (conta, IpHash) no Redis.
     -- [Atlas/v1.1] S-B07: força troca de senha (senha provisória / reset administrativo).
     DeveTrocarSenha   bit              NOT NULL CONSTRAINT DF_Usuario_DeveTrocarSenha DEFAULT (0),
+    -- [Atlas/v1.2] sv: incrementa ao desativar/rebaixar/trocar senha; invalida access tokens antigos.
+    VersaoSeguranca   int              NOT NULL CONSTRAINT DF_Usuario_VersaoSeguranca DEFAULT (0),
     CriadoEmUtc       datetime2(3)     NOT NULL CONSTRAINT DF_Usuario_CriadoEmUtc DEFAULT SYSUTCDATETIME(),
     AtualizadoEmUtc   datetime2(3)     NOT NULL CONSTRAINT DF_Usuario_AtualizadoEmUtc DEFAULT SYSUTCDATETIME(),
     RowVersion        rowversion       NOT NULL,
