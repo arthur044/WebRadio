@@ -29,7 +29,7 @@ public class GestaoDeUsuariosTests(BancoDeTeste banco) : IClassFixture<BancoDeTe
     {
         await using var db = c.NovoDb();
         var eventos = await db.EventosOutbox.AsNoTracking().Where(e => e.Tipo == EventosDoOutbox.UsuarioSessoesRevogadas).ToListAsync();
-        return eventos.Count(e => JsonDocument.Parse(e.Payload).RootElement.GetProperty("usuarioId").GetGuid() == usuarioId);
+        return eventos.Count(e => JsonDocument.Parse(e.Payload).RootElement.GetProperty("dados").GetProperty("usuarioId").GetGuid() == usuarioId);
     }
 
     [SqlFact]
@@ -92,7 +92,7 @@ public class GestaoDeUsuariosTests(BancoDeTeste banco) : IClassFixture<BancoDeTe
 
     private sealed class OutboxQueFalha : IOutbox
     {
-        public void Enfileirar(string tipo, object carga) => throw new InvalidOperationException("falha simulada depois da revogação");
+        public void Enfileirar(string tipo, object carga, params string[] grupos) => throw new InvalidOperationException("falha simulada depois da revogação");
     }
 
     [SqlFact]

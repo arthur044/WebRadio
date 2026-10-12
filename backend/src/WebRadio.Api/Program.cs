@@ -10,6 +10,7 @@ using Serilog;
 using Serilog.Formatting.Compact;
 using WebRadio.Api.Features.Auth;
 using WebRadio.Api.Features.Health;
+using WebRadio.Api.Features.Realtime;
 using WebRadio.Api.Infra;
 using WebRadio.Application.Abstracoes;
 using WebRadio.Infrastructure.Seguranca;
@@ -56,6 +57,7 @@ builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<TratadorDeExcecoes>();
 builder.Services.AddEndpointModules();
 HealthEndpoints.AddHealthChecksDaApi(builder.Services, builder.Configuration);
+RealtimeEndpoints.AddRealtime(builder.Services, builder.Configuration);
 builder.Services.AddOpenApi();
 
 // Produção exige configuração explícita de rede e hosts (sem isso o stack subiria "aberto" ou quebrado):
@@ -102,7 +104,19 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
     .Configure<IOptions<JwtOptions>>((o, jwt) =>
     {
         o.MapInboundClaims = false;
-        o.Events = new JwtBearerEvents { OnTokenValidated = VersaoDeSegurancaDoToken.ValidarAsync };
+        o.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = VersaoDeSegurancaDoToken.ValidarAsync,
+            // O WebSocket do navegador não manda cabeçalho Authorization: no hub (e só nele) o token vem na query, que
+            // nunca vai para o log (S-M09).
+            OnMessageReceived = ctx =>
+            {
+                if (ctx.HttpContext.Request.Path.StartsWithSegments(RadioHub.Rota)
+                    && ctx.Request.Query.TryGetValue("access_token", out var token) && !string.IsNullOrEmpty(token))
+                    ctx.Token = token;
+                return Task.CompletedTask;
+            },
+        };
         o.TokenValidationParameters = new TokenValidationParameters
         {
             ValidAlgorithms = [SecurityAlgorithms.HmacSha256],

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using WebRadio.Application.Abstracoes;
 
 namespace WebRadio.Infrastructure.Persistencia.Outbox;
@@ -9,12 +10,14 @@ namespace WebRadio.Infrastructure.Persistencia.Outbox;
 /// </summary>
 public sealed class OutboxEf(RadioDbContext db) : IOutbox
 {
-    /// <summary>O mesmo formato da API (camelCase): o payload vai como está para os clientes do hub.</summary>
-    public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    /// <summary>O mesmo formato da API (camelCase, enum como string): o payload vai como está para os clientes do hub.</summary>
+    public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
 
-    public void Enfileirar(string tipo, object carga)
+    public void Enfileirar(string tipo, object carga, params string[] grupos)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tipo);
-        db.EventosOutbox.Add(new EventoOutbox(tipo, JsonSerializer.Serialize(carga, Json)));
+        ArgumentNullException.ThrowIfNull(carga);
+        // O destino viaja junto com os dados: o OutboxProcessor não precisa conhecer cada tipo de evento.
+        db.EventosOutbox.Add(new EventoOutbox(tipo, JsonSerializer.Serialize(new { grupos, dados = carga }, Json)));
     }
 }

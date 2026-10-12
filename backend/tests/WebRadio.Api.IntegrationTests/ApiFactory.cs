@@ -27,6 +27,8 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         ["ConnectionStrings:RadioDb"] = "Server=nao-existe;Database=x;User Id=x;Password=x;TrustServerCertificate=True",
         ["Rede:SubnetApp"] = "172.28.0.0/24",
         ["AllowedHosts"] = "localhost;api",
+        // O laço do outbox fica desligado: cada teste que precisa dele roda o passe à mão (ou religa).
+        ["Outbox:Dispatcher"] = "false",
     };
 
     /// <summary>IP do socket simulado e porta local (TestServer não tem socket de verdade).</summary>

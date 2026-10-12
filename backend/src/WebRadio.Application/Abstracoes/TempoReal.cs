@@ -7,8 +7,11 @@ public interface IRealtimeNotifier
 {
     Task NotificarTodosAsync(string evento, object? carga, CancellationToken ct = default);
 
-    /// <summary>Envia para um grupo (<see cref="GruposDoHub.Locutores"/>, <c>listener:{hash}</c>).</summary>
-    Task NotificarGrupoAsync(string grupo, string evento, object? carga, CancellationToken ct = default);
+    /// <summary>
+    /// Envia para um ou mais grupos (<see cref="GruposDoHub.Locutores"/>, <c>listener:{hash}</c>). Quem está em mais de um
+    /// recebe uma vez só.
+    /// </summary>
+    Task NotificarGruposAsync(IReadOnlyList<string> grupos, string evento, object? carga, CancellationToken ct = default);
 
     /// <summary>Derruba as conexões do usuário (papel alterado, desativação; S-M08).</summary>
     Task DesconectarUsuarioAsync(Guid usuarioId, CancellationToken ct = default);

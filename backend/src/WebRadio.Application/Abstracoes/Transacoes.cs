@@ -27,7 +27,8 @@ public static class Travas
 /// </summary>
 public interface IOutbox
 {
-    void Enfileirar(string tipo, object carga);
+    /// <param name="grupos">Destino no hub (02 §10). Vazio = todos os clientes conectados.</param>
+    void Enfileirar(string tipo, object carga, params string[] grupos);
 }
 
 public static class EventosDoOutbox
