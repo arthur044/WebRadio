@@ -9,6 +9,8 @@ using WebRadio.Infrastructure.Armazenamento;
 using WebRadio.Infrastructure.Triagem;
 using WebRadio.Infrastructure.Persistencia;
 using WebRadio.Infrastructure.Persistencia.Outbox;
+using WebRadio.Infrastructure.Playout;
+using WebRadio.Application.Features.Playout;
 using WebRadio.Infrastructure.Seed;
 using WebRadio.Infrastructure.Seguranca;
 
@@ -71,6 +73,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IListenerIdentity>(sp => new ListenerIdentity(
             Base64Url.DecodeFromChars(sp.GetRequiredService<IConfiguration>()["Seguranca:Pepper"]!), sp.GetRequiredService<IIpHasher>()));
         AddStorage(services, configuration);
+        services.AddSingleton<ITocandoAgoraStore>(sp => new TocandoAgoraStore(
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TocandoAgoraStore>>(), sp.GetService<IConnectionMultiplexer>()));
 
         services.AddScoped<IInicializadorDeDados, AdminSeeder>();
 

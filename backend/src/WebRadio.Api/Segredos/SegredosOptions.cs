@@ -71,6 +71,9 @@ public sealed class PlayoutOptions
 
     public const string Secao = "Playout";
     public string? Token { get; set; }
+
+    /// <summary>Opcional: token anterior, aceito durante a rotação (S-A06). Vazio = sem rotação em curso.</summary>
+    public string? TokenAnterior { get; set; }
 }
 
 /// <summary>
@@ -123,7 +126,13 @@ public sealed class PlayoutOptionsValidator : IValidateOptions<PlayoutOptions>
 {
     // `openssl rand -hex 32` gera 64 caracteres; 32 caracteres é o piso aceito.
     public ValidateOptionsResult Validate(string? name, PlayoutOptions options)
-        => RegraSegredo.Resultado(RegraSegredo.Verificar("Playout:Token", options.Token, 32, base64Url: false));
+        => RegraSegredo.Resultado(
+            RegraSegredo.Verificar("Playout:Token", options.Token, 32, base64Url: false)
+            ?? (string.IsNullOrWhiteSpace(options.TokenAnterior)
+                ? null
+                : options.TokenAnterior == options.Token
+                    ? "Playout:TokenAnterior é igual ao Playout:Token: remova o anterior ou use o token antigo de verdade."
+                    : RegraSegredo.Verificar("Playout:TokenAnterior", options.TokenAnterior, 32, base64Url: false)));
 }
 
 /// <summary>Redis é opcional em Development (cai para a memória); configurado, a senha segue o fail-fast do S-C02.</summary>

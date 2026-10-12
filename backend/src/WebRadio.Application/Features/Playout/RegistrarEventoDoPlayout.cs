@@ -1,0 +1,71 @@
+using FluentValidation;
+using MediatR;
+using WebRadio.Application.Abstracoes;
+
+namespace WebRadio.Application.Features.Playout;
+
+/// <summary>O que está no ar agora (02 §9, <c>GET /stream/info</c>). <c>PedidoId</c> só existe quando a faixa veio de um pedido.</summary>
+public sealed record TocandoAgora(string? Titulo, string? Artista, Guid? MidiaId, Guid? PedidoId, DateTime IniciadoEmUtc);
+
+/// <summary>Última faixa anunciada pelo playout. Em memória e, quando há Redis, compartilhada entre as réplicas.</summary>
+public interface ITocandoAgoraStore
+{
+    Task DefinirAsync(TocandoAgora faixa, CancellationToken ct);
+
+    Task<TocandoAgora?> ObterAsync(CancellationToken ct);
+}
+
+/// <summary>02 §8: <c>POST /internal/playout/eventos</c>, enviado pelo Liquidsoap a cada troca de faixa.</summary>
+public sealed record RegistrarEventoDoPlayoutCommand(string? Tipo, Guid? MidiaId, Guid? PedidoId, string? Titulo, string? Artista, DateTime? OcorridoEmUtc) : IRequest;
+
+public sealed class RegistrarEventoDoPlayoutValidator : AbstractValidator<RegistrarEventoDoPlayoutCommand>
+{
+    public const string FaixaIniciada = "FaixaIniciada";
+    public const int TamanhoMaximoDoMetadado = 200;
+
+    public RegistrarEventoDoPlayoutValidator()
+    {
+        RuleFor(x => x.Tipo).Equal(FaixaIniciada).WithMessage($"Tipo de evento desconhecido (aceito: {FaixaIniciada}).");
+        RuleFor(x => x.OcorridoEmUtc).NotNull().WithMessage("Informe ocorridoEmUtc.");
+        RuleFor(x => x.MidiaId).NotEqual(Guid.Empty).WithMessage("midiaId inválido.");
+        RuleFor(x => x.PedidoId).NotEqual(Guid.Empty).WithMessage("pedidoId inválido.");
+        // S-A09: no ao vivo, título e artista vêm do programa do locutor (harbor) e seguem para TODOS os clientes do hub.
+        RuleFor(x => x.Titulo)
+            .MaximumLength(TamanhoMaximoDoMetadado).WithMessage($"titulo pode ter no máximo {TamanhoMaximoDoMetadado} caracteres.")
+            .Must(SemCaractereDeControle).WithMessage("titulo não pode ter caracteres de controle.");
+        RuleFor(x => x.Artista)
+            .MaximumLength(TamanhoMaximoDoMetadado).WithMessage($"artista pode ter no máximo {TamanhoMaximoDoMetadado} caracteres.")
+            .Must(SemCaractereDeControle).WithMessage("artista não pode ter caracteres de controle.");
+    }
+
+    /// <summary>
+    /// Controle C0/C1 (inclusive quebra de linha, tab e NUL) e os separadores de linha/parágrafo do Unicode, que também
+    /// quebram linha: servem para forjar linha de log ou de protocolo. Acento, emoji e outros alfabetos passam.
+    /// </summary>
+    private static bool SemCaractereDeControle(string? texto) =>
+        texto is null || !texto.Any(c => char.IsControl(c) || c is '\u2028' or '\u2029');
+}
+
+/// <summary>
+/// Esqueleto do Épico 1: só atualiza o "tocando agora" e publica <c>TocandoAgora</c>. O registro em <c>Reproducao</c> e a
+/// marcação do pedido como tocado entram com o playout real (Épico 4).
+/// </summary>
+public sealed class RegistrarEventoDoPlayoutHandler(ITocandoAgoraStore tocandoAgora, IOutbox outbox, IRadioDbContext db)
+    : IRequestHandler<RegistrarEventoDoPlayoutCommand>
+{
+    public async Task Handle(RegistrarEventoDoPlayoutCommand cmd, CancellationToken ct)
+    {
+        var titulo = Limpar(cmd.Titulo);
+        var artista = Limpar(cmd.Artista);
+        var iniciadoEmUtc = DateTime.SpecifyKind(cmd.OcorridoEmUtc!.Value.ToUniversalTime(), DateTimeKind.Utc);
+
+        await tocandoAgora.DefinirAsync(new TocandoAgora(titulo, artista, cmd.MidiaId, cmd.PedidoId, iniciadoEmUtc), ct);
+
+        // 02 §10: { titulo, artista, tipoMidia, pedidoId? }. O tipo da mídia só é conhecido quando o playout real
+        // consultar ArquivoMidia (Épico 4); até lá vai nulo.
+        outbox.Enfileirar(EventosDoOutbox.TocandoAgora, new { titulo, artista, tipoMidia = (string?)null, pedidoId = cmd.PedidoId });
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static string? Limpar(string? texto) => string.IsNullOrWhiteSpace(texto) ? null : texto.Trim();
+}
