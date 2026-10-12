@@ -1,0 +1,21 @@
+# gitleaks (CI: `gitleaks detect --source . --redact -v`, v8.30.1, fetch-depth 0: varre TODAS as branches).
+# A regra padrão continua ligada. As exceções abaixo são estreitas: cada uma exige caminho E valor (condition = "AND"),
+# só vale para a regra generic-api-key, e um segredo real no mesmo arquivo continua sendo detectado.
+title = "WebRadio"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fixtures de teste fabricadas (sem segredo real). Convenção: todo valor falso começa com 'segredo-de-teste-'."
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^backend/tests/''']
+regexes = ['''^segredo-de-teste-''']
+
+[[allowlists]]
+description = "Placeholder do runbook de rotação de segredos (exemplo de comando; nao e credencial)."
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^docs/runbooks/rotacao-de-segredos\.md$''']
+regexes = ['''^aB-cD_123456789012345678$''']
