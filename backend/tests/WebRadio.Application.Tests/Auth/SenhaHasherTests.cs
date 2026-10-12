@@ -72,16 +72,34 @@ public class SenhaHasherSemaforoTests
     [Fact]
     public async Task Sem_vaga_dentro_da_espera_lanca_ServidorOcupado()
     {
+        // O hash vem de OUTRA instância: assim o pico desta só sai de 0 quando a ocupante entra de fato na vaga.
+        var hash = new SenhaHasher().Hash("Senha-forte-123");
         var h = new SenhaHasher(limiteConcorrencia: 1, esperaMaxima: TimeSpan.FromMilliseconds(1));
-        var hash = h.Hash("Senha-forte-123");
-        using var largada = new Barrier(6);
-        var tarefas = Enumerable.Range(0, 6).Select(_ => Task.Factory.StartNew(() =>
+        using var parar = new CancellationTokenSource();
+
+        // Uma thread segura a única vaga em laço. Sem corrida de largada: com a máquina carregada, 6 threads "simultâneas"
+        // acabavam rodando uma depois da outra e nenhuma era rejeitada.
+        var ocupante = Task.Factory.StartNew(() =>
         {
-            largada.SignalAndWait();
-            try { h.Verificar(hash, "Senha-forte-123"); return false; }
-            catch (WebRadio.Domain.Erros.ServidorOcupadoException) { return true; }
-        }, TaskCreationOptions.LongRunning)).ToArray();
-        var rejeitadas = (await Task.WhenAll(tarefas)).Count(x => x);
+            while (!parar.IsCancellationRequested)
+            {
+                try { h.Verificar(hash, "Senha-forte-123"); }
+                catch (WebRadio.Domain.Erros.ServidorOcupadoException) { /* perdeu a vaga para uma tentativa do teste */ }
+            }
+        }, TaskCreationOptions.LongRunning);
+        Assert.True(SpinWait.SpinUntil(() => h.PicoDeConcorrencia == 1, TimeSpan.FromSeconds(30)), "a ocupante nunca entrou na vaga");
+
+        // A ocupante só solta a vaga por microssegundos entre duas verificações de ~100 ms: em 20 tentativas, ao menos uma
+        // encontra a vaga tomada e desiste depois de 1 ms.
+        var rejeitadas = 0;
+        for (var i = 0; i < 20 && rejeitadas == 0; i++)
+        {
+            try { h.Verificar(hash, "Senha-forte-123"); }
+            catch (WebRadio.Domain.Erros.ServidorOcupadoException) { rejeitadas++; }
+        }
+
+        parar.Cancel();
+        await ocupante;
         Assert.True(rejeitadas > 0);
         Assert.True(h.PicoDeConcorrencia <= 1);
     }
