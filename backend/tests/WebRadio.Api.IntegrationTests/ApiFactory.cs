@@ -27,6 +27,8 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         ["ConnectionStrings:RadioDb"] = "Server=nao-existe;Database=x;User Id=x;Password=x;TrustServerCertificate=True",
         ["Rede:SubnetApp"] = "172.28.0.0/24",
         ["AllowedHosts"] = "localhost;api",
+        // O laço do outbox fica desligado: cada teste que precisa dele roda o passe à mão (ou religa).
+        ["Outbox:Dispatcher"] = "false",
     };
 
     /// <summary>IP do socket simulado e porta local (TestServer não tem socket de verdade).</summary>
@@ -73,15 +75,16 @@ public static class ApiFactoryExtensions
     public const string Senha = "uma-senha-bem-longa-123";
 
     /// <summary>Cria um usuário direto no banco (o hash vem do hasher real da aplicação).</summary>
-    public static void CriarUsuario(this ApiFactory f, string email, WebRadio.Domain.Enums.Role role, bool deveTrocar = false, bool ativo = true)
+    public static Guid CriarUsuario(this ApiFactory f, string email, WebRadio.Domain.Enums.Role role, bool deveTrocar = false, bool ativo = true, Guid? id = null)
     {
         using var escopo = f.Services.CreateScope();
         var db = escopo.ServiceProvider.GetRequiredService<WebRadio.Application.Abstracoes.IRadioDbContext>();
         var hasher = escopo.ServiceProvider.GetRequiredService<WebRadio.Application.Abstracoes.ISenhaHasher>();
         var agora = DateTime.UtcNow;
-        var u = new WebRadio.Domain.Usuarios.Usuario(Guid.NewGuid(), "Fulano", email, hasher.Hash(Senha), role, deveTrocar, agora);
+        var u = new WebRadio.Domain.Usuarios.Usuario(id ?? Guid.NewGuid(), "Fulano", email, hasher.Hash(Senha), role, deveTrocar, agora);
         if (!ativo) u.Desativar(false, agora);
         db.Usuarios.Add(u);
         db.SaveChangesAsync().GetAwaiter().GetResult();
+        return u.Id;
     }
 }

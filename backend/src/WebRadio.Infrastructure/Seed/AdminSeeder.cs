@@ -26,7 +26,7 @@ public sealed class AdminSeeder(RadioDbContext db, ISenhaHasher hasher, IClock c
         {
             db.ChangeTracker.Clear();
             await using var tx = await db.Database.BeginTransactionAsync(ct);
-            await SemaforoAdmins.AdquirirAsync(db, ct);
+            await TransacaoComTrava.AdquirirAsync(db, Travas.Admins, ct);
 
             if (await db.Usuarios.AnyAsync(u => u.Role == Role.Admin, ct)) return ResultadoSeed.JaExiste;
 
@@ -50,13 +50,4 @@ public sealed class AdminSeeder(RadioDbContext db, ISenhaHasher hasher, IClock c
     }
 
     private enum ResultadoSeed { JaExiste, EmailEmUso, Criado }
-}
-
-/// <summary>Exclusão mútua entre APIs sobre os Admins (D22): applock transacional, liberado no commit/rollback.</summary>
-internal static class SemaforoAdmins
-{
-    public static Task AdquirirAsync(RadioDbContext db, CancellationToken ct) =>
-        db.Database.ExecuteSqlRawAsync(
-            "DECLARE @r int; EXEC @r = sp_getapplock @Resource = N'seg:admins', @LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = 15000; IF @r < 0 THROW 50001, N'applock seg:admins indisponível', 1;",
-            ct);
 }

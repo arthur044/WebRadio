@@ -611,6 +611,11 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
 
+                    b.Property<int>("VersaoSeguranca")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0, "DF_Usuario_VersaoSeguranca");
+
                     b.HasKey("Id")
                         .HasName("PK_Usuario");
 

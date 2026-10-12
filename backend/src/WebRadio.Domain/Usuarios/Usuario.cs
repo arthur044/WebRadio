@@ -25,6 +25,12 @@ public sealed class Usuario : Entidade
     /// <summary>true no Admin semeado; enquanto true, o token só permite POST /auth/trocar-senha e GET /auth/me.</summary>
     public bool DeveTrocarSenha { get; private set; }
 
+    /// <summary>
+    /// Vai na claim <c>sv</c> do access token e é conferida a cada requisição autenticada: mudar o papel, desativar ou
+    /// trocar a senha a incrementa, e os tokens já emitidos deixam de valer (em até 15 s, pelo cache), não em até 15 min.
+    /// </summary>
+    public int VersaoSeguranca { get; private set; }
+
     public DateTime CriadoEmUtc { get; private set; }
 
     public DateTime AtualizadoEmUtc { get; private set; }
@@ -72,6 +78,7 @@ public sealed class Usuario : Entidade
         GarantirNaoRemoveUltimoAdmin(ehUltimoAdminAtivo, removeAdmin: novoRole != Role.Admin);
 
         Role = novoRole;
+        VersaoSeguranca++;
         AtualizadoEmUtc = agora;
         AddDomainEvent(new UsuarioCredenciaisAlteradas(Id, MotivoAlteracaoCredenciais.RoleAlterada));
     }
@@ -89,8 +96,26 @@ public sealed class Usuario : Entidade
         GarantirNaoRemoveUltimoAdmin(ehUltimoAdminAtivo, removeAdmin: true);
 
         Ativo = false;
+        VersaoSeguranca++;
         AtualizadoEmUtc = agora;
         AddDomainEvent(new UsuarioCredenciaisAlteradas(Id, MotivoAlteracaoCredenciais.Desativado));
+    }
+
+    /// <summary>
+    /// Volta a permitir o login. Não mexe em <see cref="VersaoSeguranca"/>: a desativação já invalidou os tokens antigos
+    /// e revogou os refresh; a pessoa entra de novo com a senha.
+    /// </summary>
+    public void Reativar(DateTime agora)
+    {
+        UtcGuard.Exigir(agora, nameof(agora));
+
+        if (Ativo)
+        {
+            return; // no-op: já está ativo.
+        }
+
+        Ativo = true;
+        AtualizadoEmUtc = agora;
     }
 
     public void TrocarSenha(string novoSenhaHash, DateTime agora)
@@ -100,6 +125,7 @@ public sealed class Usuario : Entidade
 
         SenhaHash = novoSenhaHash;
         DeveTrocarSenha = false;
+        VersaoSeguranca++;
         AtualizadoEmUtc = agora;
         AddDomainEvent(new UsuarioCredenciaisAlteradas(Id, MotivoAlteracaoCredenciais.SenhaTrocada));
     }

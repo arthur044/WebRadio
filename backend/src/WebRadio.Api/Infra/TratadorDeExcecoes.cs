@@ -20,12 +20,19 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
         var problema = ex switch
         {
             ValidationException v => Validacao(v),
+            // Corpo ou parâmetro que o framework não conseguiu ler (JSON malformado, enum desconhecido, tipo errado). Em
+            // Development o binder lança; em produção ele mesmo responde. A mensagem do framework cita o valor recebido
+            // e nomes internos: fica fora da resposta.
+            BadHttpRequestException b => Criar(b.StatusCode, "/erros/requisicao-invalida", "Requisição inválida.",
+                "O corpo ou os parâmetros da requisição não puderam ser lidos."),
             CredenciaisInvalidasException => Credenciais(),
             EmailJaCadastradoException e => Criar(409, "/erros/conflito-cadastro", "Cadastro duplicado.", e.Message),
             ConflitoDeGradeException c => Criar(409, "/erros/conflito-grade", "Conflito de horário na grade.", c.Message,
                 ("programaConflitanteId", c.ProgramaConflitanteId)),
             PedidoJaModeradoException p => Criar(409, "/erros/transicao-invalida", "Transição inválida.", p.Message),
             TransicaoInvalidaException t => Criar(409, "/erros/transicao-invalida", "Transição inválida.", t.Message),
+            NaoEncontradoException n => Criar(404, "/erros/nao-encontrado", "Não encontrado.", n.Message),
+            VersaoDesatualizadaException d => Criar(412, "/erros/versao-desatualizada", "Versão desatualizada.", d.Message),
             ServidorOcupadoException o => Criar(503, "/erros/servidor-ocupado", "Servidor ocupado.", o.Message),
             _ => null,
         };

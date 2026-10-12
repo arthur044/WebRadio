@@ -24,6 +24,28 @@ public sealed class EventoOutbox
     {
     }
 
+    /// <summary>01 §2.8: depois de 10 tentativas o evento fica parado para análise (não entra mais na fila de envio).</summary>
+    public const short MaximoDeTentativas = 10;
+
+    private const int TamanhoMaximoDoErro = 1000;
+
+    public void MarcarProcessado(DateTime agora) => ProcessadoEmUtc = agora;
+
+    public void RegistrarFalha(string erro)
+    {
+        Tentativas++;
+        UltimoErro = erro.Length > TamanhoMaximoDoErro ? erro[..TamanhoMaximoDoErro] : erro;
+    }
+
+    /// <summary>Erro que nenhuma nova tentativa conserta (payload fora do envelope): sai da fila agora, com o motivo.</summary>
+    public void Parar(string erro)
+    {
+        RegistrarFalha(erro);
+        Tentativas = MaximoDeTentativas;
+    }
+
+    public bool Parado => ProcessadoEmUtc is null && Tentativas >= MaximoDeTentativas;
+
     public EventoOutbox(string tipo, string payload)
     {
         Tipo = tipo;

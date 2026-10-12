@@ -104,6 +104,16 @@ public sealed class MemoryLoginThrottle(IClock clock, IIpHasher pseudonimizador,
         return Task.CompletedTask;
     }
 
+    public Task DesbloquearContaAsync(string emailNormalizado, CancellationToken ct)
+    {
+        // Ação rara do Admin: varrer os pares é O(n), fora do caminho do login. A chave do par é "<conta>|<ipHash em hex>" e
+        // o hex não tem "|": o prefixo "<conta>|" só casa com pares desta conta ("a@x" não desbloqueia "a@x.com").
+        var prefixo = emailNormalizado + "|";
+        foreach (var chave in _pares.Keys.Where(k => k.StartsWith(prefixo, StringComparison.Ordinal)).ToList()) Remover(_pares, chave);
+        Remover(_contas, emailNormalizado);
+        return Task.CompletedTask;
+    }
+
     /// <summary>
     /// Limpeza por TEMPO (1x/min), não por falha: custo O(n) fora do caminho quente. Cheio, roda no máximo 1x/s e,
     /// se ainda estiver acima do teto, descarta os ~10% mais antigos, em vez de bloquear ou crescer sem limite.

@@ -9,6 +9,8 @@ using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Formatting.Compact;
 using WebRadio.Api.Features.Auth;
+using WebRadio.Api.Features.Health;
+using WebRadio.Api.Features.Realtime;
 using WebRadio.Api.Infra;
 using WebRadio.Application.Abstracoes;
 using WebRadio.Infrastructure.Seguranca;
@@ -37,6 +39,8 @@ builder.Services.AddOptions<SegurancaOptions>().BindConfiguration(SegurancaOptio
 builder.Services.AddOptions<PlayoutOptions>().BindConfiguration(PlayoutOptions.Secao).ValidateOnStart();
 builder.Services.AddOptions<RedisOptions>().BindConfiguration(RedisOptions.Secao).ValidateOnStart();
 builder.Services.AddOptions<SeedOptions>().BindConfiguration(SeedOptions.Secao).ValidateOnStart();
+builder.Services.AddOptions<StorageOptions>().BindConfiguration(StorageOptions.Secao).ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<StorageOptions>, StorageOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<RedisOptions>, RedisOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<SeedOptions>, SeedOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidator>();
@@ -46,11 +50,14 @@ builder.Services.AddSingleton<IValidateOptions<PlayoutOptions>, PlayoutOptionsVa
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 if (builder.Environment.IsDevelopment()) builder.Services.AddDevDataSeeder();
+builder.Services.AddScannerNoOpSePermitido(builder.Configuration, builder.Environment);
 
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<TratadorDeExcecoes>();
 builder.Services.AddEndpointModules();
+HealthEndpoints.AddHealthChecksDaApi(builder.Services, builder.Configuration);
+RealtimeEndpoints.AddRealtime(builder.Services, builder.Configuration);
 builder.Services.AddOpenApi();
 
 // Produção exige configuração explícita de rede e hosts (sem isso o stack subiria "aberto" ou quebrado):
@@ -66,6 +73,9 @@ if (!builder.Environment.IsDevelopment())
     // Sem Redis o bloqueio de login ficaria por réplica (N réplicas = N vezes mais tentativas): exigido fora de Development.
     if (string.IsNullOrWhiteSpace(builder.Configuration["Redis:Host"]))
         throw new InvalidOperationException("Redis:Host é obrigatório fora de Development (bloqueio de login compartilhado, D21).");
+    // Sem storage não há upload nem mídia: a seção inteira é exigida (a credencial é validada pelo StorageOptionsValidator).
+    if (string.IsNullOrWhiteSpace(builder.Configuration["Storage:Endpoint"]))
+        throw new InvalidOperationException("Storage:Endpoint é obrigatório fora de Development (MinIO interno, ex.: minio:9000).");
     var hosts = builder.Configuration["AllowedHosts"];
     if (string.IsNullOrWhiteSpace(hosts) || hosts.Contains('*'))
         throw new InvalidOperationException("AllowedHosts precisa listar os hosts permitidos (sem '*') fora de Development.");
@@ -94,6 +104,19 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
     .Configure<IOptions<JwtOptions>>((o, jwt) =>
     {
         o.MapInboundClaims = false;
+        o.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = VersaoDeSegurancaDoToken.ValidarAsync,
+            // O WebSocket do navegador não manda cabeçalho Authorization: no hub (e só nele) o token vem na query, que
+            // nunca vai para o log (S-M09).
+            OnMessageReceived = ctx =>
+            {
+                if (ctx.HttpContext.Request.Path.StartsWithSegments(RadioHub.Rota)
+                    && ctx.Request.Query.TryGetValue("access_token", out var token) && !string.IsNullOrEmpty(token))
+                    ctx.Token = token;
+                return Task.CompletedTask;
+            },
+        };
         o.TokenValidationParameters = new TokenValidationParameters
         {
             ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
@@ -112,8 +135,8 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
         };
     });
 builder.Services.AddAuthorizationBuilder()
-    .AddPolicy("PodeModerar", p => p.RequireRole("Locutor", "Admin"))
-    .AddPolicy("SomenteAdmin", p => p.RequireRole("Admin"))
+    .AddPolicy("PodeModerar", p => p.RequireAuthenticatedUser().RequireRole("Locutor", "Admin"))
+    .AddPolicy("SomenteAdmin", p => p.RequireAuthenticatedUser().RequireRole("Admin"))
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 
 // Limite global de 100/min por IP (00-arquitetura.md §164). O IP só serve de chave de partição; nunca é logado.
