@@ -51,11 +51,11 @@ Redes (D19): `borda` (web) · `app` (web, api:8080; **subnet fixa** em `ipam`, u
 | `sqlserver` | `mcr.microsoft.com/mssql/server:2022-<CU fixada>` | dados | 1433 só no `dev.yml`, `127.0.0.1` | `MSSQL_SA_PASSWORD` (entrypoint wrapper lê de `/run/secrets`) | `sqlcmd` com a senha lida de **arquivo**, nunca escrita no YAML |
 | `db-init` | `mssql-tools` | dados | — | SA + `DB_MIGRATOR/APP/RELATORIO_PASSWORD` | one-shot: `init-db.sql` + `logins.sql` (Atlas) |
 | `migrator` | build `backend` (efbundle) | dados | — | `DB_MIGRATOR_PASSWORD` | one-shot, depois do `db-init` |
-| `minio` | `minio/minio` (tag fixada), `user: 1000:1000` | dados, playout | **nenhuma**; 9001 (console) só no `dev.yml`, `127.0.0.1` | `MINIO_ROOT_*` (`_FILE`) | `mc ready local` |
-| `minio-init` | `minio/mc` | dados | — | root + chaves de `svc-api`/`svc-worker` | one-shot: buckets `quarentena`, `midia`, `publico` + políticas JSON do S-A04/S-A05 + quota da quarentena |
+| `minio` | `cgr.dev/chainguard/minio` (**digest fixado**, D24; sem root, uid 65532) | dados, playout | **nenhuma**; 9001 (console) só no `dev.yml`, `127.0.0.1` | `MINIO_ROOT_*` (`_FILE`) | `mc ready local` |
+| `minio-init` | `cgr.dev/chainguard/minio-client` (**digest fixado**, D24) | dados | — | root + chaves de `svc-api`/`svc-worker` | one-shot: buckets `quarentena`, `midia`, `publico` + políticas JSON do S-A04/S-A05 + quota da quarentena |
 | `redis` | `redis:7-alpine` | dados | — | `REDIS_PASSWORD` | `redis-cli -a` lendo de arquivo `ping` |
 | `api` | build → `WebRadio.Api` | app, dados, playout | — | JWT, pepper, `Playout__Token(+Anterior)`, `DB_APP_PASSWORD`, `svc-api`, Redis, seed do Admin | `:8081/health/ready` |
-| `worker` | build → `WebRadio.Worker` | dados | — | `DB_APP_PASSWORD`, `svc-worker`, Redis (**sem** pepper nem JWT) | `:8081/health/live` interno |
+| `worker` | build → `WebRadio.Worker` | dados | — | `DB_APP_PASSWORD`, `svc-worker`, Redis (**sem** pepper nem JWT) | arquivo de heartbeat em `tmpfs`, tocado a cada tick; o healthcheck confere a idade do arquivo (o Worker é host genérico, sem HTTP nem porta) |
 | `sanitizer` | `profiles: [sanitizacao]` no Épico 1 (imagem no Épico 4) | **`network_mode: none`** | — | **nenhum** | — |
 | `icecast` | build `infra/icecast` (Alpine, sem root) | playout | — | `ICECAST_SOURCE/ADMIN/RELAY_PASSWORD`, `ICECAST_ADMIN_USER` | `wget /status-json.xsl` |
 | `liquidsoap` | `savonet/liquidsoap` (tag 2.x fixada, conferir se roda sem root) | playout | 8005 só no `dev.yml` em `127.0.0.1`; em prod, só com allowlist/VPN (S-A08) | `ICECAST_SOURCE_PASSWORD`, `LIQUIDSOAP_HARBOR_PASSWORD`, `Playout__Token` | mount ativo no Icecast |
