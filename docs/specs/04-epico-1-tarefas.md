@@ -146,6 +146,6 @@ A pedido do dono do produto, o que falta do backend do Épico 1 entra por **feat
 
 | PR | Feature | Tarefas | Depende de |
 |---|---|---|---|
-| **B1** | Runtime da API | F08, F09, F10, F12, `/usuarios` + coluna `seg.Usuario.VersaoSeguranca` (claim `sv`) | F07b (#16) |
+| **B1** | Runtime da API | F08, F09, F10, F12, `/usuarios` + coluna `seg.Usuario.VersaoSeguranca` (claim `sv`, complemento da F07; aceite: desativar, rebaixar ou trocar a senha → access token antigo responde 401 em até 15 s) | F07b (#16) |
 | **B2** | Worker e playout | F11, F14, F15, F16 | B1 |
 | **B3** | CI, segredos e pendências | F17b, F18, sobras do PR #14 (entrypoint do db-init, dependabot), LOWs das issues #10 e #19 | B2 |
