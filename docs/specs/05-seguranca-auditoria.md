@@ -298,7 +298,7 @@ Em nenhum caso o segredo entra em `Dockerfile`, `ARG`, camada de imagem, log ou 
 
 - `TokenValidationParameters`: `ValidAlgorithms = [HS256]`, `ValidateIssuer/Audience/Lifetime/IssuerSigningKey = true`, `ClockSkew = 30 s`, `RequireExpirationTime = true`, `RequireSignedTokens = true`; `MapInboundClaims = false`, com `RoleClaimType = "role"` e `NameClaimType = "name"`.
 - O token de refresh tem 256 bits de `RandomNumberGenerator`; guardar o SHA-256 (já está na spec) e compará-lo por busca no índice único, nunca por `==` de string em memória.
-- A desativação precisa valer no refresh (já está na spec) **e** derrubar o hub (S-M08). O access token de até 15 min continua válido e esse risco é aceito.
+- A desativação precisa valer no refresh (já está na spec) **e** derrubar o hub (S-M08). O access token deixa de valer em até 15 s: a claim `sv` é conferida em `OnTokenValidated` (cache de 15 s) e AlterarRole/Desativar/trocar-senha a incrementam (decisão do Nexus, 2026-10-10; substitui o aceite do M5). PBKDF2 permanece SHA-512 com 210k iterações e rehash no login (a implementação da main já atende ao piso OWASP; o 600k é para SHA-256 e não se aplica); o 409 do `/auth/registrar` segue aceito, com limite de 3/h por IP; a chave do sucessor do refresh usa HKDF com `info='refresh-successor'`.
 - Critérios de teste extras para E1-F07: token com `alg: none` → 401; token assinado com outra chave → 401; `role` alterada no payload → 401; reuso de refresh depois da janela de tolerância → família revogada (S-M10); desativar um usuário → o refresh seguinte → 401.
 
 ---
