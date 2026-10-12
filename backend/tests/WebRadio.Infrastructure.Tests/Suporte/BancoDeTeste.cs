@@ -49,32 +49,51 @@ public sealed class BancoDeTeste : IAsyncLifetime
         await comando.ExecuteNonQueryAsync();
     }
 
-    private static string? DescobrirServidor()
-    {
-        var candidatos = new[]
+    private static string? DescobrirServidor() => EscolherServidor(
+        Environment.GetEnvironmentVariable("WEBRADIO_TEST_SQL"),
+        // LocalDB só existe no Windows: no runner Linux o SqlClient lança PlatformNotSupportedException (não SqlException).
+        OperatingSystem.IsWindows()
+            ? "Server=(localdb)\\MSSQLLocalDB;Integrated Security=true;Initial Catalog=master;Connect Timeout=15;TrustServerCertificate=true"
+            : null,
+        static cs =>
         {
-            Environment.GetEnvironmentVariable("WEBRADIO_TEST_SQL"),
-            // LocalDB só existe no Windows: no runner Linux o SqlClient lança PlatformNotSupportedException (não SqlException).
-            OperatingSystem.IsWindows()
-                ? "Server=(localdb)\\MSSQLLocalDB;Integrated Security=true;Initial Catalog=master;Connect Timeout=15;TrustServerCertificate=true"
-                : null,
-        };
+            using var conexao = new SqlConnection(cs);
+            conexao.Open();
+        });
 
-        foreach (var candidato in candidatos.Where(c => !string.IsNullOrWhiteSpace(c)))
+    /// <summary>
+    /// Com WEBRADIO_TEST_SQL definida o servidor é OBRIGATÓRIO: erro de conexão propaga e os [SqlFact] FALHAM (um job de
+    /// CI com o SQL fora do ar não pode ficar verde só com testes ignorados). Só a sonda do LocalDB, que é opcional,
+    /// engole o erro e deixa os testes pulados.
+    /// </summary>
+    internal static string? EscolherServidor(string? configurado, string? localDb, Action<string> abrir)
+    {
+        if (!string.IsNullOrWhiteSpace(configurado))
         {
             try
             {
-                using var conexao = new SqlConnection(candidato);
-                conexao.Open();
-                return candidato;
+                abrir(configurado);
             }
-            catch (Exception e) when (e is SqlException or PlatformNotSupportedException or InvalidOperationException)
+            catch (Exception e)
             {
-                // Sem servidor alcançável: os [SqlFact] ficam ignorados; a descoberta dos testes nunca pode estourar.
+                // A mensagem do SqlClient não traz a senha; a connection string em si nunca entra aqui.
+                throw new InvalidOperationException($"WEBRADIO_TEST_SQL está definida, mas o servidor não respondeu: {e.Message}", e);
             }
+
+            return configurado;
         }
 
-        return null;
+        if (localDb is null) return null;
+
+        try
+        {
+            abrir(localDb);
+            return localDb;
+        }
+        catch (Exception e) when (e is SqlException or PlatformNotSupportedException or InvalidOperationException)
+        {
+            return null;
+        }
     }
 }
 
