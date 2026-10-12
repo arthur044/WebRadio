@@ -133,7 +133,7 @@ Grupos atribuídos pelo servidor no `OnConnectedAsync` (o cliente **não** escol
 - `listener:{deviceHash}` → derivado do `listenerId`
 - `locutores` → se o JWT tiver `role ∈ {Locutor, Admin}`
 
-Eventos servidor → cliente (todos com `eventoId` e `ocorridoEmUtc`; o cliente descarta `eventoId` repetido). **A ordem de chegada não é garantida** quando há mais de uma réplica da API: para eventos de estado (`ProgramaStatusAlterado` por `programaId`, `TocandoAgora`), o cliente guarda o último `eventoId` aplicado por chave e ignora o que chegar com `eventoId` menor:
+Eventos servidor → cliente (todos com `eventoId` e `ocorridoEmUtc`; o cliente descarta `eventoId` repetido). **A ordem de chegada não é garantida** quando há mais de uma réplica da API: para eventos de estado (`ProgramaStatusAlterado` por `programaId`, `TocandoAgora`), o cliente guarda o último `eventoId` aplicado por chave e ignora o que chegar com `eventoId` menor. A comparação é **numérica** (o `eventoId` é o id inteiro do outbox enviado como texto; como texto, "10" < "9"); `TocandoAgora` tem uma chave só:
 
 | Evento | Destino | Payload |
 |---|---|---|
