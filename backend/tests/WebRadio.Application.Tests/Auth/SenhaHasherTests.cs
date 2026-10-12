@@ -77,29 +77,23 @@ public class SenhaHasherSemaforoTests
         var h = new SenhaHasher(limiteConcorrencia: 1, esperaMaxima: TimeSpan.FromMilliseconds(1));
         using var parar = new CancellationTokenSource();
 
-        // Uma thread segura a única vaga em laço. Sem corrida de largada: com a máquina carregada, 6 threads "simultâneas"
-        // acabavam rodando uma depois da outra e nenhuma era rejeitada.
-        var ocupante = Task.Factory.StartNew(() =>
-        {
-            while (!parar.IsCancellationRequested)
-            {
-                try { h.Verificar(hash, "Senha-forte-123"); }
-                catch (WebRadio.Domain.Erros.ServidorOcupadoException) { /* perdeu a vaga para uma tentativa do teste */ }
-            }
-        }, TaskCreationOptions.LongRunning);
-        Assert.True(SpinWait.SpinUntil(() => h.PicoDeConcorrencia == 1, TimeSpan.FromSeconds(30)), "a ocupante nunca entrou na vaga");
-
-        // A ocupante só solta a vaga por microssegundos entre duas verificações de ~100 ms: em 20 tentativas, ao menos uma
-        // encontra a vaga tomada e desiste depois de 1 ms.
+        // Duas threads disputam a única vaga em laço, sem corrida de largada (com a máquina carregada, 6 threads
+        // "simultâneas" acabavam rodando em série e nenhuma era rejeitada). Quem pega a vaga fica ~100 ms nela; a outra
+        // espera só 1 ms e é rejeitada. A rejeição conta dos DOIS lados: não importa qual das duas está com a vaga.
         var rejeitadas = 0;
-        for (var i = 0; i < 20 && rejeitadas == 0; i++)
+        void Tentar()
         {
             try { h.Verificar(hash, "Senha-forte-123"); }
-            catch (WebRadio.Domain.Erros.ServidorOcupadoException) { rejeitadas++; }
+            catch (WebRadio.Domain.Erros.ServidorOcupadoException) { Interlocked.Increment(ref rejeitadas); }
         }
 
+        var concorrente = Task.Factory.StartNew(() => { while (!parar.IsCancellationRequested) Tentar(); }, TaskCreationOptions.LongRunning);
+        Assert.True(SpinWait.SpinUntil(() => h.PicoDeConcorrencia == 1, TimeSpan.FromSeconds(30)), "a concorrente nunca entrou na vaga");
+
+        for (var i = 0; i < 20 && Volatile.Read(ref rejeitadas) == 0; i++) Tentar();
+
         parar.Cancel();
-        await ocupante;
+        await concorrente;
         Assert.True(rejeitadas > 0);
         Assert.True(h.PicoDeConcorrencia <= 1);
     }
