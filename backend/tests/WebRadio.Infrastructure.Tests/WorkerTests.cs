@@ -123,11 +123,14 @@ public class LiderancaSemBancoTests
     {
         var log = new LoggerDeTeste<LiderancaDoWorker>();
         // Porta fechada: o connect falha na hora com SqlException, e o worker nunca chega a ser líder.
-        using var w = new LiderancaDoWorker("Server=127.0.0.1,1;User Id=u;Password=p;Connect Timeout=1;Encrypt=False",
+        using var w = new LiderancaDoWorker("Server=127.0.0.1,1;User Id=u;Password=p;Connect Timeout=1;ConnectRetryCount=0;Encrypt=False",
             new LiderancaOptions { Intervalo = TimeSpan.FromMilliseconds(100) }, log);
 
         await w.StartAsync(default);
-        await Task.Delay(TimeSpan.FromMilliseconds(1500)); // bem mais de 5 ciclos
+        // Primeiro o aviso (a 1ª tentativa de conexão pode demorar mais num runner lento); depois ciclos de sobra para
+        // provar que ele não se repete.
+        Assert.True(await Espera.Ate(() => log.Linhas.Length > 0, TimeSpan.FromSeconds(20)));
+        await Task.Delay(TimeSpan.FromSeconds(2));
         await w.StopAsync(default);
 
         Assert.False(w.EhLider);
