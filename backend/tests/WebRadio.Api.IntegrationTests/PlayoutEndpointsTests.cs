@@ -157,10 +157,10 @@ public class PlayoutEndpointsTests
     {
         var (f, c) = Novo();
         var pedidoId = Guid.NewGuid();
-        // Instante recente e sem fração de segundo: o TocandoAgoraStore descarta faixa com mais de 6 h pelo relógio
-        // real, então uma data fixa faz o teste vencer (era 2026-10-12 e passou a falhar no dia seguinte).
-        var agora = DateTime.UtcNow.AddMinutes(-5);
-        var quando = new DateTime(agora.Year, agora.Month, agora.Day, agora.Hour, agora.Minute, 0, DateTimeKind.Utc);
+        // Relativo a agora: o TocandoAgoraStore descarta faixa com mais de 6 h (Validade), e uma data fixa vence.
+        // Uma hora atrás e sem fração de segundo: distinto do "agora" do servidor e exato na ida e volta do JSON.
+        var agora = DateTime.UtcNow;
+        var quando = new DateTime(agora.Year, agora.Month, agora.Day, agora.Hour, agora.Minute, agora.Second, DateTimeKind.Utc).AddHours(-1);
 
         var r = await c.SendAsync(Req(HttpMethod.Post, Eventos, token: Token, corpo: Faixa("  Garota de Ipanema ", "Tom Jobim", ocorridoEmUtc: quando, pedidoId: pedidoId)));
 
