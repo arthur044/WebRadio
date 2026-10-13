@@ -19,3 +19,10 @@ targetRules = ["generic-api-key"]
 condition = "AND"
 paths = ['''^docs/runbooks/rotacao-de-segredos\.md$''']
 regexes = ['''^aB-cD_123456789012345678$''']
+
+[[allowlists]]
+description = "teste.sh do Icecast: prova que a credencial PADRÃO (admin:hackme) é rejeitada com 401 (valor sabidamente falso, nunca usado)."
+targetRules = ["curl-auth-user"]
+condition = "AND"
+paths = ['''^infra/icecast/teste\.sh$''']
+regexes = ['''hackme''']
