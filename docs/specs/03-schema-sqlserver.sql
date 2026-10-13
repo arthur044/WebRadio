@@ -9,8 +9,10 @@
    nas seções 3/6/7/8); suprimir geraria PendingModelChangesWarning no EF 10 sem ganho
    real. (2) 9 DEFAULT de tinyint/bit onde o SQL Server re-renderiza o literal como
    CONVERT([tinyint],(1)) em vez de (1) — mesmo valor, sem mudança de schema aqui.
-   Revisão completa acontece quando o Forge abrir o PR da F04 (script gerado ainda não
-   visto por inteiro).
+   Conferência contra a migration Inicial (F04, PR #5, mergeado): nomes e colunas dos
+   índices verificados (30/30). Constraints, rowversion, precisão de datetime2 e DEFAULTs
+   ainda não foram conferidos por inteiro; serão revistos quando uma migration ou PR os
+   tocar.
 
    Revisão E1-A01 (Atlas, 2026-09-27): aprovado com ajustes — ver comentários
    "-- [Atlas]" (achados da revisão de tipos/CHECKs/índices/collation) e
