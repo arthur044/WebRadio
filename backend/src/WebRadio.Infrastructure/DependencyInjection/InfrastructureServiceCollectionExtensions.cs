@@ -92,7 +92,7 @@ public static class InfrastructureServiceCollectionExtensions
             Base64Url.DecodeFromChars(sp.GetRequiredService<IConfiguration>()["Seguranca:Pepper"]!), sp.GetRequiredService<IIpHasher>()));
         AddStorage(services, configuration);
         services.AddSingleton<ITocandoAgoraStore>(sp => new TocandoAgoraStore(
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TocandoAgoraStore>>(), sp.GetService<IConnectionMultiplexer>()));
+            sp.GetRequiredService<IClock>(), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TocandoAgoraStore>>(), sp.GetService<IConnectionMultiplexer>()));
 
         services.AddScoped<IInicializadorDeDados, AdminSeeder>();
 
