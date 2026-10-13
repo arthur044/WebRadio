@@ -226,11 +226,12 @@ services:
       minio-init: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
     healthcheck:
-      # O worker não tem HTTP: o ciclo de 10 s grava /tmp/worker-heartbeat; parado há mais de 60 s = unhealthy.
-      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(stat -c %Y /tmp/worker-heartbeat) )) -lt 60"]
+      # O worker não tem HTTP: o ciclo de 10 s grava /tmp/worker-heartbeat; parado há mais de ~30 s (3 ciclos) = unhealthy
+      # (04, F11). Com retries 3 o contêiner é marcado unhealthy ~30 s depois do limite, não ~2 min.
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(stat -c %Y /tmp/worker-heartbeat) )) -lt 30"]
       interval: 10s
       timeout: 3s
-      retries: 6
+      retries: 3
       start_period: 15s
 
   # Reservado (D16): a imagem com o ffmpeg mínimo chega no Épico 4. Sem rede e sem segredo.
@@ -263,6 +264,8 @@ services:
     command: ["/etc/liquidsoap/radio.liq"]
     environment:
       API_INTERNA: "http://api:8081"
+      # O radio.liq manda "ocorridoEmUtc" com sufixo Z: o relógio do contêiner precisa ser UTC de fato.
+      TZ: UTC
     secrets: [playout_token, icecast_source_password, liquidsoap_harbor_password]
     volumes:
       - ./infra/liquidsoap/radio.liq:/etc/liquidsoap/radio.liq:ro

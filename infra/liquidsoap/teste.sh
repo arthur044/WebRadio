@@ -4,7 +4,8 @@
 # Sobe o radio.liq de verdade (imagem fixada, mesmo hardening do compose) contra o Icecast da F14 e uma
 # API falsa (teste/api-falsa.liq), numa rede Docker própria, e confere o critério de aceite e o S-A08/S-A09:
 #   1. sem a API no ar o stream toca a playlist de teste;
-#   2. URL fora de http://minio:9000/midia/ é recusada (file:, annotate:, process:, outro bucket, outro host);
+#   0. segredo vazio, de exemplo ou curto aborta o boot (S-C02), sem imprimir o valor;
+#   2. URL fora de http://minio:9000/midia/ é recusada (file:, annotate:, process:, outro bucket, outro host, \n no fim);
 #   3. faixa válida da API toca, com título/artista por metadata.map e midiaId/pedidoId no evento;
 #   4. o harbor recusa senha errada e a senha certa sobrepõe a programação;
 #   5. derrubar a API não derruba o stream; nenhum segredo aparece no log.
@@ -85,6 +86,21 @@ output.icecast(%mp3(bitrate=128), host="liquidsoap", port=8005, password=senha, 
 LIQ
 chmod 0644 "$TMP/fonte.liq"
 
+echo "== segredo ruim aborta o boot (S-C02)"
+segredo_ruim() {
+  # $1 = arquivo de segredo, $2 = conteúdo ruim, $3 = trecho esperado na mensagem
+  rm -rf "$TMP/ruim"; cp -r "$TMP/segredos" "$TMP/ruim"
+  printf '%s' "$2" > "$TMP/ruim/$1"; chmod 0755 "$TMP/ruim"; chmod 0644 "$TMP/ruim"/*
+  local saida codigo=0
+  saida="$(timeout 90 docker run --rm --network none "${ENDURECIDO[@]}" -v "$PWD/infra/liquidsoap/radio.liq:/etc/liquidsoap/radio.liq:ro" \
+    -v "$PWD/infra/liquidsoap/playlist-teste:/musica-teste:ro" -v "$TMP/ruim:/run/secrets:ro" "$LIQUIDSOAP" /etc/liquidsoap/radio.liq 2>&1)" || codigo=$?
+  if [[ "$codigo" -ne 0 ]] && grep -q -F -e "segredo $1" <<<"$saida" && grep -q -F -e "$3" <<<"$saida"; then ok "$1: $3"; else falha "$1 ($3): saiu $codigo sem a mensagem esperada"; fi
+  if [[ -n "${2// /}" ]] && grep -q -F -e "$2" <<<"$saida"; then falha "$1: a mensagem imprimiu o valor do segredo"; fi
+}
+segredo_ruim liquidsoap_harbor_password "" "está vazio"
+segredo_ruim playout_token "__GERAR__-valor-de-exemplo-que-nao-pode-ir-ao-log" "valor de exemplo"
+segredo_ruim icecast_source_password "curta" "menos de 24"
+
 echo "== sobe Icecast e Liquidsoap, sem API"
 docker build -q -f infra/icecast/Dockerfile -t "$ICECAST" . >/dev/null
 docker network create "$P" >/dev/null
@@ -105,8 +121,8 @@ confere "log: API indisponível, segue com o fallback" espera_log "$P-radio" "AP
 echo "== API devolve URL fora do prefixo (S-A09)"
 api maliciosa
 confere "URL maliciosa recusada" espera_log "$P-radio" "URL da API recusada" 30
-sleep 45 # ~8 consultas (retry de 5 s): file:, annotate:, process:, ../, %2e%2e, outro bucket, outro host
-confere "todas as variações foram recusadas" test "$(docker logs "$P-radio" 2>&1 | grep -c -F 'URL da API recusada')" -ge 8
+sleep 50 # ~9 consultas (retry de 5 s): file:, annotate:, process:, ../, %2e%2e, outro bucket, outro host, \n no fim
+confere "todas as variações foram recusadas" test "$(docker logs "$P-radio" 2>&1 | grep -c -F 'URL da API recusada')" -ge 9
 if docker logs "$P-api" 2>&1 | grep -q -F "MIDIA servida"; then falha "o Liquidsoap buscou mídia de URL recusada"; else ok "nenhuma URL recusada foi buscada"; fi
 if titulo_no_ar "nao deve tocar"; then falha "faixa de URL recusada foi ao ar"; else ok "faixa de URL recusada não foi ao ar"; fi
 confere "stream continua tocando" toca

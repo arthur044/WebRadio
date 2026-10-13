@@ -46,7 +46,8 @@ esperar "S-A07 PUT /stream/radio.mp3" 403 "$(status -X PUT "$BASE/stream/radio.m
 
 echo "== 3. login do Admin semeado, troca de senha obrigatória, /auth/me"
 corpo="$(python3 -c 'import json,sys; print(json.dumps({"email": open(sys.argv[1]).read(), "senha": open(sys.argv[2]).read()}))' secrets/seed_admin_email secrets/seed_admin_senha)"
-resp="$(curl -s --max-time 10 -c "$TMP/cookies" -H 'Content-Type: application/json' -d "$corpo" "$BASE/api/v1/auth/login")"
+# O corpo (com a senha do Admin) vai por stdin: no argv ele apareceria no `ps` numa máquina compartilhada.
+resp="$(curl -s --max-time 10 -c "$TMP/cookies" -H 'Content-Type: application/json' --data-binary @- "$BASE/api/v1/auth/login" <<<"$corpo")"
 token="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("accessToken",""))' <<<"$resp" 2>/dev/null || true)"
 if [[ -n "$token" ]]; then
   [[ "${GITHUB_ACTIONS:-}" == "true" ]] && echo "::add-mask::$token"

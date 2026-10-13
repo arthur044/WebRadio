@@ -28,7 +28,8 @@ def proxima(req, res) =
       "http://minio:9000/midia/%2e%2e/quarentena/faixa.mp3",
       "http://minio:9000/quarentena/faixa.mp3",
       "http://minio:9000.evil.example/midia/faixa.mp3",
-      "http://evil.example/midia/faixa.mp3"
+      "http://evil.example/midia/faixa.mp3",
+      "http://minio:9000/midia/faixa.mp3\n"
     ]
     res.json({
       midiaId="11111111-1111-1111-1111-111111111111", pedidoId=null,

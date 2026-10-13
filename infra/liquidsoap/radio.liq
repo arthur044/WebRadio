@@ -18,13 +18,25 @@ settings.log.file := false
 settings.log.level := 3
 settings.init.allow_root := false
 
-def segredo(nome) =
-  string.trim(file.contents("/run/secrets/#{nome}"))
+# S-C02: o boot recusa segredo vazio, de exemplo ou curto (a mensagem nunca traz o valor). Harbor com senha vazia seria o pior caso (S-A08).
+def segredo(nome, minimo) =
+  valor = string.trim(file.contents("/run/secrets/#{nome}"))
+  if valor == "" then
+    error.raise(error.failure, "segredo #{nome} está vazio; rode infra/scripts/gerar-segredos.sh")
+  end
+  minusculo = string.case(lower=true, valor)
+  if string.contains(substring="__gerar__", minusculo) or string.contains(substring="change_me", minusculo) or string.contains(substring="changeme", minusculo) then
+    error.raise(error.failure, "segredo #{nome} é um valor de exemplo; rode infra/scripts/gerar-segredos.sh")
+  end
+  if string.length(valor) < minimo then
+    error.raise(error.failure, "segredo #{nome} tem menos de #{minimo} caracteres; rode infra/scripts/gerar-segredos.sh")
+  end
+  valor
 end
 
-token_playout = segredo("playout_token")
-senha_icecast = segredo("icecast_source_password")
-senha_harbor = segredo("liquidsoap_harbor_password")
+token_playout = segredo("playout_token", 32)
+senha_icecast = segredo("icecast_source_password", 24)
+senha_harbor = segredo("liquidsoap_harbor_password", 24)
 
 api = environment.get(default="http://api:8081", "API_INTERNA")
 prefixo_midia = "http://minio:9000/midia/"
@@ -44,6 +56,7 @@ def url_aceita(endereco) =
   string.contains(prefix=prefixo_midia, endereco)
     and string.match(pattern="^http://minio:9000/midia/[A-Za-z0-9/_.~%-]+(\\?[A-Za-z0-9=&%_.~+-]+)?$", endereco)
     and not string.contains(substring="..", endereco)
+    and not string.contains(substring="\n", endereco)
     and not string.match(pattern="%(2[eEfF]|5[cC])", caminho)
 end
 
@@ -131,7 +144,7 @@ def avisar_api(m) =
   # Só as faixas da fila da API têm estes dois; rotação local e ao vivo vão sem (midiaId nulo, 02 §9).
   if uuid_ou_vazio(m["wr_midia_id"]) != "" then corpo.add("midiaId", m["wr_midia_id"]) end
   if uuid_ou_vazio(m["wr_pedido_id"]) != "" then corpo.add("pedidoId", m["wr_pedido_id"]) end
-  # O contêiner roda em UTC (TZ=UTC no compose): o "Z" é verdadeiro.
+  # O contêiner roda em UTC (TZ=UTC no serviço liquidsoap do compose): o "Z" é verdadeiro.
   corpo.add("ocorridoEmUtc", time.string("%Y-%m-%dT%H:%M:%SZ"))
   try
     resp = http.post(headers=[("Content-Type", "application/json"), ...autorizacao], timeout=5.,

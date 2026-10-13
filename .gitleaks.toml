@@ -1,6 +1,7 @@
 # gitleaks (CI: `gitleaks detect --source . --redact -v`, v8.30.1, fetch-depth 0: varre TODAS as branches).
 # A regra padrão continua ligada. As exceções abaixo são estreitas: cada uma exige caminho E valor (condition = "AND"),
-# só vale para a regra generic-api-key, e um segredo real no mesmo arquivo continua sendo detectado.
+# só vale para as regras listadas em targetRules (generic-api-key e curl-auth-user), e um segredo real no mesmo
+# arquivo continua sendo detectado.
 title = "WebRadio"
 
 [extend]
