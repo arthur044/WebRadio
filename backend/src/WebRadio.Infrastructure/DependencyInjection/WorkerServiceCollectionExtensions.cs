@@ -15,9 +15,10 @@ public static class WorkerServiceCollectionExtensions
     /// hasher de IP e o resto da pilha da Api nem chegam a ser registrados no contêiner dele.
     /// <c>Worker:ArquivoDeHeartbeat</c> troca o caminho do heartbeat (padrão /tmp/worker-heartbeat, em tmpfs).
     /// </summary>
-    public static IServiceCollection AddWorkerInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddWorkerInfrastructure(this IServiceCollection services, IConfiguration configuration,
+        bool exigirSenhaDeSegredo = false)
     {
-        var connectionString = InfrastructureServiceCollectionExtensions.ConnectionStringDoBanco(configuration);
+        var connectionString = InfrastructureServiceCollectionExtensions.ConnectionStringDoBanco(configuration, exigirSenhaDeSegredo);
         services.AddRadioDbContext(connectionString);
         services.AddSingleton<IClock, SistemaRelogio>();
 

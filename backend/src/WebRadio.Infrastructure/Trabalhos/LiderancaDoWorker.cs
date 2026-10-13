@@ -31,6 +31,7 @@ public sealed class LiderancaDoWorker(string connectionString, LiderancaOptions 
 
     private SqlConnection? _conexao;
     private volatile bool _lider;
+    private bool _semBanco; // já avisado: uma mensagem por sequência de falhas, não uma a cada ciclo
 
     public bool EhLider => _lider;
 
@@ -45,6 +46,12 @@ public sealed class LiderancaDoWorker(string connectionString, LiderancaOptions 
                     await ConferirAsync(ct);
                 else
                     await TentarAsync(ct);
+
+                if (_semBanco)
+                {
+                    _semBanco = false;
+                    logger.LogInformation("A conexão com o SQL Server voltou.");
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -52,7 +59,13 @@ public sealed class LiderancaDoWorker(string connectionString, LiderancaOptions 
             }
             catch (Exception e) when (e is SqlException or InvalidOperationException or TimeoutException)
             {
-                if (_lider) logger.LogWarning(e, "Liderança perdida (conexão com o SQL caiu); tentando de novo.");
+                if (_lider)
+                    logger.LogWarning(e, "Liderança perdida (conexão com o SQL caiu); tentando de novo.");
+                else if (!_semBanco)
+                    // Sem isto um worker que nunca falou com o banco (senha errada, SQL fora, rede) ficaria mudo e o
+                    // contêiner continuaria healthy, com a manutenção da LGPD parada (review do #29, M1).
+                    logger.LogWarning(e, "Este worker não consegue falar com o SQL Server; tenta de novo a cada ciclo e só avisa de novo depois que a conexão voltar.");
+                _semBanco = true;
                 await PerderAsync();
             }
 

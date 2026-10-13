@@ -78,14 +78,63 @@ public class LiderancaDoWorkerTests(BancoDeTeste banco) : IClassFixture<BancoDeT
             await db.Database.ExecuteSqlAsync($"DECLARE @matar nvarchar(20) = CONCAT(N'KILL ', {sessoes[0]}); EXEC (@matar);");
         }
 
+        // Primeiro a perda: logo após o KILL o "a" ainda se acha líder (só percebe no próximo ciclo) e o "b" ainda nem
+        // existe, então "a ^ b" já seria verdadeiro e o teste passaria sem provar a reconexão.
+        Assert.True(await Espera.Ate(() => !a.EhLider, TimeSpan.FromSeconds(15)));
+
         using var b = Novo();
         await b.StartAsync(default);
-        // Alguém reassume (a que reconectou ou a nova), e nunca as duas.
-        Assert.True(await Espera.Ate(() => a.EhLider ^ b.EhLider, TimeSpan.FromSeconds(30)));
-        Assert.False(a.EhLider && b.EhLider);
+        // Alguém reassume (a que reconectou ou a nova)...
+        Assert.True(await Espera.Ate(() => a.EhLider || b.EhLider, TimeSpan.FromSeconds(30)));
+        // ...e, ao longo de vários ciclos, nunca as duas (como no primeiro teste).
+        for (var i = 0; i < 10; i++)
+        {
+            Assert.False(a.EhLider && b.EhLider);
+            await Task.Delay(150);
+        }
 
         await a.StopAsync(default);
         await b.StopAsync(default);
+    }
+}
+
+/// <summary>Guarda as mensagens para o teste contar quantas vezes o worker se queixou.</summary>
+internal sealed class LoggerDeTeste<T> : Microsoft.Extensions.Logging.ILogger<T>
+{
+    private readonly List<(Microsoft.Extensions.Logging.LogLevel Nivel, string Texto)> _linhas = [];
+
+    public (Microsoft.Extensions.Logging.LogLevel Nivel, string Texto)[] Linhas { get { lock (_linhas) return [.. _linhas]; } }
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+    public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+    public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+        Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        lock (_linhas) _linhas.Add((logLevel, formatter(state, exception)));
+    }
+}
+
+/// <summary>E1-F11, sem SQL Server: o worker que nunca falou com o banco precisa dizer isso no log (review do #29, M1).</summary>
+public class LiderancaSemBancoTests
+{
+    [Fact]
+    public async Task Nao_lider_que_nao_alcanca_o_banco_avisa_uma_vez_e_nao_a_cada_ciclo()
+    {
+        var log = new LoggerDeTeste<LiderancaDoWorker>();
+        // Porta fechada: o connect falha na hora com SqlException, e o worker nunca chega a ser líder.
+        using var w = new LiderancaDoWorker("Server=127.0.0.1,1;User Id=u;Password=p;Connect Timeout=1;Encrypt=False",
+            new LiderancaOptions { Intervalo = TimeSpan.FromMilliseconds(100) }, log);
+
+        await w.StartAsync(default);
+        await Task.Delay(TimeSpan.FromMilliseconds(1500)); // bem mais de 5 ciclos
+        await w.StopAsync(default);
+
+        Assert.False(w.EhLider);
+        var avisos = log.Linhas.Where(l => l.Nivel >= Microsoft.Extensions.Logging.LogLevel.Warning).ToArray();
+        Assert.Single(avisos);
+        Assert.Contains("SQL", avisos[0].Texto);
+        Assert.DoesNotContain("Password", avisos[0].Texto);
     }
 }
 
@@ -372,10 +421,10 @@ public class ConexaoDoBancoTests
     public void Banco_Senha_do_arquivo_de_segredo_entra_na_connection_string_em_memoria()
     {
         var cs = InfrastructureServiceCollectionExtensions.ConnectionStringDoBanco(
-            Config(("ConnectionStrings:RadioDb", "Server=sqlserver;Database=WebRadio;User Id=webradio_app"), ("Banco:Senha", "s3nha-Do_Arquivo")));
+            Config(("ConnectionStrings:RadioDb", "Server=sqlserver;Database=WebRadio;User Id=webradio_app"), ("Banco:Senha", "s3nha-Do_Arquivo-com-24-ou-mais")));
 
         var partes = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(cs);
-        Assert.Equal("s3nha-Do_Arquivo", partes.Password);
+        Assert.Equal("s3nha-Do_Arquivo-com-24-ou-mais", partes.Password);
         Assert.Equal("webradio_app", partes.UserID);
         Assert.Equal("sqlserver", partes.DataSource);
     }
@@ -388,6 +437,31 @@ public class ConexaoDoBancoTests
 
         Assert.Contains("Banco:Senha", e.Message);
         Assert.DoesNotContain("-abc", e.Message);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("curta-demais")]
+    [InlineData("CHANGE_ME-CHANGE_ME-CHANGE_ME")]
+    public void Banco_Senha_vazia_curta_ou_de_exemplo_recusa_o_boot(string senha)
+    {
+        // Arquivo de segredo presente mas vazio/curto: erro de configuração que não pode virar "sobe e falha só no login".
+        var e = Assert.Throws<InvalidOperationException>(() => InfrastructureServiceCollectionExtensions.ConnectionStringDoBanco(
+            Config(("ConnectionStrings:RadioDb", "Server=sqlserver;Database=WebRadio;User Id=webradio_app"), ("Banco:Senha", senha))));
+
+        Assert.Contains("Banco:Senha", e.Message);
+        if (!string.IsNullOrWhiteSpace(senha)) Assert.DoesNotContain(senha, e.Message);
+    }
+
+    [Fact]
+    public void Fora_de_Development_sem_Banco_Senha_recusa_o_boot()
+    {
+        var e = Assert.Throws<InvalidOperationException>(() => InfrastructureServiceCollectionExtensions.ConnectionStringDoBanco(
+            Config(("ConnectionStrings:RadioDb", "Server=sqlserver;Database=WebRadio;User Id=webradio_app;Password=no-compose")),
+            exigirSenhaDeSegredo: true));
+
+        Assert.Contains("Banco:Senha", e.Message);
     }
 
     [Fact]

@@ -12,7 +12,7 @@ builder.Logging.AddJsonConsole(o => o.UseUtcTimestamp = true);
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
 
 // Liderança (sp_getapplock), ciclo de 10 s com heartbeat e manutenção diária (E1-F11).
-builder.Services.AddWorkerInfrastructure(builder.Configuration);
+builder.Services.AddWorkerInfrastructure(builder.Configuration, exigirSenhaDeSegredo: !builder.Environment.IsDevelopment());
 
 var host = builder.Build();
 

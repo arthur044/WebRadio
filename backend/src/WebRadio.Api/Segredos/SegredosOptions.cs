@@ -1,5 +1,6 @@
 using System.Buffers.Text;
 using Microsoft.Extensions.Options;
+using WebRadio.Infrastructure.Seguranca;
 
 namespace WebRadio.Api.Segredos;
 
@@ -83,20 +84,16 @@ public sealed class PlayoutOptions
 /// </summary>
 internal static class RegraSegredo
 {
-    private static readonly string[] Marcadores = ["__GERAR__", "CHANGE_ME", "CHANGEME"];
-
     public static string? Verificar(string chave, string? valor, int minimoBytes, bool base64Url)
     {
-        if (string.IsNullOrWhiteSpace(valor))
-            return $"{chave} está vazio. Rode infra/scripts/gerar-segredos.sh.";
-        if (Marcadores.Any(m => valor.Contains(m, StringComparison.OrdinalIgnoreCase)))
-            return $"{chave} contém um valor de exemplo (__GERAR__/CHANGE_ME). Gere um segredo real.";
+        if (ValidacaoDeSegredo.VazioOuExemplo(chave, valor) is { } erro) return erro;
+        var texto = valor!;
 
         if (!base64Url)
-            return valor.Length < minimoBytes ? $"{chave} tem menos de {minimoBytes} caracteres." : null;
+            return texto.Length < minimoBytes ? $"{chave} tem menos de {minimoBytes} caracteres." : null;
 
         // base64url sem padding; mede os bytes DECODIFICADOS (Convert.FromBase64String rejeitaria '-' e '_').
-        if (!Base64Url.IsValid(valor, out var bytes))
+        if (!Base64Url.IsValid(texto, out var bytes))
             return $"{chave} não é base64url válido (alfabeto [A-Za-z0-9_-], sem padding).";
         return bytes < minimoBytes ? $"{chave} tem {bytes} bytes decodificados; o mínimo é {minimoBytes}." : null;
     }
