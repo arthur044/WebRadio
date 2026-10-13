@@ -29,6 +29,8 @@ builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);
 builder.Host.UseSerilog((ctx, cfg) => cfg
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
+    // Cada comando SQL sairia como Information (texto do SQL a cada request e a cada tick do outbox).
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", Serilog.Events.LogEventLevel.Warning)
     .Destructure.With<MascaraSegredosPolicy>()
     .Enrich.FromLogContext()
     .WriteTo.Console(new CompactJsonFormatter()));

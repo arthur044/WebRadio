@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1
+# E1-F16 — minio-init: o mc (cliente MinIO) + o script de buckets/políticas/usuários de serviço.
+# A imagem oficial do mc não tem shell; o binário (Go, estático) vem dela para um Alpine com sh.
+# Contexto = RAIZ do repositório:  docker build -f infra/minio/Dockerfile -t webradio-minio-init .
+FROM cgr.dev/chainguard/minio-client@sha256:ad8dcbf569b9ae56536c3cfd23b850cb05b42fd6aae22767ae66acbcf161a224 AS mc
+
+FROM alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+COPY --from=mc /usr/bin/mc /usr/local/bin/mc
+# Pastas criadas antes: um COPY --chmod=0444 de pasta deixaria a própria pasta sem o bit x (intransponível).
+RUN mkdir -p -m 0755 /etc/minio-init/policies
+COPY --chmod=0444 infra/minio/policies/*.json /etc/minio-init/policies/
+COPY --chmod=0555 infra/minio/init-buckets.sh /usr/local/bin/init-buckets.sh
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/init-buckets.sh"]

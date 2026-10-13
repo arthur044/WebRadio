@@ -1,0 +1,361 @@
+# =============================================================================
+# WebRadio — docker-compose.yml (E1-F16) · base de PRODUÇÃO
+#
+#   infra/scripts/gerar-segredos.sh prod      # cria secrets/ (um arquivo por segredo)
+#   cp .env.example .env && editar             # PUBLIC_HOST / PUBLIC_AUTHORITY / PUBLIC_ORIGIN
+#   docker compose up -d --wait
+#
+# Desenvolvimento (uso EXPLÍCITO, nunca override automático — S-M12):
+#   infra/scripts/gerar-segredos.sh dev
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait
+#
+# Regras (04 §Serviços, D19, S-B08): imagem com digest fixado; usuário não root; cap_drop ALL;
+# no-new-privileges; read_only + tmpfs; mem/pids limit; segredos SÓ por arquivo em /run/secrets e
+# cada serviço recebe só os seus (nada de env_file compartilhado); só a 8080 é publicada.
+# Redes: borda (web) · app (web ↔ api:8080, subnet FIXA = Rede__SubnetApp) · dados (interna) ·
+# playout (interna: api:8081, liquidsoap, icecast, minio) · midia-borda (interna: web → icecast/minio, S-M15).
+# =============================================================================
+name: webradio
+
+x-endurecido: &endurecido
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  restart: unless-stopped
+
+x-one-shot: &one-shot
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  restart: "no"
+
+x-dotnet-env: &dotnet-env
+  ASPNETCORE_ENVIRONMENT: Production
+  DOTNET_gcServer: "0"
+  ConnectionStrings__RadioDb: "Server=sqlserver;Database=WebRadio;User Id=webradio_app;Encrypt=True;TrustServerCertificate=True;Application Name=webradio"
+  Redis__Host: "redis"
+  Storage__Endpoint: "minio:9000"
+  Storage__PublicEndpoint: "${PUBLIC_ORIGIN:?Defina PUBLIC_ORIGIN no .env (rode infra/scripts/gerar-segredos.sh)}/storage"
+
+services:
+  # ------------------------------------------------------------------ dados
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090 # 2022-latest
+    <<: *endurecido
+    # O binário sqlservr tem a file capability cap_net_bind_service=ep: sem ela no conjunto limite, o exec
+    # falha com EPERM (cap_drop ALL + no-new-privileges). É a ÚNICA capability devolvida.
+    cap_add: [NET_BIND_SERVICE]
+    # A imagem não lê *_FILE: o wrapper exporta a senha da SA a partir do arquivo e só então chama o sqlservr.
+    entrypoint: ["/bin/bash", "-c", "export MSSQL_SA_PASSWORD=\"$$(cat /run/secrets/mssql_sa_password)\" && exec /opt/mssql/bin/sqlservr"]
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "${MSSQL_PID:-Express}"
+    secrets: [mssql_sa_password]
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    tmpfs: [/tmp]
+    networks: [dados]
+    mem_limit: 2g
+    pids_limit: 300
+    healthcheck:
+      test: ["CMD-SHELL", "SQLCMDPASSWORD=\"$$(cat /run/secrets/mssql_sa_password)\" /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -b -Q 'SELECT 1' > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  db-init:
+    # Mesma imagem do SQL Server: traz o sqlcmd 18 (-C, -I). É o ÚNICO serviço que usa a SA (D20, S-A10).
+    image: mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090
+    <<: *one-shot
+    entrypoint: ["/bin/bash", "/init/db-init/entrypoint.sh"]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      SEED_DEV: "false"
+      DB_SERVER: sqlserver
+      PATH: "/opt/mssql-tools18/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    secrets: [mssql_sa_password, db_app_password, db_migrator_password, db_relatorio_password]
+    volumes:
+      - ./infra/db-init:/init/db-init:ro
+      - ./infra/sql:/init/sql:ro
+    tmpfs: [/tmp]
+    networks: [dados]
+    mem_limit: 256m
+    pids_limit: 50
+    depends_on:
+      sqlserver: { condition: service_healthy }
+
+  migrator:
+    build: { context: ., dockerfile: backend/Dockerfile.migrator }
+    image: webradio-migrator:local
+    <<: *one-shot
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      DB_SERVER: sqlserver
+      DB_NAME: WebRadio
+      DB_MIGRATOR_PASSWORD_FILE: /run/secrets/db_migrator_password
+    secrets: [db_migrator_password]
+    tmpfs: [/tmp]
+    networks: [dados]
+    mem_limit: 512m
+    pids_limit: 100
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+
+  redis:
+    image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499 # 7.4-alpine
+    <<: *endurecido
+    user: "999:1000"
+    entrypoint: ["/bin/sh", "/etc/webradio/redis-entrypoint.sh"]
+    secrets: [redis_password]
+    volumes:
+      - ./infra/redis/entrypoint.sh:/etc/webradio/redis-entrypoint.sh:ro
+      - redis-data:/data
+    tmpfs: ["/tmp:uid=999,gid=1000,mode=0700"]
+    networks: [dados]
+    mem_limit: 128m
+    pids_limit: 50
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/redis_password)\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    # A MinIO deixou de publicar imagens oficiais (minio/minio e quay.io); esta é a build da Chainguard, a partir do
+    # código-fonte, sem root (uid 65532). Fixada por digest.
+    image: cgr.dev/chainguard/minio@sha256:4692462f35d97d7e82c30371d82f057703c5d9489bcae726010594c812f2d285
+    <<: *endurecido
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
+      MINIO_BROWSER: "off"
+    secrets: [minio_root_user, minio_root_password]
+    volumes:
+      - minio-data:/data
+    tmpfs: [/tmp]
+    networks: [dados, playout, midia-borda]
+    mem_limit: 512m
+    pids_limit: 200
+    healthcheck:
+      # Sem curl/wget na imagem: HTTP cru pelo /dev/tcp do bash, no endpoint de liveness do MinIO.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /minio/health/live HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n' >&3 && read -r linha <&3 && [[ $$linha == *' 200 '* ]]"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    build: { context: ., dockerfile: infra/minio/Dockerfile }
+    image: webradio-minio-init:local
+    <<: *one-shot
+    secrets: [minio_root_user, minio_root_password, minio_api_access_key, minio_api_secret_key, minio_worker_access_key, minio_worker_secret_key]
+    tmpfs: [/tmp]
+    networks: [dados]
+    mem_limit: 128m
+    pids_limit: 50
+    depends_on:
+      minio: { condition: service_healthy }
+
+  # ------------------------------------------------------------------ aplicação
+  api:
+    build: { context: ., dockerfile: backend/Dockerfile.api }
+    image: webradio-api:local
+    <<: *endurecido
+    environment:
+      <<: *dotnet-env
+      # Hosts aceitos (sem '*'): o nginx repassa Host = PUBLIC_AUTHORITY; o Liquidsoap usa "api"; o healthcheck, 127.0.0.1.
+      AllowedHosts: "${PUBLIC_HOST:?Defina PUBLIC_HOST no .env};api;127.0.0.1"
+      # S-A11: só a rede app (o nginx) pode dizer o IP do cliente.
+      Rede__SubnetApp: "172.30.1.0/24"
+      # D17/S-A06: :8080 SÓ no IP fixo da api na rede app (o nginx); :8081 SÓ no IP fixo da api na rede playout
+      # e no loopback (healthcheck). Nenhum listener em 0.0.0.0: o Liquidsoap não alcança a :8080, o web não alcança a :8081.
+      Kestrel__Endpoints__Publico__Url: "http://172.30.1.10:8080"
+      Kestrel__Endpoints__InternoLoopback__Url: "http://127.0.0.1:8081"
+      Kestrel__Endpoints__InternoPlayout__Url: "http://172.30.3.10:8081"
+    # R1 (Sentinel): o PBKDF2 tem semáforo global (uma vaga por CPU visível); o teto de CPU e memória
+    # impede que um pico de login derrube o resto do host (o streaming roda na mesma máquina).
+    cpus: 2
+    mem_limit: 512m
+    pids_limit: 200
+    secrets:
+      - { source: jwt_signing_key, target: Jwt__SigningKey }
+      - { source: seguranca_pepper, target: Seguranca__Pepper }
+      - { source: playout_token, target: Playout__Token }
+      - { source: db_app_password, target: Banco__Senha }
+      - { source: minio_api_access_key, target: Storage__AccessKey }
+      - { source: minio_api_secret_key, target: Storage__SecretKey }
+      - { source: redis_password, target: Redis__Password }
+      - { source: seed_admin_email, target: Seed__AdminEmail }
+      - { source: seed_admin_senha, target: Seed__AdminSenha }
+    tmpfs: [/tmp]
+    networks:
+      app: { ipv4_address: 172.30.1.10 }
+      dados: {}
+      playout: { ipv4_address: 172.30.3.10 }
+    depends_on:
+      migrator: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  worker:
+    build: { context: ., dockerfile: backend/Dockerfile.worker }
+    image: webradio-worker:local
+    <<: *endurecido
+    environment:
+      <<: *dotnet-env
+    # Sem JWT nem pepper (05 §5.1).
+    secrets:
+      - { source: db_app_password, target: Banco__Senha }
+      - { source: minio_worker_access_key, target: Storage__AccessKey }
+      - { source: minio_worker_secret_key, target: Storage__SecretKey }
+      - { source: redis_password, target: Redis__Password }
+    tmpfs: [/tmp]
+    networks: [dados]
+    cpus: 1
+    mem_limit: 256m
+    pids_limit: 100
+    depends_on:
+      migrator: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      # O worker não tem HTTP: o ciclo de 10 s grava /tmp/worker-heartbeat; parado há mais de 60 s = unhealthy.
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(stat -c %Y /tmp/worker-heartbeat) )) -lt 60"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+
+  # Reservado (D16): a imagem com o ffmpeg mínimo chega no Épico 4. Sem rede e sem segredo.
+  sanitizer:
+    image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+    profiles: [sanitizacao]
+    <<: *endurecido
+    network_mode: none
+    user: "65532:65532"
+    command: ["sleep", "infinity"]
+    mem_limit: 256m
+    pids_limit: 50
+
+  # ------------------------------------------------------------------ playout
+  icecast:
+    build: { context: ., dockerfile: infra/icecast/Dockerfile }
+    image: webradio-icecast:local
+    <<: *endurecido
+    environment:
+      ICECAST_HOSTNAME: "${PUBLIC_HOST:?Defina PUBLIC_HOST no .env}"
+    secrets: [icecast_source_password, icecast_admin_user, icecast_admin_password, icecast_relay_password]
+    tmpfs: ["/tmp:uid=100,gid=101,mode=0700"]
+    networks: [playout, midia-borda]
+    mem_limit: 128m
+    pids_limit: 100
+
+  liquidsoap:
+    image: savonet/liquidsoap@sha256:8c1918482b76ca11191162a07ab47a7f0e0697e7b1a23e81b55cba0552f61e8e # v2.4.0, uid 100
+    <<: *endurecido
+    command: ["/etc/liquidsoap/radio.liq"]
+    environment:
+      API_INTERNA: "http://api:8081"
+    secrets: [playout_token, icecast_source_password, liquidsoap_harbor_password]
+    volumes:
+      - ./infra/liquidsoap/radio.liq:/etc/liquidsoap/radio.liq:ro
+      - ./infra/liquidsoap/playlist-teste:/musica-teste:ro
+    tmpfs: ["/tmp:uid=100,gid=101"]
+    # Só a rede playout: o Liquidsoap NÃO alcança sqlserver nem redis (DoD da F16).
+    networks: [playout]
+    mem_limit: 256m
+    pids_limit: 100
+    depends_on:
+      icecast: { condition: service_healthy }
+    healthcheck:
+      # "mount ativo no Icecast": o mount é <hidden> (S-A07) e não aparece no status-json; o Icecast só responde 200 a um
+      # GET /radio.mp3 quando há fonte conectada (sem fonte é 404). Lê só a linha de status e fecha.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/icecast/8000 && printf 'GET /radio.mp3 HTTP/1.0\\r\\nHost: icecast\\r\\n\\r\\n' >&3 && read -r linha <&3 && [[ $$linha == *' 200 '* ]]"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  # ------------------------------------------------------------------ borda
+  web:
+    build: { context: ., dockerfile: frontend/Dockerfile }
+    image: webradio-web:local
+    <<: *endurecido
+    environment:
+      PUBLIC_HOST: "${PUBLIC_HOST:?Defina PUBLIC_HOST no .env}"
+      PUBLIC_AUTHORITY: "${PUBLIC_AUTHORITY:?Defina PUBLIC_AUTHORITY no .env}"
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    # nginx-unprivileged roda como uid 101: o envsubst escreve o default.conf no conf.d (tmpfs) na subida.
+    tmpfs:
+      - "/tmp:uid=101,gid=101"
+      - "/var/cache/nginx:uid=101,gid=101"
+      - "/etc/nginx/conf.d:uid=101,gid=101"
+    networks: [borda, app, midia-borda]
+    mem_limit: 128m
+    pids_limit: 100
+    depends_on:
+      api: { condition: service_healthy }
+      icecast: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    healthcheck:
+      # Com o Host público: qualquer outro Host cai no server default do nginx, que fecha a conexão (444).
+      test: ["CMD-SHELL", "wget -q -O /dev/null --header \"Host: $${PUBLIC_HOST}\" http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+networks:
+  borda: {}
+  app:
+    internal: true
+    ipam:
+      config: [{ subnet: 172.30.1.0/24 }]
+  dados:
+    internal: true
+    ipam:
+      config: [{ subnet: 172.30.2.0/24 }]
+  playout:
+    internal: true
+    ipam:
+      config: [{ subnet: 172.30.3.0/24 }]
+  midia-borda:
+    internal: true
+    ipam:
+      config: [{ subnet: 172.30.4.0/24 }]
+
+volumes:
+  sqlserver-data: {}
+  minio-data: {}
+  redis-data: {}
+
+# Um arquivo por segredo, gerado por infra/scripts/gerar-segredos.sh (nunca versionado).
+secrets:
+  jwt_signing_key: { file: ./secrets/jwt_signing_key }
+  seguranca_pepper: { file: ./secrets/seguranca_pepper }
+  playout_token: { file: ./secrets/playout_token }
+  redis_password: { file: ./secrets/redis_password }
+  mssql_sa_password: { file: ./secrets/mssql_sa_password }
+  db_migrator_password: { file: ./secrets/db_migrator_password }
+  db_app_password: { file: ./secrets/db_app_password }
+  db_relatorio_password: { file: ./secrets/db_relatorio_password }
+  minio_root_user: { file: ./secrets/minio_root_user }
+  minio_root_password: { file: ./secrets/minio_root_password }
+  minio_api_access_key: { file: ./secrets/minio_api_access_key }
+  minio_api_secret_key: { file: ./secrets/minio_api_secret_key }
+  minio_worker_access_key: { file: ./secrets/minio_worker_access_key }
+  minio_worker_secret_key: { file: ./secrets/minio_worker_secret_key }
+  icecast_source_password: { file: ./secrets/icecast_source_password }
+  icecast_admin_user: { file: ./secrets/icecast_admin_user }
+  icecast_admin_password: { file: ./secrets/icecast_admin_password }
+  icecast_relay_password: { file: ./secrets/icecast_relay_password }
+  liquidsoap_harbor_password: { file: ./secrets/liquidsoap_harbor_password }
+  seed_admin_email: { file: ./secrets/seed_admin_email }
+  seed_admin_senha: { file: ./secrets/seed_admin_senha }

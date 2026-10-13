@@ -8,6 +8,8 @@ builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);
 // Log JSON em UTC, uma linha por evento. Nenhuma mensagem do Worker leva connection string, senha ou dado de ouvinte.
 builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole(o => o.UseUtcTimestamp = true);
+// Cada comando SQL do ciclo de 10 s sairia como Information.
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
 
 // Liderança (sp_getapplock), ciclo de 10 s com heartbeat e manutenção diária (E1-F11).
 builder.Services.AddWorkerInfrastructure(builder.Configuration);
