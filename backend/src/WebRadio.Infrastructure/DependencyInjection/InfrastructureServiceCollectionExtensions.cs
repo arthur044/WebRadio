@@ -21,11 +21,26 @@ public static class InfrastructureServiceCollectionExtensions
 {
     public const string ConnectionStringName = "RadioDb";
 
-    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    /// <summary>
+    /// 05 §5.3: a senha NÃO fica na connection string do compose. Ela chega por arquivo (<c>/run/secrets/Banco__Senha</c>,
+    /// chave <c>Banco:Senha</c>) e é montada aqui, em memória. Sem <c>Banco:Senha</c>, vale a string como veio (dev local).
+    /// </summary>
+    public static string ConnectionStringDoBanco(IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString(ConnectionStringName)
-            ?? throw new InvalidOperationException($"Connection string '{ConnectionStringName}' não configurada.");
+        var connectionString = configuration.GetConnectionString(ConnectionStringName);
+        if (string.IsNullOrWhiteSpace(connectionString))
+            throw new InvalidOperationException($"Connection string '{ConnectionStringName}' não configurada.");
 
+        var senha = configuration["Banco:Senha"];
+        if (string.IsNullOrEmpty(senha)) return connectionString;
+        // S-C02: mesmo fail-fast dos outros segredos, para a Api e para o Worker. A mensagem nunca traz o valor.
+        if (senha.Contains("__GERAR__", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Banco:Senha contém um valor de exemplo (__GERAR__). Rode infra/scripts/gerar-segredos.sh.");
+        return new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString) { Password = senha }.ConnectionString;
+    }
+
+    /// <summary>O <see cref="RadioDbContext"/> com a mesma configuração para a Api e para o Worker.</summary>
+    internal static IServiceCollection AddRadioDbContext(this IServiceCollection services, string connectionString) =>
         services.AddDbContext<RadioDbContext>(options =>
             options.UseSqlServer(connectionString, sql =>
             {
@@ -39,6 +54,10 @@ public static class InfrastructureServiceCollectionExtensions
                 sql.EnableRetryOnFailure();
                 sql.MigrationsAssembly(typeof(RadioDbContext).Assembly.FullName);
             }));
+
+    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddRadioDbContext(ConnectionStringDoBanco(configuration));
 
         services.AddScoped<IRadioDbContext>(sp => sp.GetRequiredService<RadioDbContext>());
         services.AddScoped<ITransacaoComTrava, TransacaoComTrava>();
