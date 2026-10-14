@@ -38,7 +38,8 @@ services:
       Seguranca__PermitirScannerNoOp: "true"
 
   worker:
-    environment: *dev-env
+    environment:
+      DOTNET_ENVIRONMENT: Development
 
   liquidsoap:
     ports:

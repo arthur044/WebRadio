@@ -17,22 +17,36 @@
 # =============================================================================
 name: webradio
 
+# Rotação dos logs (B3-02, S-B04): o json-file padrão cresce sem limite. 10 MB × 3 arquivos = no máximo 30 MB por serviço.
+# A retenção de 14 dias (IP anonimizado do nginx) depende de um passo no host: docs/operacao-logs.md.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 x-endurecido: &endurecido
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
   read_only: true
   restart: unless-stopped
+  logging: *logging
 
 x-one-shot: &one-shot
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
   read_only: true
   restart: "no"
+  logging: *logging
 
+# Só a Api (host web: ASPNETCORE_ENVIRONMENT). O Worker é host genérico e lê DOTNET_ENVIRONMENT (B3-04): tem o próprio bloco.
+# Application Name por serviço vem do código (NomesDeAplicacao), não daqui. TrustServerCertificate=True nos três clientes do
+# SQL (api, worker, migrator): risco aceito em produção enquanto valerem os gatilhos de docs/conexao-sql-server.md §2; o
+# smoke confere que os três têm o MESMO valor e que nenhum contêiner da rede dados tem NET_RAW/NET_ADMIN.
 x-dotnet-env: &dotnet-env
   ASPNETCORE_ENVIRONMENT: Production
   DOTNET_gcServer: "0"
-  ConnectionStrings__RadioDb: "Server=sqlserver;Database=WebRadio;User Id=webradio_app;Encrypt=True;TrustServerCertificate=True;Application Name=webradio"
+  ConnectionStrings__RadioDb: "Server=sqlserver;Database=WebRadio;User Id=webradio_app;Encrypt=True;TrustServerCertificate=True;Max Pool Size=50;Min Pool Size=0;Connect Timeout=10"
   Redis__Host: "redis"
   Storage__Endpoint: "minio:9000"
   Storage__PublicEndpoint: "${PUBLIC_ORIGIN:?Defina PUBLIC_ORIGIN no .env (rode infra/scripts/gerar-segredos.sh)}/storage"
@@ -93,6 +107,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       DB_SERVER: sqlserver
       DB_NAME: WebRadio
+      DB_TRUST_SERVER_CERTIFICATE: "True" # o mesmo valor da Api e do Worker (B3-03); o smoke compara os três
       DB_MIGRATOR_PASSWORD_FILE: /run/secrets/db_migrator_password
     secrets: [db_migrator_password]
     tmpfs: [/tmp]
@@ -131,6 +146,8 @@ services:
       MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
       MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
       MINIO_BROWSER: "off"
+      MC_HOST_local: "http://127.0.0.1:9000"
+      MC_CONFIG_DIR: /tmp/mc
     secrets: [minio_root_user, minio_root_password]
     volumes:
       - minio-data:/data
@@ -139,10 +156,11 @@ services:
     mem_limit: 512m
     pids_limit: 200
     healthcheck:
-      # Sem curl/wget na imagem: HTTP cru pelo /dev/tcp do bash, no endpoint de liveness do MinIO.
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /minio/health/live HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n' >&3 && read -r linha <&3 && [[ $$linha == *' 200 '* ]]"]
+      # `mc ready local` (a spec, 04 §Serviços): o mc vem na imagem; o alias "local" sai de MC_HOST_local (sem credencial,
+      # o endpoint de saúde do cluster é anônimo) e o diretório de configuração vai para o tmpfs (o rootfs é só leitura).
+      test: ["CMD", "mc", "ready", "local"]
       interval: 5s
-      timeout: 3s
+      timeout: 5s
       retries: 20
 
   minio-init:
@@ -209,13 +227,14 @@ services:
     image: webradio-worker:local
     <<: *endurecido
     environment:
-      <<: *dotnet-env
-    # Sem JWT nem pepper (05 §5.1).
+      # O host genérico lê DOTNET_ENVIRONMENT (B3-04); o dev.yml troca para Development.
+      DOTNET_ENVIRONMENT: Production
+      DOTNET_gcServer: "0"
+      ConnectionStrings__RadioDb: "Server=sqlserver;Database=WebRadio;User Id=webradio_app;Encrypt=True;TrustServerCertificate=True;Max Pool Size=20;Min Pool Size=0;Connect Timeout=10"
+    # Só o segredo que o código lê hoje (B3-11): o banco. Sem JWT, pepper, Redis nem MinIO; esses voltam quando um job do
+    # Worker precisar deles (Épico 4: sanitização no MinIO, locks no Redis).
     secrets:
       - { source: db_app_password, target: Banco__Senha }
-      - { source: minio_worker_access_key, target: Storage__AccessKey }
-      - { source: minio_worker_secret_key, target: Storage__SecretKey }
-      - { source: redis_password, target: Redis__Password }
     tmpfs: [/tmp]
     networks: [dados]
     cpus: 1
@@ -223,8 +242,6 @@ services:
     pids_limit: 100
     depends_on:
       migrator: { condition: service_completed_successfully }
-      minio-init: { condition: service_completed_successfully }
-      redis: { condition: service_healthy }
     healthcheck:
       # O worker não tem HTTP: o ciclo de 10 s grava /tmp/worker-heartbeat; parado há mais de ~30 s (3 ciclos) = unhealthy
       # (04, F11). Com retries 3 o contêiner é marcado unhealthy ~30 s depois do limite, não ~2 min.
