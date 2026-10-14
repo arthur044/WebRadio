@@ -27,4 +27,5 @@ done
 Zerar toda semana garante que nada passe de 7 dias (folga sobre os 14). O comando não derruba o contêiner nem perde o stream.
 Se um dia os logs forem para um coletor central (Loki, ELK), a retenção de 14 dias passa a ser configurada lá e este passo sai.
 
-Este passo é **operacional**, não está automatizado no repositório: quem opera a produção instala o cron.
+**Sem esse cron a retenção de 14 dias do S-B04 NÃO é cumprida**: só a rotação por tamanho está garantida pelo compose. Este passo é
+**operacional** e não está automatizado no repositório: quem opera a produção instala o cron (o Sentinel avalia o risco no review do B3).
