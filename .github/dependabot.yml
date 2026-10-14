@@ -1,0 +1,49 @@
+# F17b (05 §9.2): sem isto os SHAs das Actions e as dependências envelhecem sem aviso. Atualizações semanais, agrupadas por
+# ecossistema para não abrir um PR por pacote. As imagens do docker-compose.yml são fixadas por digest (sem tag), e o
+# Dependabot só acompanha Dockerfile: a atualização dessas imagens é manual, conferida no PR que a troca.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: "nuget"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    groups:
+      nuget:
+        patterns: ["*"]
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    groups:
+      npm:
+        patterns: ["*"]
+
+  # Um bloco por pasta com Dockerfile.
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/infra/icecast"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/infra/minio"
+    schedule:
+      interval: "weekly"

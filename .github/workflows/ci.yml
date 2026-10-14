@@ -5,41 +5,70 @@ on:
     branches: [main]
   pull_request:
 
-permissions:
-  contents: read
+# Permissões mínimas (05 §9.1): nada no topo, `contents: read` só em cada job. Concorrência: um PR novo cancela a rodada
+# anterior do mesmo PR; na `main` nenhuma rodada é cancelada (cada commit mergeado fica com o resultado dele).
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   GITLEAKS_VERSION: "8.30.1"
+  # sha256 ESPERADO do tarball, fixado aqui (05 §9.2): o checksums.txt da mesma release só provaria integridade do download,
+  # não autenticidade. Ao subir a versão, o valor novo vem de uma conferência independente da release, nunca do próprio download.
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  # Imagem do SQL Server dos testes: a mesma, por digest, do docker-compose.yml.
+  MSSQL_IMAGEM: "mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090"
 
 jobs:
   seguranca:
     name: Segurança (gitleaks)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Instalar gitleaks (binário verificado por checksum, sem Action de terceiros com licença)
+      - name: Instalar gitleaks (binário com sha256 esperado fixado no workflow)
         run: |
           set -euo pipefail
           curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
-          sha256sum --ignore-missing -c "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          echo "${GITLEAKS_SHA256}  gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | sha256sum -c -
           tar -xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
           sudo mv gitleaks /usr/local/bin/gitleaks
 
       - name: gitleaks detect
         run: gitleaks detect --source . --redact -v
 
+      - name: .env.example sem segredo com valor (S-C02, 05 §9.5)
+        run: |
+          # Não usar "! grep ...": com o "bash -e" do Actions, um pipeline negado que não é o último comando do passo não
+          # derruba o passo. -i é obrigatório: as chaves .NET são em caixa mista (Jwt__SigningKey, Seguranca__Pepper).
+          violacoes=$(grep -iE '^[A-Za-z0-9_]*(PASSWORD|SECRET|SENHA|TOKEN|KEY|PEPPER)[A-Za-z0-9_]*=' .env.example \
+              | grep -vE '=__GERAR__$' | cut -d= -f1 || true)
+          if [ -n "$violacoes" ]; then
+            echo "::error::Segredo com valor real no .env.example: $violacoes"   # só os nomes, nunca o valor
+            exit 1
+          fi
+
   backend-unit:
     name: Backend (unit + arquitetura)
     runs-on: ubuntu-latest
     needs: seguranca
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -59,11 +88,107 @@ jobs:
           --logger "trx"
           --collect:"XPlat Code Coverage"
 
+  # B3-01: o aceite da F11 (liderança, reeleição, manutenção em lotes) só existe contra SQL Server de verdade. Aqui os
+  # [SqlFact] rodam com WEBRADIO_TEST_SQL apontando para um SQL Server do próprio job; se o servidor não responder o teste
+  # FALHA (BancoDeTeste não ignora com a variável definida) e, no fim, um passo recusa qualquer teste pulado.
+  backend-sql:
+    name: Backend (SQL Server real)
+    runs-on: ubuntu-latest
+    needs: seguranca
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: backend/global.json
+
+      - name: Restore e build
+        run: |
+          dotnet restore backend/WebRadio.slnx
+          dotnet build backend/WebRadio.slnx --no-restore --configuration Release
+
+      - name: SQL Server de teste (senha gerada nesta execução, nenhum segredo cadastrado)
+        run: |
+          set -euo pipefail
+          senha="Wr$(openssl rand -hex 16)A1"
+          echo "::add-mask::${senha}"
+          docker run -d --name mssql-teste -p 127.0.0.1:1433:1433 \
+            -e ACCEPT_EULA=Y -e MSSQL_PID=Developer -e "MSSQL_SA_PASSWORD=${senha}" "${MSSQL_IMAGEM}" >/dev/null
+          for _ in $(seq 1 60); do
+            if docker exec -e "SQLCMDPASSWORD=${senha}" mssql-teste /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -b -Q "SELECT 1" >/dev/null 2>&1; then
+              echo "WEBRADIO_TEST_SQL=Server=127.0.0.1,1433;User Id=sa;Password=${senha};TrustServerCertificate=True;Encrypt=True;Connect Timeout=15" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::O SQL Server de teste não ficou pronto em 2 minutos."
+          docker logs --tail 30 mssql-teste
+          exit 1
+
+      - name: Test (Infrastructure.Tests inteiro, com SQL real)
+        run: >
+          dotnet test backend/tests/WebRadio.Infrastructure.Tests --no-build --configuration Release
+          --logger "trx;LogFileName=sql.trx" --results-directory "$RUNNER_TEMP/resultados"
+
+      - name: Nenhum teste pulado (um [SqlFact] ignorado seria um verde falso)
+        run: |
+          trx="$RUNNER_TEMP/resultados/sql.trx"
+          executados=$(grep -c 'outcome="Passed"' "$trx" || true)
+          pulados=$(grep -c 'outcome="NotExecuted"' "$trx" || true)
+          echo "executados=${executados} pulados=${pulados}"
+          if [ "${pulados}" -ne 0 ]; then
+            echo "::error::${pulados} teste(s) pulado(s) no job com SQL Server."
+            exit 1
+          fi
+          # Piso contra um filtro que passe a não rodar nada; sobe quando entrarem mais testes.
+          if [ "${executados}" -lt 100 ]; then
+            echo "::error::Só ${executados} teste(s) executado(s); o esperado é no mínimo 100."
+            exit 1
+          fi
+
+      - name: Estado em caso de falha
+        if: failure()
+        run: docker logs --tail 40 mssql-teste || true
+
+      - name: Derrubar o SQL Server
+        if: always()
+        run: docker rm -f mssql-teste >/dev/null 2>&1 || true
+
+  # B3-01: os dois teste.sh de infraestrutura (hardening do Icecast e playout do Liquidsoap) não rodavam em nenhum job.
+  # O do Liquidsoap usa a imagem webradio-icecast:teste que o do Icecast constrói: a ordem importa.
+  infra-testes:
+    name: Infra (teste.sh do Icecast e do Liquidsoap)
+    runs-on: ubuntu-latest
+    needs: seguranca
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: infra/icecast/teste.sh
+        run: infra/icecast/teste.sh
+
+      - name: infra/liquidsoap/teste.sh
+        run: infra/liquidsoap/teste.sh
+
   compose-smoke:
     name: Compose (smoke da Definição de Pronto)
     runs-on: ubuntu-latest
     needs: seguranca
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,7 +199,9 @@ jobs:
         run: infra/scripts/gerar-segredos.sh dev
 
       - name: docker compose config (sem segredo literal)
-        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
 
       - name: Build das imagens
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml build
@@ -82,7 +209,7 @@ jobs:
       - name: Subir e esperar healthy (DoD 1, < 3 min)
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait --wait-timeout 180
 
-      - name: Smoke (DoD 2–4, 7, 8 e isolamento de rede)
+      - name: Smoke (DoD 2–4, 7, 8, isolamento de rede e topologia da base de produção)
         run: infra/scripts/smoke-compose.sh
 
       - name: Estado e logs em caso de falha

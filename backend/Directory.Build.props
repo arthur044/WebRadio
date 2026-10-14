@@ -16,6 +16,14 @@
     -->
     <InvariantGlobalization>false</InvariantGlobalization>
     <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
+    <!--
+      F17b (05 §9.5): auditoria de vulnerabilidades do NuGet explícita, também nas dependências transitivas. Com
+      TreatWarningsAsErrors, o nível padrão (low) quebraria o build por um NU1901 de baixa gravidade; de "moderate" para cima
+      (NU1902–NU1904) quebra, de propósito. O job `vulnerabilidades` do CI (trivy, npm audit) é outra tarefa (F17).
+    -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>moderate</NuGetAuditLevel>
   </PropertyGroup>
 
   <!-- Projetos de teste relaxam algumas regras que atrapalham fixtures/mocks -->
