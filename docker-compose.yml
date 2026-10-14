@@ -138,8 +138,8 @@ services:
 
   minio:
     # A MinIO deixou de publicar imagens oficiais (minio/minio e quay.io); esta é a build da Chainguard, a partir do
-    # código-fonte, sem root (uid 65532). Fixada por digest.
-    image: cgr.dev/chainguard/minio@sha256:4692462f35d97d7e82c30371d82f057703c5d9489bcae726010594c812f2d285
+    # código-fonte, sem root (uid 65532). Fixada por digest (latest de 2026-10-14; a Chainguard só publica a tag latest no plano gratuito).
+    image: cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
     <<: *endurecido
     command: ["server", "/data"]
     environment:
