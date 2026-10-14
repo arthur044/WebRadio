@@ -47,6 +47,8 @@ echo "== 03-schema-sqlserver.sql em $DB_03"
 sql -d "$DB_03" -i /dev/stdin < docs/specs/03-schema-sqlserver.sql > "$TMP/03.log" 2>&1 || { cat "$TMP/03.log"; echo "FALHA: o 03 não rodou." >&2; exit 1; }
 
 echo "== dotnet ef migrations script --idempotent em $DB_EF"
+# O dotnet-ef lê o project.assets.json: num checkout limpo (CI) sem restore ele falha com "Unable to retrieve project metadata".
+dotnet restore backend/src/WebRadio.Infrastructure --verbosity quiet > "$TMP/restore.log" 2>&1 || { cat "$TMP/restore.log"; echo "FALHA: o restore do projeto não rodou." >&2; exit 1; }
 "$DOTNET_EF" migrations script --idempotent --project backend/src/WebRadio.Infrastructure --output "$TMP/ef.sql" > "$TMP/ef-gerar.log" 2>&1 \
   || { cat "$TMP/ef-gerar.log"; echo "FALHA: o EF não gerou o script." >&2; exit 1; }
 # O script do EF começa com BOM UTF-8, que o sqlcmd leria como lixo na linha 1.
