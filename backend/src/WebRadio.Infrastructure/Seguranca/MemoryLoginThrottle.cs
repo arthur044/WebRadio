@@ -133,9 +133,16 @@ public sealed class MemoryLoginThrottle(IClock clock, IIpHasher pseudonimizador,
             var excesso = Entradas - LimiteDeEntradas;
             if (excesso < 0) return;
             var descartar = excesso + LimiteDeEntradas / 10;
-            foreach (var k in _pares.OrderBy(x => x.Value.UltimaEmUtc).Take(descartar).Select(x => x.Key).ToList()) Remover(_pares, k);
+            // Só pares NÃO bloqueados no 1º passo (os mais antigos primeiro): um bloqueio ativo é o que o atacante quer ver
+            // solto, e descartar por antiguidade pura destrancaria a vítima assim que uma enxurrada de e-mails inventados chegasse.
+            bool Bloqueado(Par p) => p.BloqueadoAte is { } ate && ate > agora;
+            foreach (var k in _pares.Where(x => !Bloqueado(x.Value)).OrderBy(x => x.Value.UltimaEmUtc).Take(descartar).Select(x => x.Key).ToList())
+                Remover(_pares, k);
             if (Entradas >= LimiteDeEntradas)
                 foreach (var k in _contas.OrderBy(x => x.Value.InicioDaJanelaUtc).Take(descartar).Select(x => x.Key).ToList()) Remover(_contas, k);
+            // Último recurso (só bloqueados sobraram e o teto segue estourado): sai o bloqueio mais antigo, para a memória não crescer.
+            if (Entradas >= LimiteDeEntradas)
+                foreach (var k in _pares.OrderBy(x => x.Value.UltimaEmUtc).Take(Entradas - LimiteDeEntradas + 1).Select(x => x.Key).ToList()) Remover(_pares, k);
         }
     }
 }

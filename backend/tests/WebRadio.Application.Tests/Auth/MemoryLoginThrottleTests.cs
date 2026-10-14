@@ -90,6 +90,23 @@ public class MemoryLoginThrottleTests
     }
 
     [Fact]
+    public async Task Teto_de_entradas_descarta_os_pares_nao_bloqueados_antes_dos_bloqueados()
+    {
+        // Um par bloqueado é o MAIS ANTIGO da memória. Descartar por antiguidade pura soltaria justamente quem o atacante
+        // quer ver liberado: uma enxurrada de e-mails inventados destrancaria a conta da vítima (#19).
+        await Falhar(5, "VITIMA@X.COM");
+        Assert.True((await _t.AvaliarAsync("VITIMA@X.COM", IpHash, default)).Bloqueado);
+
+        for (var i = 0; i < MemoryLoginThrottle.LimiteDeEntradas + 1000; i++)
+        {
+            _relogio.UtcNow = Agora.AddMilliseconds(i + 1);
+            await _t.RegistrarFalhaAsync($"U{i}@X.COM", IpHash, default);
+        }
+
+        Assert.True((await _t.AvaliarAsync("VITIMA@X.COM", IpHash, default)).Bloqueado);
+    }
+
+    [Fact]
     public async Task Limpeza_por_tempo_remove_entradas_vencidas_sem_custo_por_falha()
     {
         await Falhar(1, "VELHO@X.COM");
