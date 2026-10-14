@@ -237,6 +237,31 @@ jobs:
         if: always()
         run: docker rm -f mssql-ddl >/dev/null 2>&1 || true
 
+  # F17: lint, testes e build do frontend. O vitest exige Node >= 22.12 e o Node do runner é mais antigo, então os comandos
+  # rodam na MESMA imagem node (por digest) do build de produção (frontend/Dockerfile): o que passa aqui é o que vai para a
+  # imagem, sem uma action nova (actions/setup-node precisaria entrar no patterns_allowed do repositório).
+  frontend:
+    name: Frontend (lint, testes e build)
+    runs-on: ubuntu-latest
+    needs: seguranca
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: npm ci, lint, testes e build (imagem node do frontend/Dockerfile)
+        run: |
+          set -euo pipefail
+          imagem="$(grep -m1 '^FROM node@' frontend/Dockerfile | awk '{print $2}')"
+          [[ "${imagem}" == node@sha256:* ]] || { echo "::error::Não achei a imagem node (por digest) no frontend/Dockerfile."; exit 1; }
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/npm \
+            -v "$PWD/frontend:/app" -w /app "${imagem}" \
+            sh -c 'set -e; npm ci --no-audit --no-fund; npm run lint; npm test; npm run build'
+
   compose-smoke:
     name: Compose (smoke da Definição de Pronto)
     runs-on: ubuntu-latest
