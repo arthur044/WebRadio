@@ -62,6 +62,8 @@ if [[ -n "$token" ]]; then
   esperar "rota qualquer com token restrito" 403 "$(status -H "Authorization: Bearer $token" "$BASE/api/v1/stream/qualquer")"
   esperar "refresh sem Origin" 403 "$(status -b "$TMP/cookies" -X POST "$BASE/api/v1/auth/refresh")"
   esperar "refresh com Origin de outra origem" 403 "$(status -b "$TMP/cookies" -H 'Origin: https://evil.example' -X POST "$BASE/api/v1/auth/refresh")"
+  # O nginx reescreve o X-Forwarded-Host/Proto (default.conf.template): um cliente que os forja não vira "a própria origem" (#19).
+  esperar "refresh com X-Forwarded-Host forjado" 403 "$(status -b "$TMP/cookies" -H 'Origin: https://evil.example' -H 'X-Forwarded-Host: evil.example' -H 'X-Forwarded-Proto: https' -X POST "$BASE/api/v1/auth/refresh")"
   esperar "refresh da mesma origem" 200 "$(status -b "$TMP/cookies" -H "Origin: $ORIGEM" -X POST "$BASE/api/v1/auth/refresh")"
 else
   falha "login do Admin (sem accessToken; o Admin já trocou a senha? use volumes limpos)"
