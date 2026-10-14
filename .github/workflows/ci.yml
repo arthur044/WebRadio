@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Semanal (segunda, 06:17 UTC), SÓ para o job `vulnerabilidades` (e o `seguranca`, de que ele depende): CVE nova aparece sem
+  # esperar um commit. Roda na main (agendamento só vale no branch padrão); os demais jobs não rodam no cron.
+  schedule:
+    - cron: "17 6 * * 1"
 
 # Permissões mínimas (05 §9.1): nada no topo, `contents: read` só em cada job. Concorrência: um PR novo cancela a rodada
 # anterior do mesmo PR; na `main` nenhuma rodada é cancelada (cada commit mergeado fica com o resultado dele).
@@ -68,6 +72,7 @@ jobs:
   backend-unit:
     name: Backend (unit + arquitetura)
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     needs: seguranca
     timeout-minutes: 20
     permissions:
@@ -102,6 +107,7 @@ jobs:
   backend-sql:
     name: Backend (SQL Server real)
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     needs: seguranca
     timeout-minutes: 30
     permissions:
@@ -188,6 +194,7 @@ jobs:
   infra-testes:
     name: Infra (teste.sh do Icecast e do Liquidsoap)
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     needs: seguranca
     timeout-minutes: 20
     permissions:
@@ -209,6 +216,7 @@ jobs:
   ddl-check:
     name: DDL (03 × migrations do EF)
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     needs: seguranca
     timeout-minutes: 20
     permissions:
@@ -262,6 +270,7 @@ jobs:
   frontend:
     name: Frontend (lint, testes e build)
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     needs: seguranca
     timeout-minutes: 20
     permissions:
@@ -377,6 +386,7 @@ jobs:
   compose-smoke:
     name: Compose (smoke da Definição de Pronto)
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     needs: seguranca
     timeout-minutes: 30
     permissions:
