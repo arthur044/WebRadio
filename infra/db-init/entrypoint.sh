@@ -87,10 +87,10 @@ validar_alfabeto_senha "DB_APP_PASSWORD" "$APP_PASSWORD"
 validar_alfabeto_senha "DB_MIGRATOR_PASSWORD" "$MIGRATOR_PASSWORD"
 validar_alfabeto_senha "DB_RELATORIO_PASSWORD" "$RELATORIO_PASSWORD"
 
-# Argumentos comuns. -C aceita o certificado autoassinado (mesmo risco aceito do migrator, Api e Worker; docs/conexao-sql-server.md
-# §2). -l 30 = Connect Timeout da §4. O sqlcmd NÃO deixa trocar o Application Name (ele fixa program_name = SQLCMD, mesmo
+# Argumentos comuns. -N exige a conexão cifrada (gatilho iii do risco aceito: Encrypt=True fixo, sem depender do padrão do cliente) e -C aceita
+# o certificado autoassinado (mesmo risco aceito do migrator, Api e Worker; docs/conexao-sql-server.md §2). -l 30 = Connect Timeout da §4. O sqlcmd NÃO deixa trocar o Application Name (ele fixa program_name = SQLCMD, mesmo
 # com APP= num DSN): o db-init se identifica por -H, em sys.dm_exec_sessions.host_name = WebRadio.DbInit.
-SQLCMD_BASE=(-b -C -I -S "$DB_SERVER" -U sa -l 30 -H WebRadio.DbInit)
+SQLCMD_BASE=(-b -C -N -I -S "$DB_SERVER" -U sa -l 30 -H WebRadio.DbInit)
 
 # SQLCMDPASSWORD, nunca -P (S-A10): -P fica visível por inteiro em `ps aux` e em
 # `docker inspect` (args do processo), SQLCMDPASSWORD só existe no ambiente do processo.

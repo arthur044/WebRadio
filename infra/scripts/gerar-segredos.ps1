@@ -28,7 +28,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $DirRaiz = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 
-if ($AdminEmail -and $AdminEmail -cnotmatch '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$') {
+if ($AdminEmail -and $AdminEmail -cnotmatch '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\z') {
     throw 'E-mail do Admin inválido.'
 }
 if ($Modo -eq 'prod' -and -not $AdminEmail -and -not (Test-Path (Join-Path $DirRaiz 'secrets\seed_admin_email'))) {

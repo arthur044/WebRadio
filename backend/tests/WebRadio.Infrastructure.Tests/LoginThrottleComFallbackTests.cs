@@ -153,5 +153,6 @@ public class LoginThrottleComFallbackTests
 
         var aviso = Assert.Single(log.Linhas, l => l.Nivel == Microsoft.Extensions.Logging.LogLevel.Warning);
         Assert.Contains("InvalidOperationException", aviso.Texto);
+        Assert.DoesNotContain("Redis fora do ar (simulado)", aviso.Texto); // a mensagem da exceção pode trazer o endereço do Redis
     }
 }

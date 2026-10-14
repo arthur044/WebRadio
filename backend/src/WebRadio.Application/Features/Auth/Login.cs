@@ -72,6 +72,8 @@ public sealed class LoginHandler(
             usuario.AtualizarHashSenha(hasher.Hash(cmd.Senha), agora);
 
         // A sessão nova entra; se passar do teto, saem as famílias mais antigas (um refresh ativo por família: o rotacionado já está revogado).
+        // O teto NÃO é atômico: dois logins simultâneos do mesmo usuário leem 9 famílias e os dois inserem, e ele passa de 10 até o próximo
+        // login. É um teto frouxo de propósito (limita o acúmulo, não é um limite de segurança); uma trava por usuário custaria mais que vale.
         var ativos = await db.RefreshTokens.Where(t => t.UsuarioId == usuario.Id && t.RevogadoEmUtc == null && t.ExpiraEmUtc > agora).ToListAsync(ct);
         var excedentes = ativos.Select(t => t.FamiliaId).Distinct().Count() - (MaximoDeSessoesPorUsuario - 1);
         if (excedentes > 0)
