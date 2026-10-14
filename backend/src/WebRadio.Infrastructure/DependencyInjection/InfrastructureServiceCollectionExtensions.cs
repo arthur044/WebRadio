@@ -21,11 +21,34 @@ public static class InfrastructureServiceCollectionExtensions
 {
     public const string ConnectionStringName = "RadioDb";
 
-    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    /// <summary>
+    /// 05 §5.3: a senha NÃO fica na connection string do compose. Ela chega por arquivo (<c>/run/secrets/Banco__Senha</c>,
+    /// chave <c>Banco:Senha</c>) e é montada aqui, em memória. Sem <c>Banco:Senha</c>, vale a string como veio (dev local).
+    /// </summary>
+    public static string ConnectionStringDoBanco(IConfiguration configuration, bool exigirSenhaDeSegredo = false)
     {
-        var connectionString = configuration.GetConnectionString(ConnectionStringName)
-            ?? throw new InvalidOperationException($"Connection string '{ConnectionStringName}' não configurada.");
+        var connectionString = configuration.GetConnectionString(ConnectionStringName);
+        if (string.IsNullOrWhiteSpace(connectionString))
+            throw new InvalidOperationException($"Connection string '{ConnectionStringName}' não configurada.");
 
+        // null = sem arquivo de segredo (dev local, senha na própria string). Fora de Development o arquivo é obrigatório.
+        var senha = configuration["Banco:Senha"];
+        if (senha is null)
+        {
+            if (exigirSenhaDeSegredo)
+                throw new InvalidOperationException("Banco:Senha é obrigatória fora de Development (arquivo de segredo Banco__Senha). Rode infra/scripts/gerar-segredos.sh.");
+            return connectionString;
+        }
+
+        // S-C02: mesmo fail-fast dos outros segredos, para a Api e para o Worker. Arquivo presente mas vazio, de exemplo ou
+        // curto é erro de configuração: sem isto o stack subiria e só o login no SQL falharia, tarde e sem pista. Nunca traz o valor.
+        if (ValidacaoDeSegredo.Verificar("Banco:Senha", senha) is { } erro)
+            throw new InvalidOperationException(erro);
+        return new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString) { Password = senha }.ConnectionString;
+    }
+
+    /// <summary>O <see cref="RadioDbContext"/> com a mesma configuração para a Api e para o Worker.</summary>
+    internal static IServiceCollection AddRadioDbContext(this IServiceCollection services, string connectionString) =>
         services.AddDbContext<RadioDbContext>(options =>
             options.UseSqlServer(connectionString, sql =>
             {
@@ -39,6 +62,10 @@ public static class InfrastructureServiceCollectionExtensions
                 sql.EnableRetryOnFailure();
                 sql.MigrationsAssembly(typeof(RadioDbContext).Assembly.FullName);
             }));
+
+    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddRadioDbContext(ConnectionStringDoBanco(configuration));
 
         services.AddScoped<IRadioDbContext>(sp => sp.GetRequiredService<RadioDbContext>());
         services.AddScoped<ITransacaoComTrava, TransacaoComTrava>();
@@ -73,7 +100,7 @@ public static class InfrastructureServiceCollectionExtensions
             Base64Url.DecodeFromChars(sp.GetRequiredService<IConfiguration>()["Seguranca:Pepper"]!), sp.GetRequiredService<IIpHasher>()));
         AddStorage(services, configuration);
         services.AddSingleton<ITocandoAgoraStore>(sp => new TocandoAgoraStore(
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TocandoAgoraStore>>(), sp.GetService<IConnectionMultiplexer>()));
+            sp.GetRequiredService<IClock>(), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TocandoAgoraStore>>(), sp.GetService<IConnectionMultiplexer>()));
 
         services.AddScoped<IInicializadorDeDados, AdminSeeder>();
 

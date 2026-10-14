@@ -1,0 +1,47 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AssinarUploadDaQuarentenaEDoPublico",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::quarentena/*",
+        "arn:aws:s3:::publico/*"
+      ]
+    },
+    {
+      "Sid": "HeadDoConcluirNaQuarentena",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::quarentena/*"
+      ]
+    },
+    {
+      "Sid": "PreviewDaMidia",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::midia/*"
+      ]
+    },
+    {
+      "Sid": "HeadBucketExigidoPeloSdk",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::quarentena",
+        "arn:aws:s3:::midia"
+      ]
+    }
+  ]
+}

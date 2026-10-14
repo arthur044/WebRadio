@@ -29,6 +29,8 @@ builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);
 builder.Host.UseSerilog((ctx, cfg) => cfg
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
+    // Cada comando SQL sairia como Information (texto do SQL a cada request e a cada tick do outbox).
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", Serilog.Events.LogEventLevel.Warning)
     .Destructure.With<MascaraSegredosPolicy>()
     .Enrich.FromLogContext()
     .WriteTo.Console(new CompactJsonFormatter()));
@@ -73,6 +75,9 @@ if (!builder.Environment.IsDevelopment())
     // Sem Redis o bloqueio de login ficaria por réplica (N réplicas = N vezes mais tentativas): exigido fora de Development.
     if (string.IsNullOrWhiteSpace(builder.Configuration["Redis:Host"]))
         throw new InvalidOperationException("Redis:Host é obrigatório fora de Development (bloqueio de login compartilhado, D21).");
+    // A senha do banco vem do arquivo de segredo (Banco__Senha); sem ele o stack subiria e só o login no SQL falharia.
+    if (builder.Configuration["Banco:Senha"] is null)
+        throw new InvalidOperationException("Banco:Senha é obrigatória fora de Development (arquivo de segredo Banco__Senha).");
     // Sem storage não há upload nem mídia: a seção inteira é exigida (a credencial é validada pelo StorageOptionsValidator).
     if (string.IsNullOrWhiteSpace(builder.Configuration["Storage:Endpoint"]))
         throw new InvalidOperationException("Storage:Endpoint é obrigatório fora de Development (MinIO interno, ex.: minio:9000).");

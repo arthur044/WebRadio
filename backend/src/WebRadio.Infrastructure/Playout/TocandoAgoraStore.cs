@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
+using WebRadio.Application.Abstracoes;
 using WebRadio.Application.Features.Playout;
 
 namespace WebRadio.Infrastructure.Playout;
@@ -9,7 +10,7 @@ namespace WebRadio.Infrastructure.Playout;
 /// A memória desta instância é sempre gravada; com Redis, o valor também vai para lá, para a réplica que não recebeu o
 /// evento do playout responder o mesmo no <c>/stream/info</c>. Redis fora não é erro para o Liquidsoap: fica o valor local.
 /// </summary>
-public sealed class TocandoAgoraStore(ILogger<TocandoAgoraStore> logger, IConnectionMultiplexer? redis = null) : ITocandoAgoraStore
+public sealed class TocandoAgoraStore(IClock clock, ILogger<TocandoAgoraStore> logger, IConnectionMultiplexer? redis = null) : ITocandoAgoraStore
 {
     private static readonly RedisKey Chave = "wr:tocando-agora";
 
@@ -52,6 +53,6 @@ public sealed class TocandoAgoraStore(ILogger<TocandoAgoraStore> logger, IConnec
         }
     }
 
-    private static TocandoAgora? Vigente(TocandoAgora? faixa) =>
-        faixa is not null && DateTime.UtcNow - faixa.IniciadoEmUtc < Validade ? faixa : null;
+    private TocandoAgora? Vigente(TocandoAgora? faixa) =>
+        faixa is not null && clock.UtcNow - faixa.IniciadoEmUtc < Validade ? faixa : null;
 }

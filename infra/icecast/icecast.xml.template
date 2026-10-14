@@ -1,0 +1,71 @@
+<!--
+  WebRadio — infra/icecast/icecast.xml.template (E1-F14, S-A07, S-B04)
+  Renderizado pelo entrypoint em /tmp/icecast/icecast.xml (tmpfs). Os marcadores @@...@@ viram os
+  segredos de /run/secrets; sobrar um marcador aborta a subida.
+-->
+<icecast>
+    <location>WebRadio</location>
+    <admin>webradio@localhost</admin>
+    <hostname>@@HOSTNAME@@</hostname>
+
+    <limits>
+        <clients>@@MAX_CLIENTES@@</clients>
+        <!-- 2 fontes: o Liquidsoap e uma reserva (S-A07); nenhum source client externo chega aqui. -->
+        <sources>2</sources>
+        <queue-size>524288</queue-size>
+        <client-timeout>30</client-timeout>
+        <header-timeout>15</header-timeout>
+        <!-- Fonte muda por 10 s é derrubada (libera o mount para o Liquidsoap reconectar). -->
+        <source-timeout>10</source-timeout>
+        <burst-on-connect>1</burst-on-connect>
+        <burst-size>65535</burst-size>
+    </limits>
+
+    <authentication>
+        <source-password>@@SOURCE_PASSWORD@@</source-password>
+        <relay-password>@@RELAY_PASSWORD@@</relay-password>
+        <!-- Nunca "admin" (S-A07); a interface /admin também não passa pelo nginx. -->
+        <admin-user>@@ADMIN_USER@@</admin-user>
+        <admin-password>@@ADMIN_PASSWORD@@</admin-password>
+    </authentication>
+
+    <listen-socket>
+        <port>8000</port>
+    </listen-socket>
+
+    <mount type="normal">
+        <mount-name>/radio.mp3</mount-name>
+        <max-listeners>@@MAX_CLIENTES@@</max-listeners>
+        <public>0</public>
+        <!-- S-A07: o mount não aparece nas páginas de status nem na listagem da interface web. -->
+        <hidden>1</hidden>
+        <stream-name>WebRadio</stream-name>
+    </mount>
+
+    <fileserve>1</fileserve>
+
+    <paths>
+        <basedir>/usr/share/icecast</basedir>
+        <logdir>/tmp/icecast</logdir>
+        <webroot>/usr/share/icecast/web</webroot>
+        <adminroot>/usr/share/icecast/admin</adminroot>
+        <pidfile>/tmp/icecast/icecast.pid</pidfile>
+    </paths>
+
+    <logging>
+        <!--
+          S-B04: o access log do Icecast teria o IP do ouvinte em claro e não dá para truncá-lo aqui; ele vai para
+          /dev/null (o entrypoint troca o arquivo por um link). O registro de acesso do stream fica no nginx, com
+          o IP já anonimizado (/24 ou /64) e retenção de 14 dias. O error log vai para o stderr do contêiner.
+        -->
+        <accesslog>access.log</accesslog>
+        <errorlog>error.log</errorlog>
+        <loglevel>2</loglevel>
+        <logsize>1000000</logsize>
+        <logarchive>0</logarchive>
+    </logging>
+
+    <security>
+        <chroot>0</chroot>
+    </security>
+</icecast>

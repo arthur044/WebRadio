@@ -226,6 +226,7 @@ public class HostTests
     private static ApiFactory ProducaoCompleta()
     {
         var f = new ApiFactory { Ambiente = "Production" };
+        f.Config["Banco:Senha"] = new string('b', 32);
         f.Config["Redis:Host"] = "redis-inexistente";
         f.Config["Redis:Password"] = new string('r', 32);
         f.Config["Storage:Endpoint"] = "minio-inexistente:9000";
@@ -275,6 +276,25 @@ public class HostTests
     [Fact]
     public void Producao_com_rede_hosts_e_redis_explicitos_sobe()
         => ProducaoCompleta().CreateClient().Dispose();
+
+    [Fact]
+    public void Producao_sem_Banco_Senha_falha_no_boot()
+    {
+        var f = ProducaoCompleta();
+        f.Config.Remove("Banco:Senha");
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("curta")]
+    [InlineData("__GERAR__-__GERAR__-__GERAR__")]
+    public void Banco_Senha_vazia_curta_ou_de_exemplo_falha_no_boot(string senha)
+    {
+        var f = ProducaoCompleta();
+        f.Config["Banco:Senha"] = senha;
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
 
     [Fact]
     public void Producao_sem_Redis_falha_no_boot()
