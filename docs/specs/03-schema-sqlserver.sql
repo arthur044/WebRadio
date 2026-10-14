@@ -375,7 +375,17 @@ GO
            WHERE CriadoEmUtc < DATEADD(DAY, -30, SYSUTCDATETIME()) AND (ListenerDeviceHash IS NOT NULL OR ListenerIpHash IS NOT NULL);
            (em lotes de 5.000 para não escalar o lock)
    - Outbox: DELETE infra.EventoOutbox WHERE ProcessadoEmUtc < DATEADD(DAY, -7, SYSUTCDATETIME());
-   - RefreshToken: DELETE seg.RefreshToken WHERE ExpiraEmUtc < DATEADD(DAY, -1, SYSUTCDATETIME());
+   - RefreshToken (em dois passos; um DELETE em lotes violaria a FK_RefreshToken_SubstituidoPor,
+     que é NO ACTION e checada ao fim de cada statement: o TOP não tem ordem e pode apagar o
+     sucessor sem o predecessor):
+       1) UPDATE seg.RefreshToken SET SubstituidoPorId = NULL
+          WHERE SubstituidoPorId IS NOT NULL AND ExpiraEmUtc < DATEADD(DAY, -1, SYSUTCDATETIME());
+       2) DELETE t FROM seg.RefreshToken AS t
+          WHERE t.ExpiraEmUtc < DATEADD(DAY, -1, SYSUTCDATETIME())
+            AND NOT EXISTS (SELECT 1 FROM seg.RefreshToken AS a WHERE a.SubstituidoPorId = t.Id);
+     Um vencido ainda apontado por um token que não venceu fica para outra rodada.
+     (Corrigido em 2026-10-13: é o que o Manutencao.cs do Worker executa desde o PR #29.)
+   Outbox e RefreshToken também rodam em lotes, como a rotina de LGPD.
    Executadas pelo Worker (job diário), não por SQL Agent: o SQL Server Linux em
    contêiner não é dependência de agendamento.
    --------------------------------------------------------------------------------------- */
