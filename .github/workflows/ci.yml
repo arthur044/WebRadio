@@ -286,8 +286,8 @@ jobs:
       - name: npm ci, lint, testes e build (imagem node do frontend/Dockerfile)
         run: |
           set -euo pipefail
-          imagem="$(grep -m1 '^FROM node@' frontend/Dockerfile | awk '{print $2}')"
-          [[ "${imagem}" == node@sha256:* ]] || { echo "::error::Não achei a imagem node (por digest) no frontend/Dockerfile."; exit 1; }
+          imagem="$(grep -m1 '^FROM node:' frontend/Dockerfile | awk '{print $2}')"
+          [[ "${imagem}" == node:*@sha256:* ]] || { echo "::error::Não achei a imagem node (tag@digest) no frontend/Dockerfile."; exit 1; }
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/npm \
             -v "$PWD/frontend:/app" -w /app "${imagem}" \
             sh -c 'set -e; npm ci --no-audit --no-fund; npm run lint; npm test; npm run build'
@@ -345,7 +345,7 @@ jobs:
       - name: npm audit --audit-level=high (imagem node do frontend/Dockerfile)
         run: |
           set -euo pipefail
-          imagem="$(grep -m1 '^FROM node@' frontend/Dockerfile | awk '{print $2}')"
+          imagem="$(grep -m1 '^FROM node:' frontend/Dockerfile | awk '{print $2}')"
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/npm \
             -v "$PWD/frontend:/app" -w /app "${imagem}" npm audit --audit-level=high
 

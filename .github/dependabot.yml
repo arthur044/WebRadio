@@ -1,6 +1,7 @@
 # F17b (05 §9.2): sem isto os SHAs das Actions e as dependências envelhecem sem aviso. Atualizações semanais, agrupadas por
-# ecossistema para não abrir um PR por pacote. As imagens do docker-compose.yml são fixadas por digest (sem tag), e o
-# Dependabot só acompanha Dockerfile: a atualização dessas imagens é manual, conferida no PR que a troca.
+# ecossistema para não abrir um PR por pacote. Os FROM dos Dockerfiles são `imagem:tag@sha256:...` (a tag dá ao Dependabot o que
+# comparar; o digest fixa o conteúdo). As imagens do docker-compose.yml são só por digest e o Dependabot só acompanha Dockerfile:
+# a troca delas é manual, conferida no PR que a faz (e o job `vulnerabilidades` acusa o envelhecimento).
 version: 2
 updates:
   - package-ecosystem: "github-actions"
