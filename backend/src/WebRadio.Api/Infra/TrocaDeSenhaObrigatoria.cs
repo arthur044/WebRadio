@@ -5,11 +5,14 @@ namespace WebRadio.Api.Infra;
 /// <summary>
 /// 01 §2.1: com <c>DeveTrocarSenha</c> o token só abre <c>POST /auth/trocar-senha</c> e <c>GET /auth/me</c>
 /// (e o refresh, que não usa Bearer). Qualquer outra rota → 403 <c>/erros/troca-de-senha-obrigatoria</c>.
-/// Roda depois da autenticação e antes da autorização.
+/// Roda depois da autenticação e antes da autorização. Quem está liberado é declarado pelo PRÓPRIO endpoint, com
+/// <see cref="TrocaDeSenhaObrigatoria.PermitirComTrocaDeSenhaPendente{T}"/> (metadado), e não por uma lista de paths aqui.
 /// </summary>
 public static class TrocaDeSenhaObrigatoria
 {
-    private static readonly string[] Liberadas = ["/api/v1/auth/trocar-senha", "/api/v1/auth/me"];
+    /// <summary>Marca o endpoint como acessível ao token restrito pela troca de senha obrigatória.</summary>
+    public static TBuilder PermitirComTrocaDeSenhaPendente<TBuilder>(this TBuilder builder) where TBuilder : IEndpointConventionBuilder
+        => builder.WithMetadata(new PermiteComTrocaDeSenhaPendente());
 
     public static IApplicationBuilder UseTrocaDeSenhaObrigatoria(this IApplicationBuilder app)
         => app.Use(async (ctx, next) =>
@@ -23,7 +26,7 @@ public static class TrocaDeSenhaObrigatoria
             if (!anonima
                 && ctx.User.Identity?.IsAuthenticated == true
                 && ctx.User.HasClaim(EmissorDeTokens.ClaimDeveTrocarSenha, "true")
-                && !Liberadas.Contains(ctx.Request.Path.Value?.TrimEnd('/'), StringComparer.OrdinalIgnoreCase))
+                && ctx.GetEndpoint()?.Metadata.GetMetadata<PermiteComTrocaDeSenhaPendente>() is null)
             {
                 ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
                 await ctx.Response.WriteAsJsonAsync(new Microsoft.AspNetCore.Mvc.ProblemDetails
@@ -39,3 +42,6 @@ public static class TrocaDeSenhaObrigatoria
             await next();
         });
 }
+
+/// <summary>Metadado de endpoint: vale mesmo com <c>DeveTrocarSenha</c> no token (ver <see cref="TrocaDeSenhaObrigatoria"/>).</summary>
+public sealed record PermiteComTrocaDeSenhaPendente;

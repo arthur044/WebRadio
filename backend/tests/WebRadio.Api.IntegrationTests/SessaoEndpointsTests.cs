@@ -105,6 +105,19 @@ public class SessaoEndpointsTests
     }
 
     [Fact]
+    public async Task X_Forwarded_Host_fora_do_AllowedHosts_e_ignorado_mesmo_vindo_da_rede_app()
+    {
+        // Defesa em profundidade (#19): o nginx já fixa o X-Forwarded-Host, mas se um proxy da rede app repassasse um host
+        // forjado, a "própria origem" do refresh/logout viraria a do atacante. O ForwardedHeaders usa a mesma lista do AllowedHosts.
+        var c = Cliente(new ApiFactory { RemoteIp = IPAddress.Parse("172.28.0.5") }, new RefreshFalso());
+        var req = Post("/api/v1/auth/refresh", origem: "https://evil.example", cookie: TokenValido());
+        req.Headers.Add("X-Forwarded-Host", "evil.example");
+        req.Headers.Add("X-Forwarded-Proto", "https");
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await c.SendAsync(req)).StatusCode);
+    }
+
+    [Fact]
     public async Task AllowedHosts_lista_so_o_nome_e_aceita_o_host_com_qualquer_porta()
     {
         // O HostFiltering compara só o NOME do host (a porta do cabeçalho é ignorada). Uma entrada COM porta nunca casa.
@@ -372,5 +385,23 @@ public class SessaoEndpointsTests
         }
 
         Assert.True(verificados >= 2, "a varredura deveria achar /auth/me e /auth/trocar-senha");
+    }
+
+    [Fact]
+    public void So_me_e_trocar_senha_declaram_que_valem_com_a_troca_de_senha_pendente()
+    {
+        // A lista deixou de ser uma lista de paths no middleware: cada endpoint declara por metadado (#19). Esta varredura trava
+        // o conjunto: um endpoint novo só fica liberado para o token restrito se alguém o marcar de propósito, e este teste acusa.
+        var f = Nova();
+        using var host = f.WithWebHostBuilder(_ => { });
+        var fonte = (Microsoft.AspNetCore.Routing.EndpointDataSource)host.Services.GetService(typeof(Microsoft.AspNetCore.Routing.EndpointDataSource))!;
+
+        var liberados = fonte.Endpoints.OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>()
+            .Where(e => e.Metadata.GetMetadata<WebRadio.Api.Infra.PermiteComTrocaDeSenhaPendente>() is not null)
+            .Select(e => e.RoutePattern.RawText!)
+            .Order()
+            .ToArray();
+
+        Assert.Equal(["/api/v1/auth/me", "/api/v1/auth/trocar-senha"], liberados);
     }
 }
