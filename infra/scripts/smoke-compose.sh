@@ -40,6 +40,13 @@ done < <("${COMPOSE[@]}" ps -a --format '{{.Service}} {{.Status}}' | grep -v '^s
 
 echo "== 2. SPA e stream"
 esperar "GET / (SPA)" 200 "$(status "$BASE/")"
+# Cabeçalhos de segurança do nginx (S-M14): a base do web é trocada de tempos em tempos e nada mais afirma que continuam saindo.
+cabecalhos_spa="$(curl -s -I --max-time 10 "$BASE/" | tr -d '\r')"
+grep -qi "^content-security-policy: .*default-src 'self'" <<<"$cabecalhos_spa" && ok "CSP em /" || falha "CSP ausente ou diferente em /"
+grep -qi '^x-content-type-options: nosniff' <<<"$cabecalhos_spa" && ok "nosniff em /" || falha "X-Content-Type-Options ausente em /"
+# O allowlist de /storage/: objeto de mídia sem assinatura e listagem de bucket nunca respondem (S-A05).
+esperar "/storage/midia/x sem assinatura" 404 "$(status "$BASE/storage/midia/x")"
+esperar "/storage/midia/ (listagem do bucket)" 404 "$(status "$BASE/storage/midia/")"
 cabecalhos="$(curl -s -I --max-time 10 "$BASE/stream/radio.mp3" | tr -d '\r')"
 esperar "HEAD /stream/radio.mp3" "HTTP/1.1 200 OK" "$(head -1 <<<"$cabecalhos")"
 grep -qi '^content-type: audio/mpeg' <<<"$cabecalhos" && ok "content-type audio/mpeg" || falha "content-type do stream"
@@ -94,7 +101,7 @@ echo "== 8. portas publicadas"
 mapeamentos="$(docker ps --filter label=com.docker.compose.project=webradio --format '{{.Ports}}' | tr ',' '\n' | grep -- '->' | sed 's/^ *//' | sort -u)"
 # IPv4 exato; IPv6 só pode ser o [::]:8080 que o Docker acrescenta à porta pública (ele pode ou não aparecer, conforme o host).
 publicadas_v4="$(grep -oE '^(0\.0\.0\.0|127\.0\.0\.1):[0-9]+' <<<"$mapeamentos" | sort -u | tr '\n' ' ')"
-publicadas_v6="$(grep -oE '^\[::\]:[0-9]+' <<<"$mapeamentos" | sort -u | tr '\n' ' ')"
+publicadas_v6="$(grep -oE '^\[::\]:[0-9]+' <<<"$mapeamentos" | sort -u | tr '\n' ' ' || true)"
 esperar "só 8080 pública em 0.0.0.0 (+ 127.0.0.1 no dev)" "0.0.0.0:8080 127.0.0.1:1433 127.0.0.1:8005 127.0.0.1:9001 " "$publicadas_v4"
 [[ -z "$publicadas_v6" || "$publicadas_v6" == "[::]:8080 " ]] && ok "IPv6 publicado: só o [::]:8080 (ou nenhum)" || falha "IPv6 publicado inesperado: $publicadas_v6"
 # Qualquer mapeamento que não comece por um desses endereços (ex.: um IP de LAN) seria ignorado pelos greps acima.
@@ -147,9 +154,11 @@ for nome, s in sorted(servicos.items()):
     if "dados" not in redes(nome):
         continue
     adicionadas = set(s.get("cap_add") or [])
-    confere(f"{nome} (rede dados): sem NET_RAW/NET_ADMIN, sem network_mode host, cap_drop ALL",
-            not (adicionadas & perigosas) and s.get("network_mode") != "host" and "ALL" in (s.get("cap_drop") or []),
-            f"cap_add={sorted(adicionadas)} network_mode={s.get('network_mode')}")
+    # privileged devolve NET_RAW/NET_ADMIN mesmo com cap_drop ALL, e pid host enxerga os processos do host.
+    confere(f"{nome} (rede dados): sem NET_RAW/NET_ADMIN, privileged, pid host nem network_mode host; cap_drop ALL",
+            not (adicionadas & perigosas) and s.get("network_mode") != "host" and not s.get("privileged") and s.get("pid") != "host"
+            and "ALL" in (s.get("cap_drop") or []),
+            f"cap_add={sorted(adicionadas)} network_mode={s.get('network_mode')} privileged={s.get('privileged')} pid={s.get('pid')}")
 
 # --- TrustServerCertificate com o MESMO valor em api, worker e migrator; Encrypt=True fixo (B3-03)
 def valor(cs, chave):
