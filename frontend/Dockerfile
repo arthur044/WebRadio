@@ -12,8 +12,9 @@ COPY frontend/ .
 # vite.config.e2e.ts, usado pelo Playwright local, nunca por este Dockerfile.
 RUN npm run build
 
-# Tag+digest (não só a tag, que é mutável): nginxinc/nginx-unprivileged:1.27-alpine.
-FROM nginxinc/nginx-unprivileged@sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0
+# Fixado por digest (a tag é mutável): nginxinc/nginx-unprivileged:1.31.6-alpine3.24 (nginx mainline 1.31.6 sobre Alpine 3.24.2).
+# Era 1.27.5-alpine3.21 (jun/2025): sem imagem corrigida na linha 3.21 (B3, trivy).
+FROM nginxinc/nginx-unprivileged@sha256:884e0b7f42f303641b0f4e78755aea647521dca0b89ca3be7992ad78b5c07434
 # Hosts públicos válidos (server_name aceita lista espaço-separada) — o compose
 # sobrescreve em outros ambientes; ver comentário de Host header injection em
 # infra/nginx/default.conf.template.
