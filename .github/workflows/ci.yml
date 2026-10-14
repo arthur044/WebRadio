@@ -19,6 +19,8 @@ env:
   # não autenticidade. Ao subir a versão, o valor novo vem de uma conferência independente da release, nunca do próprio download.
   GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
   # Imagem do SQL Server dos testes: a mesma, por digest, do docker-compose.yml.
+  # Imagem do Redis dos testes do throttle: a mesma, por digest, do docker-compose.yml.
+  REDIS_IMAGEM: "redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"
   # trivy: binário com sha256 esperado fixado aqui, como o gitleaks (05 §9.2).
   TRIVY_VERSION: "0.75.0"
   TRIVY_SHA256: "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f"
@@ -138,7 +140,21 @@ jobs:
           docker logs --tail 30 mssql-teste
           exit 1
 
-      - name: Test (Infrastructure.Tests inteiro, com SQL real)
+      - name: Redis de teste (testes do throttle de login, com Lua e SCAN de verdade)
+        run: |
+          set -euo pipefail
+          docker run -d --name redis-teste -p 127.0.0.1:6379:6379 "${REDIS_IMAGEM}" >/dev/null
+          for _ in $(seq 1 30); do
+            if [ "$(docker exec redis-teste redis-cli ping 2>/dev/null)" = "PONG" ]; then
+              echo "WEBRADIO_TEST_REDIS=127.0.0.1:6379" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::O Redis de teste não respondeu em 30 segundos."
+          exit 1
+
+      - name: Test (Infrastructure.Tests inteiro, com SQL e Redis reais)
         run: >
           dotnet test backend/tests/WebRadio.Infrastructure.Tests --no-build --configuration Release
           --logger "trx;LogFileName=sql.trx" --results-directory "$RUNNER_TEMP/resultados"
@@ -163,9 +179,9 @@ jobs:
         if: failure()
         run: docker logs --tail 40 mssql-teste || true
 
-      - name: Derrubar o SQL Server
+      - name: Derrubar o SQL Server e o Redis
         if: always()
-        run: docker rm -f mssql-teste >/dev/null 2>&1 || true
+        run: docker rm -f mssql-teste redis-teste >/dev/null 2>&1 || true
 
   # B3-01: os dois teste.sh de infraestrutura (hardening do Icecast e playout do Liquidsoap) não rodavam em nenhum job.
   # O do Liquidsoap usa a imagem webradio-icecast:teste que o do Icecast constrói: a ordem importa.
