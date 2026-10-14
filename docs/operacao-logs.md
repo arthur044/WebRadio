@@ -25,7 +25,7 @@ essas linhas do `error_log warn` (o status 429 continua no access log anonimizad
 A rotação por **tamanho** limita o espaço, mas **não limita o tempo**: num dia de pouco acesso o arquivo corrente pode guardar
 linhas por mais de 14 dias, e os dois rotacionados ficam no disco até uma rotação futura empurrá-los para fora. Por isso existe
 `infra/scripts/limpar-logs.sh`: zera o log **corrente** do `web` e do `icecast` (truncando, o daemon o mantém aberto) e **apaga os
-rotacionados** (`.1`, `.2`). Não derruba contêiner nem stream. Rodando **toda semana**, nenhuma linha com IP passa de 7 dias (folga
+rotacionados** (`.1`, `.2`). Não derruba contêiner nem stream. Se um serviço pedido não for achado (por exemplo, `COMPOSE_PROJECT` diferente do padrão `webradio`), limpa os outros e **sai com 1**, e o systemd marca a unidade como falha. Rodando **toda semana**, nenhuma linha com IP passa de 7 dias (folga
 sobre os 14); o que garante isso é o script **instalado e agendado**, não o compose.
 
 ```bash

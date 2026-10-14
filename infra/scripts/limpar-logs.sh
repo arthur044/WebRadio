@@ -31,6 +31,7 @@ if [[ $simular -eq 0 && "${LIMPAR_LOGS_ARQUIVOS:-}" == "" && "$(id -u)" -ne 0 ]]
 fi
 
 arquivos=()
+faltou=0   # algum serviço pedido sem contêiner: o script limpa os outros, mas sai com 1 no fim (retenção não cumprida para aquele)
 if [[ -n "${LIMPAR_LOGS_ARQUIVOS:-}" ]]; then
   read -r -a arquivos <<<"$LIMPAR_LOGS_ARQUIVOS"
 else
@@ -38,6 +39,7 @@ else
     ids="$(docker ps -aq --filter "label=com.docker.compose.project=${projeto}" --filter "label=com.docker.compose.service=${servico}")"
     if [[ -z "$ids" ]]; then
       echo "limpar-logs: nenhum contêiner do serviço '${servico}' no projeto '${projeto}'." >&2
+      faltou=1
       continue
     fi
     for id in $ids; do
@@ -63,3 +65,8 @@ for arquivo in "${arquivos[@]}"; do
   [[ ${#rotacionados[@]} -gt 0 ]] && rm -f -- "${rotacionados[@]}"
   echo "limpar-logs: $arquivo zerado; ${#rotacionados[@]} rotacionado(s) apagado(s)."
 done
+
+if [[ $faltou -ne 0 ]]; then
+  echo "limpar-logs: ao menos um serviço pedido não foi encontrado (COMPOSE_PROJECT='${projeto}'): a retenção dele NÃO foi cumprida." >&2
+  exit 1
+fi
