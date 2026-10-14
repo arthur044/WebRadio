@@ -8,11 +8,11 @@ title = "WebRadio"
 useDefault = true
 
 [[allowlists]]
-description = "Fixtures de teste fabricadas (sem segredo real). Convenção: todo valor falso começa com 'segredo-de-teste-'."
+description = "Fixtures de teste fabricadas (sem segredo real). Convenção: todo valor falso é 'segredo-de-teste-' + minúsculas, dígitos e hífen (até 40). Um valor com maiúscula ou '_' depois do prefixo NÃO é isentado: é o formato de uma credencial real colada."
 targetRules = ["generic-api-key"]
 condition = "AND"
 paths = ['''^backend/tests/''']
-regexes = ['''^segredo-de-teste-''']
+regexes = ['''^segredo-de-teste-[a-z0-9-]{1,40}$''']
 
 [[allowlists]]
 description = "Placeholder do runbook de rotação de segredos (exemplo de comando; nao e credencial)."
