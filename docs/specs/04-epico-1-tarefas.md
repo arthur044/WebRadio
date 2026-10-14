@@ -149,7 +149,7 @@ A pedido do dono do produto, o que falta do backend do Épico 1 entra por **feat
 |---|---|---|---|
 | **B1** | Runtime da API | F08, F09, F10, F12, `/usuarios` + coluna `seg.Usuario.VersaoSeguranca` (claim `sv`, complemento da F07; aceite: desativar, rebaixar ou trocar a senha → access token antigo responde 401 em até 15 s) | F07b (#16) |
 | **B2** | Worker e playout | F11, F14, F15, F16 (+ F18, que a F16 exigia). **Entregue no PR #29 (2026-10-13)** | B1 |
-| **B3** | CI e pendências | F17b, sobras do PR #14 (entrypoint do db-init, dependabot), LOWs das issues #10 e #19, pendências do review do PR #29 (lista abaixo). A F18 já entrou no B2 | B2 |
+| **B3** | CI e pendências | F17b, sobras do PR #14 (entrypoint do db-init, dependabot), LOWs das issues #10 e #19, pendências do review do PR #29 (lista abaixo), restante da F17: jobs `ddl-check`, `frontend` e `vulnerabilidades` (decisão do usuário em 13/10). A F18 já entrou no B2 | B2 |
 
 ### Pendências do review do PR #29 (entram no B3)
 
