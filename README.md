@@ -18,7 +18,7 @@ Arquitetura detalhada: [`docs/specs/00-arquitetura.md`](docs/specs/00-arquitetur
 
 ### Stack
 
-- **Backend**: .NET 10 (Clean Architecture, EF Core 9, MediatR)
+- **Backend**: .NET 10 (Clean Architecture, EF Core 10, MediatR)
 - **Banco de dados**: SQL Server 2022, migrations geradas via EF Core
 - **Cache & realtime**: Redis (throttle, SignalR backplane)
 - **Storage**: MinIO (S3-compatible, arquivos de áudio/divulgação)
@@ -43,7 +43,11 @@ Arquitetura detalhada: [`docs/specs/00-arquitetura.md`](docs/specs/00-arquitetur
 
 ```
 webradio/
-├── docs/specs/                    # Especificações v1.1 (arquitetura, domínio, API, schema, segurança)
+├── docs/
+│   ├── specs/                     # Especificações (arquitetura, domínio, API, schema, tarefas, segurança)
+│   ├── runbooks/                  # Procedimentos operacionais
+│   ├── conexao-sql-server.md      # Connection string, pool e identificação de sessão
+│   └── processo-de-desenvolvimento.md
 ├── backend/
 │   ├── WebRadio.sln
 │   ├── Directory.Build.props      # .NET 10, properties centralizadas
@@ -57,6 +61,7 @@ webradio/
 │       ├── WebRadio.Domain.Tests/
 │       ├── WebRadio.Application.Tests/
 │       ├── WebRadio.Architecture.Tests/ # NetArchTest
+│       ├── WebRadio.Infrastructure.Tests/ # parte roda contra SQL Server real
 │       └── WebRadio.Api.IntegrationTests/
 ├── frontend/
 │   ├── package.json               # Vite, React, Tailwind, Playwright
@@ -66,16 +71,18 @@ webradio/
 │   │   └── assets/
 │   └── e2e/                       # Testes Playwright
 ├── infra/
-│   ├── scripts/                   # gerar-segredos.sh/.ps1
+│   ├── scripts/                   # gerar-segredos.sh/.ps1, smoke-compose.sh
+│   ├── db-init/                   # entrypoint do one-shot que cria banco e logins
+│   ├── migrator/                  # entrypoint do one-shot que aplica as migrations
 │   ├── sql/                       # init-db.sql, logins.sql, seed-dev.sql
 │   ├── nginx/                     # default.conf.template (gateway)
 │   ├── icecast/                   # Dockerfile, icecast.xml.template
 │   ├── liquidsoap/                # radio.liq, playlist de teste
 │   ├── minio/                     # init-buckets.sh, políticas S3
 │   └── redis/                     # entrypoint de configuração
-├── docker-compose.yml             # Produção-like (segredos em arquivo)
+├── docker-compose.yml             # Base de produção (segredos em arquivo, só a 8080 publicada)
 ├── docker-compose.dev.yml         # Desenvolvimento (deve ser usado explicitamente com -f)
-├── .env.example                   # Placeholders: __GERAR__ para segredos
+├── .env.example                   # Configuração NÃO secreta; os segredos ficam em secrets/ (fora do git)
 ├── .gitattributes                 # Scripts shell com LF em Windows
 ├── .gitignore                     # .env, .maestri/, node_modules/
 ├── SECURITY.md                    # Política de segurança e divulgação
@@ -84,59 +91,44 @@ webradio/
 
 ## Status do Épico 1
 
-### Na `main` (mergeado)
+O Épico 1 entrega a fundação rodando de ponta a ponta; as regras de negócio de grade, pedidos e upload são dos Épicos 2 a 4. O detalhe de cada tarefa e o que ainda está pendente ficam em [`docs/specs/04-epico-1-tarefas.md`](docs/specs/04-epico-1-tarefas.md).
 
-- ✅ **Domínio (F02, F03)**: Entidades (Usuario, Programa, PedidoMusica, ArquivoMidia, etc.), máquinas de estado, testes de arquitetura.
-- ✅ **SQL (A01, A02, A04, A06)**: Schema com schemas nomeados, índices, CHECKs, logins mínimos, seed de desenvolvimento.
-- ✅ **CI (F17)**: GitHub Actions com gitleaks, build .NET, testes, Testcontainers, ddl-check, linters frontend.
-- ✅ **Backend API básica (F04–F07a)**: EF Context + migrations, db-init/migrator, Minimal APIs (ProblemDetails, rate-limit, RateLimiter), autenticação JWT com refresh rotativo, bloqueio por (IP, conta), health checks internos, abstrações de infra, segredos validados no startup.
+### Na `main`
 
-### Em PR (aguardando merge)
+- **Domínio e banco**: entidades e máquinas de estado, schema do SQL Server com migrations do EF Core, logins mínimos, `db-init` e `migrator`.
+- **API**: autenticação JWT com refresh rotativo, gestão de usuários, health checks, abstrações de infraestrutura (relógio, storage, throttle, identidade do ouvinte), hub SignalR com outbox, endpoints internos de playout na porta `:8081`.
+- **Worker**: eleição de líder, heartbeat e manutenção diária (anonimização LGPD, limpeza de outbox e de refresh tokens).
+- **Playout**: Icecast e Liquidsoap com a playlist de teste; o Liquidsoap consulta a API pela próxima faixa.
+- **Stack**: `docker-compose.yml` e `docker-compose.dev.yml` com 5 redes segmentadas, segredos por arquivo e contêineres endurecidos; scripts de geração de segredos.
+- **Frontend**: shell com player global, autenticação, Mural e Grade com atualização em tempo real, gateway nginx.
+- **CI**: gitleaks, build e testes do backend, smoke do stack inteiro no Docker Compose.
 
-- 🔄 **Frontend (P01–P08)**: Scaffold Vite + React + Tailwind, direção visual (P02), shell + player global (P03), cliente tipado (P04), auth UI (P05), nginx gateway (P06), SignalR (P07), páginas placeholder (P08).
+### Em PR
 
-### Em desenvolvimento
+- **B3 (PR #31)**: jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra e varredura de vulnerabilidades; pendências dos reviews do B2; imagens-base atualizadas; `SECURITY.md`.
 
-- 🚧 **Backend (F08–F16)**: Health checks `/health/live` e `/health/ready`, abstrações de infra (IClock, IObjectStorage, IRequestThrottle, IListenerIdentity, IAudioSanitizer, IMalwareScanner), SignalR hub com outbox dispatcher, Worker com eleição de líder, endpoints internos playout, Dockerfiles, Icecast + Liquidsoap, docker-compose + .env.example.
+### Pendente
+
+- Testes Playwright no CI, execução do `gerar-segredos.ps1` em Windows real e subida da base de produção num job.
+- Atualização das imagens do SQL Server e do Liquidsoap, antes de o Épico 4 liberar upload.
+- Reescrita do runbook de rotação de segredos (ver o aviso no topo dele).
 
 ## Como contribuir
 
 ### Fluxo de PR
 
-1. **Crie uma branch** a partir de `main` com o padrão `<seu-agente>/<tarefa>`:
-   ```bash
-   git checkout main
-   git pull origin main
-   git checkout -b seu-agente/tarefa-x
-   ```
+O fluxo completo está em [`docs/processo-de-desenvolvimento.md`](docs/processo-de-desenvolvimento.md). Em resumo:
 
-2. **Commit apenas os arquivos que você criou/modificou**:
-   ```bash
-   git add src/seu-arquivo.ts
-   git add backend/src/SeuProjeto/SeuArquivo.cs
-   git commit -m "feat: descrição curta"
-   ```
-   ⚠️ **Nunca** use `git add .` ou `git add -A` numa árvore compartilhada.
-
-3. **Não troque de branch** antes do merge. Isso muda a árvore de trabalho para os outros agentes.
-
-4. **Push e abra um PR** contra `main`:
-   ```bash
-   git push -u origin seu-agente/tarefa-x
-   ```
-
-5. **Um PR por vez**: o Nexus coordena a fila. Sem novo PR até o anterior ser mergeado.
-
-6. **Revisores obrigatórios**:
-   - 🛡️ **Guardian** (Code-Review): todos os PRs
-   - 🔐 **Sentinel** (DevSecOps): PRs de auth, storage, infra, segredos
-   - 🗄️ **Atlas** (DBA): PRs de SQL e migrations
-
-7. **Merge sem squash**: cria um merge commit que registra a história e a origem.
+1. **Branch a partir da `main`**, no padrão `<agente>/<assunto>`, criada num worktree próprio (`git worktree add`). O checkout compartilhado não troca de branch.
+2. **Commit só dos arquivos que você criou ou modificou.** Nunca `git add .` nem `git add -A` numa árvore compartilhada.
+3. **Um PR por feature grande**, com commits separados por tarefa, em vez de um PR por tarefa.
+4. **Revisão só com PR aberto:** Guardian (código) em todos; Sentinel (segurança) em auth, storage, infra e segredos; Atlas (banco) em SQL e migrations; Prism em frontend.
+5. **Merge sem squash** (merge commit), depois de todos os checks verdes.
+6. **Ao terminar**, apague os temporários que criou (worktrees, logs, contêineres de teste) e a branch já mergeada.
 
 ### Checklist de qualidade
 
-- [ ] Branch criada a partir de `main` (não atrás)
+- [ ] Branch criada a partir da `main` atual
 - [ ] Commits só dos caminhos que você tocou
 - [ ] `dotnet build` (backend) e `npm run lint`, `npm test`, `npm run build` (frontend) localmente
 - [ ] Testes unitários com cobertura ≥ 80% para Domain/Application (backend)
@@ -145,10 +137,28 @@ webradio/
 
 ## Como subir localmente
 
-> ⚠️ **Disponível após E1-F16 (Forge em desenvolvimento).**  
-> O `docker-compose.yml`, `gerar-segredos.sh`, Icecast, Liquidsoap e a imagem do `sanitizer` ainda estão em desenvolvimento (F13–F16). Instruções completas serão incluídas assim que a Definição de Pronto do Épico 1 for alcançada.
+Pré-requisitos: Docker com Compose v2 e `openssl` (Linux/macOS) ou PowerShell (Windows).
 
-Enquanto isso, consulte [`docs/specs/04-epico-1-tarefas.md`](docs/specs/04-epico-1-tarefas.md) para a sequência de tarefas, [`docs/runbooks/rotacao-de-segredos.md`](docs/runbooks/rotacao-de-segredos.md) para procedimentos operacionais e [`docs/processo-de-desenvolvimento.md`](docs/processo-de-desenvolvimento.md) para o fluxo de PR.
+```bash
+# 1. Gera secrets/ (um arquivo por segredo) e o .env de desenvolvimento. Não sobrescreve o que já existe.
+infra/scripts/gerar-segredos.sh dev
+#    Windows: .\infra\scripts\gerar-segredos.ps1 -Modo dev
+
+# 2. Sobe o stack inteiro e espera todos os serviços ficarem healthy.
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait
+
+# 3. (Opcional) Confere a Definição de Pronto contra o stack no ar.
+infra/scripts/smoke-compose.sh
+```
+
+- **Aplicação:** `http://localhost:8080` (SPA, `/api`, `/hubs`, `/stream/radio.mp3`). É a única porta publicada pela base.
+- **Admin semeado:** o e-mail está em `secrets/seed_admin_email` e a senha em `secrets/seed_admin_senha`. O primeiro login exige a troca da senha.
+- **Portas de diagnóstico, só no dev e só em `127.0.0.1`:** SQL Server `1433`, console do MinIO `9001`, harbor do Liquidsoap `8005`.
+- **Parar:** `docker compose -f docker-compose.yml -f docker-compose.dev.yml down`. Sem `-v`, os dados dos volumes são preservados.
+
+O `docker-compose.dev.yml` precisa ser passado com `-f`; ele não é carregado sozinho. É o mesmo roteiro que o job `compose-smoke` do CI executa a cada PR. O `gerar-segredos.ps1` ainda não foi validado em Windows real.
+
+Para rodar só o backend ou só o frontend fora do Docker, veja `backend/` (`dotnet build`, `dotnet test`) e [`frontend/README.md`](frontend/README.md).
 
 ## Segurança
 
@@ -166,7 +176,7 @@ WebRadio é um projeto **público no GitHub**. Nenhum segredo, credencial, e-mai
 | [`01-dominio.md`](docs/specs/01-dominio.md) | Entidades, enums, máquinas de estado | Backend |
 | [`02-api-rest.md`](docs/specs/02-api-rest.md) | Contratos REST, SignalR, RBAC | Backend, Frontend |
 | [`03-schema-sqlserver.sql`](docs/specs/03-schema-sqlserver.sql) | DDL, índices, constraints | Backend, DBA |
-| [`04-epico-1-tarefas.md`](docs/specs/04-epico-1-tarefas.md) | Pacote de tarefas do Épico 1 | Time |
+| [`04-epico-1-tarefas.md`](docs/specs/04-epico-1-tarefas.md) | Pacote de tarefas do Épico 1 e pendências | Time |
 | [`05-seguranca-auditoria.md`](docs/specs/05-seguranca-auditoria.md) | Auditoria de segurança (normativo) | Backend, DevSecOps |
 
 ## Licença
@@ -175,6 +185,6 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 
 ---
 
-**Versão**: v1.1 (Épico 1)  
-**Última atualização**: 2026-09-28  
+**Versão**: Épico 1  
+**Última atualização**: 2026-10-14  
 **Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend)

@@ -1,5 +1,16 @@
 # Rotação de Segredos
 
+> ⚠️ **RASCUNHO DE 2026-09-28 — NÃO SIGA OS COMANDOS DESTE DOCUMENTO.** Ele foi escrito antes de o stack existir e não corresponde ao que está na `main`. Fica versionado para não se perder; a reescrita está pendente (Lore, com revisão do Sentinel).
+>
+> O que está errado, conferido contra o código em 2026-10-14:
+> - **Não há Docker Swarm.** O stack é Docker Compose puro; `docker secret create/rm` e `docker service update` não se aplicam.
+> - **Não há segredo no `.env`.** Em dev **e** em produção, cada segredo é um arquivo em `secrets/<nome>`, montado em `/run/secrets`. O `.env` só tem configuração não secreta.
+> - **Os nomes são outros.** Os arquivos são `jwt_signing_key`, `playout_token`, `db_app_password`, `redis_password` etc. (lista em `infra/scripts/gerar-segredos.sh`), não `Jwt__SigningKey` nem `DB_APP_PASSWORD`.
+> - **O script exige o modo** (`gerar-segredos.sh dev|prod`, `gerar-segredos.ps1 -Modo dev|prod`), gera **todos** os segredos que faltam e nunca sobrescreve. Para trocar um, apaga-se o arquivo dele e roda-se o script de novo.
+> - **A chave anterior não está ligada no Compose.** A API aceita `Jwt:SigningKeyAnterior` e `Playout:TokenAnterior`, mas o `docker-compose.yml` não tem segredo para eles; a rotação sem derrubar sessões descrita abaixo ainda não funciona no stack.
+>
+> Não foi conferido: se o `db-init` redefine a senha de um login que já existe, e os prazos de rotação da tabela. A fonte normativa dos segredos e do impacto de cada troca é a tabela 5.1 do [`05-seguranca-auditoria.md`](../specs/05-seguranca-auditoria.md).
+
 > Procedimento operacional para renovar segredos em produção, minimizando downtime e evitando perda de acesso.
 
 ## Visão geral
@@ -327,7 +338,7 @@ Exemplo:
 **Referências:**
 - [`../specs/04-epico-1-tarefas.md`](../specs/04-epico-1-tarefas.md) — Tarefas do Épico 1 (A02b)
 - [`../specs/05-seguranca-auditoria.md`](../specs/05-seguranca-auditoria.md) — Política de segurança (§5)
-- [`../scripts/gerar-segredos.sh`](../scripts/gerar-segredos.sh) e [`../scripts/gerar-segredos.ps1`](../scripts/gerar-segredos.ps1) — Scripts de geração
+- [`../scripts/gerar-segredos.sh`](../../infra/scripts/gerar-segredos.sh) e [`../scripts/gerar-segredos.ps1`](../../infra/scripts/gerar-segredos.ps1) — Scripts de geração
 
 **Versão**: v1.0  
 **Última atualização**: 2026-09-28

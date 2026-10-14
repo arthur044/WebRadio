@@ -10,16 +10,25 @@ A `main` é **protegida por branch**: todo merge exige:
 - Revisão adicional do **Sentinel** (security) para PRs de autenticação, storage, infraestrutura ou segredos
 - Revisão adicional do **Atlas** (DBA) para PRs de SQL ou migrations
 
-### Regra de um PR por vez
+### Entrega por feature grande
 
-**Apenas um PR aberto por vez** na fila. Não abra um novo PR antes do anterior ser mergeado.
+Por decisão do dono do produto (2026-10-12), o trabalho entra por **feature grande**, e não por tarefa: um PR por grupo de tarefas relacionadas, com **commits separados por tarefa** e uma revisão no fim. O agrupamento do backend do Épico 1 (B1, B2, B3) está em [`specs/04-epico-1-tarefas.md`](specs/04-epico-1-tarefas.md).
 
-**Por quê?** Numa árvore de trabalho compartilhada (todos editam a mesma pasta), manter múltiplos PRs abertos causa:
-- Conflitos ao sincronizar entre PRs
-- Perda acidental de trabalho em troca de branch
-- Interferência com testes de integração
+A regra antiga, "apenas um PR aberto por vez", existia porque todos os agentes editavam a mesma pasta. Ela deixou de valer quando cada agente passou a trabalhar em **worktree próprio** (ver abaixo). O **Nexus** (planejador) continua definindo a ordem e avisando quem depende de quem.
 
-**Coordenação**: o **Nexus** (planejador) gerencia a ordem. Comunique quando sua tarefa estiver pronta para PR.
+### Revisão só com PR aberto
+
+Um revisor só é chamado quando já existe um **PR aberto** do assunto. Rascunho local ou branch sem PR não vai para revisão. O review é publicado no próprio PR (`gh pr review`), e o re-review cobre só o delta desde o commit revisado.
+
+### Worktrees e o checkout compartilhado
+
+- Cada agente desenvolve num **worktree próprio** (`git worktree add <pasta> -b <agente>/<assunto> origin/main`), fixo ou temporário.
+- O checkout compartilhado **não troca de branch**: outros agentes podem ter commits locais ou arquivos não rastreados nele.
+- O projeto roda em mais de uma máquina; só o GitHub é comum. Antes de confiar no estado local, rode `git fetch` e confira os PRs abertos.
+
+### Limpeza ao terminar
+
+Ao concluir um desenvolvimento, cada agente apaga o que criou no caminho: worktrees temporários, logs, clones, contêineres e volumes de teste. Apague só o que é seu, e olhe o conteúdo antes (um arquivo temporário pode ser a única cópia de uma nota). Branches já mergeadas são apagadas do remoto.
 
 ## Criação de branch e commits
 
@@ -79,6 +88,8 @@ feat: comandos de login e refresh com HMAC-SHA256
 ```
 
 ## Não troque de branch antes do merge
+
+> Esta seção vale para quem trabalha no **checkout compartilhado**. Num worktree próprio, a branch é só sua e o problema descrito aqui não acontece.
 
 **Cenário proibido:**
 ```bash
@@ -168,15 +179,18 @@ Critério de aceite: script de migration aprovado, índices corretos, collation 
 
 A `main` exige que **todos** os seguintes checks passem antes de permitir merge:
 
-| Check | Descrição | Falha em |
-|-------|-----------|----------|
-| `seguranca` | gitleaks (histórico inteiro), grep `__GERAR__` no `.env.example` | segredo em claro, credencial no git |
-| `backend-unit` | `dotnet build`, testes unitários, cobertura | código quebrado, cobertura < 80% |
-| `backend-integracao` | Testcontainers SQL + Redis, testes de integração | comportamento incorreto com banco real |
-| `ddl-check` | Schema validação contra `03-schema-sqlserver.sql` | migração inválida, índice perdido |
-| `frontend` | ESLint, Prettier, testes Vitest, build Vite | lint, formatação, testes |
-| `compose-smoke` | Docker Compose up, Playwright no player | serviços não sobem, UI quebrada |
-| `vulnerabilidades` | trivy, `dotnet list package --vulnerable`, `npm audit` | dependência vulnerável |
+| Job | O que roda | Falha em |
+|-----|-----------|----------|
+| `seguranca` | gitleaks no histórico inteiro; grep de segredo no `.env.example` | segredo em claro, credencial no git |
+| `backend-unit` | build, testes unitários e de arquitetura | código quebrado, regra de camada violada |
+| `backend-sql` | testes que precisam de SQL Server e Redis reais; falha se algum for pulado | comportamento incorreto com banco real |
+| `ddl-check` | compara `03-schema-sqlserver.sql` com o script das migrations do EF | spec e migrations divergentes |
+| `frontend` | ESLint, testes Vitest, `tsc` e build do Vite | lint, tipos, testes |
+| `infra-testes` | `teste.sh` do Icecast e do Liquidsoap | regressão no playout |
+| `compose-smoke` | sobe o stack inteiro e roda `infra/scripts/smoke-compose.sh` | serviço que não sobe, isolamento de rede, bypass da porta interna |
+| `vulnerabilidades` | `dotnet list package --vulnerable`, `npm audit` e `trivy` nas imagens construídas | dependência ou imagem com vulnerabilidade alta ou crítica |
+
+Além desses, o GitHub roda o CodeQL. Os jobs `backend-sql`, `ddl-check`, `frontend`, `infra-testes` e `vulnerabilidades` entram com o PR #31; antes dele, só `seguranca`, `backend-unit` e `compose-smoke` existem. O Playwright ainda não roda no CI.
 
 Se um check falhar, o merge é bloqueado até a correção.
 
@@ -209,7 +223,7 @@ A organização aprendeu pela via difícil a importância de **staging e committ
 
 ## Checklist antes de abrir PR
 
-- [ ] Branch criada a partir da `main` atual (não atrás)
+- [ ] Branch criada a partir da `main` atual, num worktree próprio
 - [ ] `git add` só dos caminhos que você tocou
 - [ ] Commits atômicos com mensagens claras
 - [ ] Nenhum `console.log`, `// TODO`, `// DEBUG`
@@ -218,7 +232,7 @@ A organização aprendeu pela via difícil a importância de **staging e committ
 - [ ] Backend: `dotnet build`, `dotnet test` 100% verde localmente
 - [ ] Frontend: `npm run lint`, `npm test`, `npm run build` 100% verde localmente
 - [ ] Mudanças de contrato (DTO, rota, coluna) atualizadas em `docs/specs/` **antes** do código
-- [ ] Uma única purpose por PR (não misture F04 + F06 + P08)
+- [ ] Um PR por feature grande, com commits separados por tarefa (não misture features sem relação)
 
 ## Sincronização após merge
 
@@ -230,7 +244,7 @@ git checkout main
 git merge --ff-only origin/main  # Avança para o merge commit
 ```
 
-Agora você e outros estão no mesmo ponto. O próximo PR pode começar.
+Agora você e outros estão no mesmo ponto. Apague a branch mergeada (local e remota) e os temporários que criou.
 
 ---
 
@@ -239,5 +253,5 @@ Agora você e outros estão no mesmo ponto. O próximo PR pode começar.
 - [`./specs/04-epico-1-tarefas.md`](specs/04-epico-1-tarefas.md) — tarefas em detalhe
 - [`../SECURITY.md`](../SECURITY.md) — política de segurança
 
-**Versão**: v1.1  
-**Última atualização**: 2026-09-28
+**Versão**: v1.2  
+**Última atualização**: 2026-10-14
