@@ -30,8 +30,10 @@ Max Pool Size=<ver §4>;Min Pool Size=0;Connect Timeout=10
   da rede `dados` não seria detectado.
 - O risco só é aceito **enquanto os três gatilhos valerem**:
   1. a rede `dados` é `internal` e de um único host (sem Swarm, sem Kubernetes, sem multi-host);
-  2. nenhum contêiner da `dados` tem `NET_RAW` ou `NET_ADMIN`, nem `network_mode: host`
-     (`cap_drop: [ALL]` em todos). O `infra/scripts/smoke-compose.sh` confere isso;
+  2. nenhum contêiner da `dados` tem `NET_RAW`, `NET_ADMIN` ou `privileged` (que devolve as duas
+     mesmo com `cap_drop: [ALL]`), nem `network_mode: host` nem `pid: host`, e todos têm
+     `cap_drop: [ALL]`. O `infra/scripts/smoke-compose.sh` confere isso sobre o `docker compose config`
+     da base;
   3. `Encrypt=True` fica fixo (nunca `Encrypt=False`).
 - **Se um gatilho cair, o certificado confiável vira pré-requisito** e `TrustServerCertificate`
   volta a `False` em produção (fail-closed). Desenho de referência (PR #30): CA própria gerada pelo
@@ -57,9 +59,10 @@ Cada serviço se identifica de um jeito próprio, para diferenciar sessões em
 | `migrator` | `program_name = WebRadio.Migrator` | `infra/migrator/entrypoint.sh` |
 | `db-init` | `host_name = WebRadio.DbInit` (o `program_name` é `SQLCMD`) | `sqlcmd -H` no `infra/db-init/entrypoint.sh` |
 
-O `sqlcmd` fixa `program_name = SQLCMD` e não deixa trocá-lo; por isso o db-init se identifica pelo
-`host_name`. Os clientes .NET mostram o id do contêiner em `host_name`; só o db-init o sobrescreve.
-O db-init é one-shot: a sessão só existe enquanto ele roda.
+O `sqlcmd` fixa `program_name = SQLCMD` e não deixa trocá-lo (confirmado na execução registrada no
+commit `cb32deb`: `APP_NAME()=SQLCMD` com `-H WebRadio.DbInit`); por isso o db-init se identifica pelo
+`host_name`. Os demais serviços se filtram por `program_name`; o `host_name` deles não é definido por
+este projeto. O db-init é one-shot: a sessão só existe enquanto ele roda.
 
 Consultas de diagnóstico:
 
@@ -111,9 +114,9 @@ DB_ENCRYPT=True
       produção só enquanto valerem os três gatilhos da §2 (o `smoke-compose.sh` confere o valor igual e o
       gatilho ii).
 - [ ] Gatilhos conferidos a cada mudança de compose: (i) `dados` `internal` e host único; (ii) nenhum
-      contêiner da `dados` com `NET_RAW`/`NET_ADMIN`/`network_mode: host`; (iii) sem `Encrypt=False`.
+      contêiner da `dados` com `NET_RAW`/`NET_ADMIN`/`privileged`/`network_mode: host`/`pid: host`;
+      (iii) sem `Encrypt=False`.
 - [ ] Se um gatilho cair: certificado confiável (§2) **antes** do merge, e `TrustServerCertificate=False`.
 - [ ] Identificação de sessão por serviço conforme a tabela da §3 (inclui a liderança do Worker; o db-init por `host_name`).
 - [ ] Pool dimensionado por serviço conforme §4 (não usar o mesmo valor para `api` e `migrator`).
 - [ ] Senha montada em runtime a partir de `/run/secrets` — nunca literal na connection string versionada.
-
