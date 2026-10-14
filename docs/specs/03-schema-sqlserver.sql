@@ -373,7 +373,7 @@ GO
 /* ---------- 11. Rotinas de manutenção (Atlas, Épico 1 cria o esqueleto) ----------
    - LGPD: UPDATE interacao.PedidoMusica SET ListenerDeviceHash = NULL, ListenerIpHash = NULL
            WHERE CriadoEmUtc < DATEADD(DAY, -30, SYSUTCDATETIME()) AND (ListenerDeviceHash IS NOT NULL OR ListenerIpHash IS NOT NULL);
-           (em lotes de 5.000 para não escalar o lock)
+           (em lotes de 4.000: o SQL Server escala para lock de tabela a partir de ~5.000 locks num statement, e o DELETE toca o clustered e os índices)
    - Outbox: DELETE infra.EventoOutbox WHERE ProcessadoEmUtc < DATEADD(DAY, -7, SYSUTCDATETIME());
    - RefreshToken (em dois passos; um DELETE em lotes violaria a FK_RefreshToken_SubstituidoPor,
      que é NO ACTION e checada ao fim de cada statement: o TOP não tem ordem e pode apagar o

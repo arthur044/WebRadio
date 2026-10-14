@@ -11,13 +11,13 @@ public interface IManutencao
 }
 
 /// <summary>
-/// Rotinas da seção 11 do <c>03-schema-sqlserver.sql</c>, em lotes de 5.000 (não escala o lock para a tabela).
+/// Rotinas da seção 11 do <c>03-schema-sqlserver.sql</c>, em lotes de 4.000 (abaixo do limiar de ~5.000 locks que escala o lock para a tabela; o DELETE toca o clustered e os índices).
 /// O "agora" é o do SQL (<c>SYSUTCDATETIME()</c>), não o do contêiner. Tudo é idempotente: rodar duas vezes, ou em
 /// dois workers ao mesmo tempo, não muda o resultado (a liderança só evita trabalho dobrado).
 /// </summary>
 public sealed class Manutencao(RadioDbContext db) : IManutencao
 {
-    public const int LotePadrao = 5000;
+    public const int LotePadrao = 4000;
 
     public int Lote { get; init; } = LotePadrao;
 

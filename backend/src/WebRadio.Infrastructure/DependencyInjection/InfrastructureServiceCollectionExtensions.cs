@@ -25,7 +25,17 @@ public static class InfrastructureServiceCollectionExtensions
     /// 05 §5.3: a senha NÃO fica na connection string do compose. Ela chega por arquivo (<c>/run/secrets/Banco__Senha</c>,
     /// chave <c>Banco:Senha</c>) e é montada aqui, em memória. Sem <c>Banco:Senha</c>, vale a string como veio (dev local).
     /// </summary>
-    public static string ConnectionStringDoBanco(IConfiguration configuration, bool exigirSenhaDeSegredo = false)
+    public static string ConnectionStringDoBanco(IConfiguration configuration, bool exigirSenhaDeSegredo = false, string? nomeDaAplicacao = null)
+    {
+        var connectionString = ConnectionStringComSenha(configuration, exigirSenhaDeSegredo);
+        // Um Application Name por serviço (docs/conexao-sql-server.md §3): vem do código, não do compose, para a Api e o Worker
+        // não herdarem o mesmo nome por uma âncora de YAML.
+        return nomeDaAplicacao is null
+            ? connectionString
+            : new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString) { ApplicationName = nomeDaAplicacao }.ConnectionString;
+    }
+
+    private static string ConnectionStringComSenha(IConfiguration configuration, bool exigirSenhaDeSegredo)
     {
         var connectionString = configuration.GetConnectionString(ConnectionStringName);
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -65,7 +75,7 @@ public static class InfrastructureServiceCollectionExtensions
 
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
-        services.AddRadioDbContext(ConnectionStringDoBanco(configuration));
+        services.AddRadioDbContext(ConnectionStringDoBanco(configuration, nomeDaAplicacao: NomesDeAplicacao.Api));
 
         services.AddScoped<IRadioDbContext>(sp => sp.GetRequiredService<RadioDbContext>());
         services.AddScoped<ITransacaoComTrava, TransacaoComTrava>();

@@ -128,9 +128,11 @@ public class LiderancaSemBancoTests
 
         await w.StartAsync(default);
         // Primeiro o aviso (a 1ª tentativa de conexão pode demorar mais num runner lento); depois ciclos de sobra para
-        // provar que ele não se repete.
+        // provar que ele não se repete. O contador de tentativas (e não um sleep) garante que houve outros ciclos de
+        // falha DEPOIS do aviso: num runner lento um sleep passaria sem provar a não-repetição (B3-05).
         Assert.True(await Espera.Ate(() => log.Linhas.Length > 0, TimeSpan.FromSeconds(20)));
-        await Task.Delay(TimeSpan.FromSeconds(2));
+        var depoisDoAviso = w.Tentativas;
+        Assert.True(await Espera.Ate(() => w.Tentativas >= depoisDoAviso + 3, TimeSpan.FromSeconds(30)));
         await w.StopAsync(default);
 
         Assert.False(w.EhLider);
@@ -138,6 +140,17 @@ public class LiderancaSemBancoTests
         Assert.Single(avisos);
         Assert.Contains("SQL", avisos[0].Texto);
         Assert.DoesNotContain("Password", avisos[0].Texto);
+    }
+}
+
+public class LoteDaManutencaoTests
+{
+    [Fact]
+    public void O_lote_padrao_fica_abaixo_do_limiar_de_escalonamento_de_lock_do_SQL_Server()
+    {
+        // O SQL Server tenta escalar para lock de tabela a partir de ~5.000 locks num statement, e um DELETE TOP (N) toca o
+        // clustered e os índices: com N = 5.000 o limiar é ultrapassado (B3-14). A seção 11 do 03 cita o mesmo número.
+        Assert.InRange(Manutencao.LotePadrao, 1, 4000);
     }
 }
 
@@ -306,11 +319,19 @@ public class CicloDoWorkerTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private CicloDoWorker Novo(string? arquivo = null)
+    private static readonly TimeSpan RecuoInicial = TimeSpan.FromMinutes(5);
+
+    private CicloDoWorker Novo(string? arquivo = null, Microsoft.Extensions.Logging.ILogger<CicloDoWorker>? log = null)
     {
         var servicos = new ServiceCollection().AddScoped<IManutencao>(_ => _manutencao).BuildServiceProvider();
-        var opcoes = new CicloOptions { Intervalo = TimeSpan.FromMilliseconds(40), ArquivoDeHeartbeat = arquivo ?? Heartbeat };
-        return new CicloDoWorker(_lideranca, servicos.GetRequiredService<IServiceScopeFactory>(), _relogio, opcoes, NullLogger<CicloDoWorker>.Instance);
+        var opcoes = new CicloOptions
+        {
+            Intervalo = TimeSpan.FromMilliseconds(40),
+            ArquivoDeHeartbeat = arquivo ?? Heartbeat,
+            RecuoInicialDaManutencao = RecuoInicial,
+            RecuoMaximoDaManutencao = TimeSpan.FromHours(1),
+        };
+        return new CicloDoWorker(_lideranca, servicos.GetRequiredService<IServiceScopeFactory>(), _relogio, opcoes, log ?? NullLogger<CicloDoWorker>.Instance);
     }
 
     [Fact]
@@ -365,22 +386,65 @@ public class CicloDoWorkerTests : IDisposable
     }
 
     [Fact]
-    public async Task Falha_da_manutencao_nao_derruba_o_laco_e_ela_e_tentada_de_novo()
+    public async Task Falha_da_manutencao_nao_derruba_o_laco_e_a_nova_tentativa_respeita_o_recuo()
     {
         _lideranca.Lider = true;
         _manutencao.Falhar = true;
         using var ciclo = Novo();
         await ciclo.StartAsync(default);
 
-        Assert.True(await Espera.Ate(() => _manutencao.Execucoes >= 2, TimeSpan.FromSeconds(10)));
+        // A falha só conta depois que o ciclo registrou o recuo: avançar o relógio antes disso mudaria o instante da próxima tentativa.
+        Assert.True(await Espera.Ate(() => ciclo.FalhasSeguidasDaManutencao == 1, TimeSpan.FromSeconds(10)));
+        // Sem recuo (B3-07) seriam tentativas a cada ciclo: o relógio não andou, então fica em UMA, com vários ciclos de sobra.
+        var antes = ciclo.Ciclos;
+        Assert.True(await Espera.Ate(() => ciclo.Ciclos >= antes + 5, TimeSpan.FromSeconds(10)));
+        Assert.Equal(1, _manutencao.Execucoes);
+
+        // Passado o recuo inicial tenta de novo; a falha seguinte dobra o recuo.
+        _relogio.Avancar(RecuoInicial);
+        Assert.True(await Espera.Ate(() => ciclo.FalhasSeguidasDaManutencao == 2, TimeSpan.FromSeconds(10)));
+        Assert.Equal(2, _manutencao.Execucoes);
+        _relogio.Avancar(RecuoInicial);
+        var ciclos = ciclo.Ciclos;
+        Assert.True(await Espera.Ate(() => ciclo.Ciclos >= ciclos + 5, TimeSpan.FromSeconds(10)));
+        Assert.Equal(2, _manutencao.Execucoes); // 1× o recuo inicial já não basta: o recuo agora é 2×
+
+        // Banco de volta: a próxima tentativa (depois do recuo dobrado) dá certo e a manutenção volta ao ritmo diário.
         _manutencao.Falhar = false;
-        var antes = _manutencao.Execucoes;
-        Assert.True(await Espera.Ate(() => _manutencao.Execucoes > antes, TimeSpan.FromSeconds(10)));
+        _relogio.Avancar(RecuoInicial);
+        Assert.True(await Espera.Ate(() => _manutencao.Execucoes == 3 && ciclo.FalhasSeguidasDaManutencao == 0, TimeSpan.FromSeconds(10)));
         var depois = ciclo.Ciclos;
         Assert.True(await Espera.Ate(() => ciclo.Ciclos >= depois + 5, TimeSpan.FromSeconds(10)));
         await ciclo.StopAsync(default);
 
-        Assert.InRange(_manutencao.Execucoes, antes + 1, antes + 2); // deu certo: para de repetir
+        Assert.Equal(3, _manutencao.Execucoes); // deu certo: para de repetir
+    }
+
+    [Fact]
+    public async Task Sequencia_de_falhas_da_manutencao_gera_um_unico_erro_e_o_retorno_e_registrado()
+    {
+        _lideranca.Lider = true;
+        _manutencao.Falhar = true;
+        var log = new LoggerDeTeste<CicloDoWorker>();
+        using var ciclo = Novo(log: log);
+        await ciclo.StartAsync(default);
+
+        for (var tentativa = 1; tentativa <= 3; tentativa++)
+        {
+            // Espera a falha ser registrada (e o recuo calculado) antes de avançar o relógio.
+            Assert.True(await Espera.Ate(() => ciclo.FalhasSeguidasDaManutencao == tentativa, TimeSpan.FromSeconds(10)));
+            _relogio.Avancar(TimeSpan.FromHours(2)); // acima de qualquer recuo
+        }
+
+        Assert.True(await Espera.Ate(() => ciclo.FalhasSeguidasDaManutencao == 4, TimeSpan.FromSeconds(10)));
+        _manutencao.Falhar = false;
+        _relogio.Avancar(TimeSpan.FromHours(2));
+        Assert.True(await Espera.Ate(() => _manutencao.Execucoes == 5, TimeSpan.FromSeconds(10)));
+        Assert.True(await Espera.Ate(() => log.Linhas.Any(l => l.Texto.Contains("WORKER_MANUTENCAO") && l.Nivel == Microsoft.Extensions.Logging.LogLevel.Information), TimeSpan.FromSeconds(10)));
+        await ciclo.StopAsync(default);
+
+        // 4 falhas seguidas = 1 erro (com a stack); as demais saem sem repetir o erro.
+        Assert.Single(log.Linhas, l => l.Nivel >= Microsoft.Extensions.Logging.LogLevel.Error);
     }
 
     [Fact]
@@ -465,6 +529,25 @@ public class ConexaoDoBancoTests
             exigirSenhaDeSegredo: true));
 
         Assert.Contains("Banco:Senha", e.Message);
+    }
+
+    [Fact]
+    public void O_nome_da_aplicacao_do_servico_vai_para_a_connection_string_e_vence_o_da_configuracao()
+    {
+        var cs = InfrastructureServiceCollectionExtensions.ConnectionStringDoBanco(
+            Config(("ConnectionStrings:RadioDb", "Server=sqlserver;Database=WebRadio;User Id=webradio_app;Application Name=outro")),
+            nomeDaAplicacao: NomesDeAplicacao.Worker);
+
+        Assert.Equal("WebRadio.Worker", new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(cs).ApplicationName);
+    }
+
+    [Fact]
+    public void Os_nomes_da_aplicacao_sao_os_da_tabela_do_guia_de_conexao()
+    {
+        // docs/conexao-sql-server.md §3: um Application Name por serviço (sys.dm_exec_sessions.program_name).
+        Assert.Equal("WebRadio.Api", NomesDeAplicacao.Api);
+        Assert.Equal("WebRadio.Worker", NomesDeAplicacao.Worker);
+        Assert.Equal("WebRadio.Worker.Lideranca", LiderancaDoWorker.NomeDaAplicacao);
     }
 
     [Fact]
