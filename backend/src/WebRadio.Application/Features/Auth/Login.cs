@@ -19,7 +19,7 @@ public sealed class LoginValidator : AbstractValidator<LoginCommand>
     {
         // Só formato/tamanho: não revela nada sobre contas. Teto de 128 evita PBKDF2 sobre entrada gigante (DoS).
         RuleFor(x => x.Email).NotEmpty().MaximumLength(254);
-        RuleFor(x => x.Senha).NotEmpty().MaximumLength(128);
+        RuleFor(x => x.Senha).NotEmpty().MaximumLength(PoliticaDeSenha.Maximo);
     }
 }
 

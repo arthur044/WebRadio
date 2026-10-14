@@ -19,8 +19,7 @@ public sealed class RegistrarValidator : AbstractValidator<RegistrarCommand>
     {
         RuleFor(x => x.Nome).NotEmpty().MaximumLength(120);
         RuleFor(x => x.Email).NotEmpty().MaximumLength(254).EmailAddress();
-        RuleFor(x => x.Senha).NotEmpty().MinimumLength(12).MaximumLength(128)
-            .Must(s => !vazadas.EhVazada(s)).WithMessage("Esta senha é muito comum. Escolha outra.");
+        RuleFor(x => x.Senha).NotEmpty().SenhaNova(vazadas);
     }
 }
 

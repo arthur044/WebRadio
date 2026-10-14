@@ -2,6 +2,7 @@ using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using WebRadio.Application.Abstracoes;
+using WebRadio.Application.Features.Auth;
 using WebRadio.Domain.Enums;
 using WebRadio.Domain.Erros;
 using WebRadio.Domain.Usuarios;
@@ -19,8 +20,7 @@ public sealed class CriarUsuarioValidator : AbstractValidator<CriarUsuarioComman
     {
         RuleFor(x => x.Nome).NotEmpty().MaximumLength(120);
         RuleFor(x => x.Email).NotEmpty().MaximumLength(254).EmailAddress();
-        RuleFor(x => x.SenhaInicial).NotEmpty().MinimumLength(12).MaximumLength(128)
-            .Must(s => !vazadas.EhVazada(s)).WithMessage("Esta senha é muito comum. Escolha outra.");
+        RuleFor(x => x.SenhaInicial).NotEmpty().SenhaNova(vazadas);
         RuleFor(x => x.Role).IsInEnum().WithMessage("Papel inválido.");
     }
 }
