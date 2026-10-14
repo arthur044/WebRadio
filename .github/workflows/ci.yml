@@ -57,6 +57,9 @@ jobs:
             exit 1
           fi
 
+      - name: Paridade dos segredos (gerar-segredos.sh × .ps1 × compose, B3-10)
+        run: infra/scripts/verificar-paridade-segredos.sh
+
   backend-unit:
     name: Backend (unit + arquitetura)
     runs-on: ubuntu-latest

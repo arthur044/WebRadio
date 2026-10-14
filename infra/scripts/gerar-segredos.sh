@@ -34,19 +34,33 @@
 # falharia). Os hex (playout_token, minio_*_user/access_key) não têm maiúscula
 # por natureza e ficam fora do laço: não são senha de SQL.
 #
+# E-mail do Admin semeado (secrets/seed_admin_email): em dev vale admin@webradio.local; em PROD é obrigatório informar o
+# seu (2º argumento ou ADMIN_EMAIL), porque um e-mail fixo e conhecido é metade da credencial de um Admin (B3-10).
+#
 # Uso:
-#   infra/scripts/gerar-segredos.sh dev    # secrets/ + .env de desenvolvimento
-#   infra/scripts/gerar-segredos.sh prod   # só secrets/ (o .env de prod sai do .env.example)
+#   infra/scripts/gerar-segredos.sh dev                         # secrets/ + .env de desenvolvimento
+#   infra/scripts/gerar-segredos.sh prod admin@radio.exemplo.br # só secrets/ (o .env de prod sai do .env.example)
 # =============================================================================
 set -euo pipefail
 export LC_ALL=C
 umask 077
 
 MODO="${1:-}"
+ADMIN_EMAIL="${2:-${ADMIN_EMAIL:-}}"
 DIR_RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 if [[ "$MODO" != "dev" && "$MODO" != "prod" ]]; then
-  echo "Uso: $0 [dev|prod]" >&2
+  echo "Uso: $0 dev | $0 prod <email-do-admin>" >&2
+  exit 1
+fi
+
+# O e-mail não é segredo, mas entra no seed como credencial: alfabeto estrito (sem espaço, aspa, ';' nem barra).
+if [[ -n "$ADMIN_EMAIL" && ! "$ADMIN_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
+  echo "E-mail do Admin inválido." >&2
+  exit 1
+fi
+if [[ "$MODO" == "prod" && -z "$ADMIN_EMAIL" && ! -e "$DIR_RAIZ/secrets/seed_admin_email" ]]; then
+  echo "Em prod informe o e-mail do Admin: $0 prod <email-do-admin> (ou ADMIN_EMAIL=...)." >&2
   exit 1
 fi
 
@@ -141,7 +155,7 @@ while IFS='=' read -r nome receita; do
 done < <(listar_segredos)
 
 if [[ ! -e "$DESTINO_DIR/seed_admin_email" ]]; then
-  gravar "$DESTINO_DIR/seed_admin_email" "admin@webradio.local"
+  gravar "$DESTINO_DIR/seed_admin_email" "${ADMIN_EMAIL:-admin@webradio.local}"
 else
   chmod 644 "$DESTINO_DIR/seed_admin_email"
 fi
