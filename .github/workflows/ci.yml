@@ -22,12 +22,12 @@ env:
   # sha256 ESPERADO do tarball, fixado aqui (05 §9.2): o checksums.txt da mesma release só provaria integridade do download,
   # não autenticidade. Ao subir a versão, o valor novo vem de uma conferência independente da release, nunca do próprio download.
   GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
-  # Imagem do SQL Server dos testes: a mesma, por digest, do docker-compose.yml.
   # Imagem do Redis dos testes do throttle: a mesma, por digest, do docker-compose.yml.
   REDIS_IMAGEM: "redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"
   # trivy: binário com sha256 esperado fixado aqui, como o gitleaks (05 §9.2).
   TRIVY_VERSION: "0.75.0"
   TRIVY_SHA256: "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f"
+  # Imagem do SQL Server dos testes (backend-sql e ddl-check): a mesma, por digest, do docker-compose.yml.
   MSSQL_IMAGEM: "mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090"
 
 jobs:
@@ -168,6 +168,8 @@ jobs:
       - name: Nenhum teste pulado (um [SqlFact] ignorado seria um verde falso)
         run: |
           trx="$RUNNER_TEMP/resultados/sql.trx"
+          # Sem o .trx as contagens ficariam vazias e o passo passaria sem provar nada.
+          [ -s "${trx}" ] || { echo "::error::O arquivo de resultados ${trx} não existe ou está vazio."; exit 1; }
           executados=$(grep -c 'outcome="Passed"' "$trx" || true)
           pulados=$(grep -c 'outcome="NotExecuted"' "$trx" || true)
           echo "executados=${executados} pulados=${pulados}"
@@ -314,19 +316,31 @@ jobs:
         run: |
           set -euo pipefail
           achados=0
-          # Um projeto por vez: a solução inteira num só comando estoura a memória do runner.
+          total=0
+          # Um projeto por vez: a solução inteira num só comando estoura a memória do runner. Falha FECHADA: cada projeto precisa
+          # produzir uma das duas frases conhecidas do dotnet; qualquer outra saída (SDK novo, locale, erro) quebra o passo,
+          # e zero projetos encontrados também.
           while IFS= read -r projeto; do
+            total=$((total + 1))
             saida="$(dotnet list "${projeto}" package --vulnerable --include-transitive 2>&1)" || { echo "${saida}"; echo "::error::dotnet list falhou em ${projeto}"; exit 1; }
             if grep -q "has the following vulnerable packages" <<<"${saida}"; then
               echo "${saida}"
               achados=$((achados + 1))
+            elif ! grep -q "has no vulnerable packages" <<<"${saida}"; then
+              echo "${saida}"
+              echo "::error::Saída inesperada do dotnet list em ${projeto} (nem 'has no vulnerable packages' nem 'has the following vulnerable packages')."
+              exit 1
             fi
           done < <(find backend -name '*.csproj' -not -path '*/obj/*' | sort)
+          if [ "${total}" -eq 0 ]; then
+            echo "::error::Nenhum .csproj encontrado em backend/."
+            exit 1
+          fi
           if [ "${achados}" -ne 0 ]; then
             echo "::error::${achados} projeto(s) com pacote NuGet vulnerável (acima)."
             exit 1
           fi
-          echo "Nenhum pacote NuGet vulnerável."
+          echo "Nenhum pacote NuGet vulnerável em ${total} projeto(s)."
 
       - name: npm audit --audit-level=high (imagem node do frontend/Dockerfile)
         run: |
@@ -373,15 +387,22 @@ jobs:
             echo "| Imagem | HIGH | CRITICAL |"
             echo "|---|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
+          lidas=0
           for imagem in $(grep -hoE 'image: [^ ]+@sha256:[0-9a-f]+' docker-compose.yml | awk '{print $2}' | sort -u); do
             contagem="$(trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --format json "${imagem}" 2>/dev/null \
               | python3 -c "import json,sys; d=json.load(sys.stdin); v=[x for r in d.get('Results',[]) for x in (r.get('Vulnerabilities') or [])]; print(sum(x['Severity']=='HIGH' for x in v), sum(x['Severity']=='CRITICAL' for x in v))" || echo "? ?")"
             read -r altas criticas <<<"${contagem}"
+            [ "${altas}" != "?" ] && lidas=$((lidas + 1))
             echo "| \`${imagem%%@*}\` | ${altas} | ${criticas} |" >> "$GITHUB_STEP_SUMMARY"
             if [ "${altas}" != "0" ] || [ "${criticas}" != "0" ]; then
               echo "::warning::${imagem%%@*}: ${altas} HIGH, ${criticas} CRITICAL com correção disponível (imagem de terceiros, sem build aqui)."
             fi
           done
+          # Informativo não quer dizer cego: se o trivy quebrou e nenhuma contagem foi lida, o passo falha.
+          if [ "${lidas}" -eq 0 ]; then
+            echo "::error::O trivy não leu nenhuma imagem de terceiros (todas as contagens são '?')."
+            exit 1
+          fi
 
   compose-smoke:
     name: Compose (smoke da Definição de Pronto)
