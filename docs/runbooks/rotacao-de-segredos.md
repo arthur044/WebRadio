@@ -6,10 +6,13 @@
 > - **Não há Docker Swarm.** O stack é Docker Compose puro; `docker secret create/rm` e `docker service update` não se aplicam.
 > - **Não há segredo no `.env`.** Em dev **e** em produção, cada segredo é um arquivo em `secrets/<nome>`, montado em `/run/secrets`. O `.env` só tem configuração não secreta.
 > - **Os nomes são outros.** Os arquivos são `jwt_signing_key`, `playout_token`, `db_app_password`, `redis_password` etc. (lista em `infra/scripts/gerar-segredos.sh`), não `Jwt__SigningKey` nem `DB_APP_PASSWORD`.
-> - **O script exige o modo** (`gerar-segredos.sh dev|prod`, `gerar-segredos.ps1 -Modo dev|prod`), gera **todos** os segredos que faltam e nunca sobrescreve. Para trocar um, apaga-se o arquivo dele e roda-se o script de novo.
+> - **O script exige o modo** (`gerar-segredos.sh dev|prod`, `gerar-segredos.ps1 -Modo dev|prod`), gera **todos** os segredos que faltam e nunca sobrescreve. Apagar o arquivo e rodar o script de novo só serve para `jwt_signing_key`, `playout_token`, `redis_password` e as senhas do Icecast e do harbor, seguido de recriar os serviços que os leem. **Não faça isso com as senhas de SQL** (`db_*_password`, `mssql_sa_password`): o `logins.sql` só **cria** o login, não redefine a senha de um que já existe, então a Api, o Worker e o migrator passam a falhar com `Login failed`. O `seguranca_pepper` só se troca em caso de vazamento (tabela 5.1 do `05`).
+> - **O `ALTER LOGIN` do Passo 2 é o único trecho que age no estado real.** Executado sozinho, deixa o login com uma senha que o Compose não conhece.
+> - **O rascunho expõe segredos na linha de comando** (`echo '<segredo>' |`, argumentos, `rm` simples de arquivos com segredo). Não copie esse padrão.
+> - **Os prazos de rotação da tabela divergem** dos da tabela 5.1 do `05`, que é a que vale.
 > - **A chave anterior não está ligada no Compose.** A API aceita `Jwt:SigningKeyAnterior` e `Playout:TokenAnterior`, mas o `docker-compose.yml` não tem segredo para eles; a rotação sem derrubar sessões descrita abaixo ainda não funciona no stack.
 >
-> Não foi conferido: se o `db-init` redefine a senha de um login que já existe, e os prazos de rotação da tabela. A fonte normativa dos segredos e do impacto de cada troca é a tabela 5.1 do [`05-seguranca-auditoria.md`](../specs/05-seguranca-auditoria.md).
+> Conferido pelo Sentinel no review do PR #32. A fonte normativa dos segredos e do impacto de cada troca é a tabela 5.1 do [`05-seguranca-auditoria.md`](../specs/05-seguranca-auditoria.md).
 
 > Procedimento operacional para renovar segredos em produção, minimizando downtime e evitando perda de acesso.
 

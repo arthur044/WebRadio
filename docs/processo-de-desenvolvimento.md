@@ -4,11 +4,14 @@
 
 ## Fila de Pull Requests
 
-A `main` é **protegida por branch**: todo merge exige:
-- Todos os **checks obrigatórios** (CI) passando
-- Revisão do **Guardian** (code-review)
+A `main` é **protegida**: só entra por PR, e o GitHub bloqueia o merge enquanto os dois checks obrigatórios não passarem: `Segurança (gitleaks)` e `Backend (unit + arquitetura)`. O GitHub **não** exige aprovação de review (o repositório tem uma conta só) nem os demais jobs.
+
+O resto é **regra do time**, cumprida por disciplina e não pela plataforma:
+- Todos os jobs do CI verdes antes do merge, não só os dois obrigatórios
+- Revisão do **Guardian** (code-review) em todo PR
 - Revisão adicional do **Sentinel** (security) para PRs de autenticação, storage, infraestrutura ou segredos
 - Revisão adicional do **Atlas** (DBA) para PRs de SQL ou migrations
+- Merge autorizado pelo dono do produto
 
 ### Entrega por feature grande
 
@@ -35,7 +38,8 @@ Ao concluir um desenvolvimento, cada agente apaga o que criou no caminho: worktr
 ### Padrão de branch
 
 ```bash
-git checkout -b <seu-agente>/<tarefa-id>
+git fetch origin
+git worktree add ../webradio-<seu-agente> -b <seu-agente>/<assunto> origin/main
 ```
 
 Exemplo:
@@ -130,7 +134,8 @@ git merge --ff-only origin/main     # Avança main para o commit mergeado
 O merge é um **merge commit**, não squash.
 
 ```bash
-# ✅ No GitHub: deixe "Create a merge commit" selecionado (padrão)
+# ✅ No GitHub: escolha "Create a merge commit" (ou `gh pr merge --merge`).
+#    O repositório também aceita squash e rebase; não usar é regra do time, a plataforma não impede.
 
 # ❌ Não use:
 # - Squash and merge (apaga a história de commits)
@@ -177,11 +182,11 @@ Critério de aceite: script de migration aprovado, índices corretos, collation 
 
 ## Checks obrigatórios na CI
 
-A `main` exige que **todos** os seguintes checks passem antes de permitir merge:
+O CI roda os jobs abaixo em todo PR. O GitHub só **bloqueia** o merge por `seguranca` e `backend-unit`; os outros são exigidos pela regra do time.
 
 | Job | O que roda | Falha em |
 |-----|-----------|----------|
-| `seguranca` | gitleaks no histórico inteiro; grep de segredo no `.env.example` | segredo em claro, credencial no git |
+| `seguranca` | gitleaks no histórico inteiro; grep de segredo no `.env.example` (o grep entra com o PR #31) | segredo em claro, credencial no git |
 | `backend-unit` | build, testes unitários e de arquitetura | código quebrado, regra de camada violada |
 | `backend-sql` | testes que precisam de SQL Server e Redis reais; falha se algum for pulado | comportamento incorreto com banco real |
 | `ddl-check` | compara `03-schema-sqlserver.sql` com o script das migrations do EF | spec e migrations divergentes |
@@ -192,7 +197,7 @@ A `main` exige que **todos** os seguintes checks passem antes de permitir merge:
 
 Além desses, o GitHub roda o CodeQL. Os jobs `backend-sql`, `ddl-check`, `frontend`, `infra-testes` e `vulnerabilidades` entram com o PR #31; antes dele, só `seguranca`, `backend-unit` e `compose-smoke` existem. O Playwright ainda não roda no CI.
 
-Se um check falhar, o merge é bloqueado até a correção.
+Se um dos dois checks obrigatórios falhar, o GitHub bloqueia o merge. Se outro job falhar, o merge não é feito até a correção, por regra do time.
 
 ## Lição de 2026-09-27
 
@@ -251,7 +256,7 @@ Agora você e outros estão no mesmo ponto. Apague a branch mergeada (local e re
 **Veja também:**
 - [`./specs/00-arquitetura.md`](specs/00-arquitetura.md) — decisões e design
 - [`./specs/04-epico-1-tarefas.md`](specs/04-epico-1-tarefas.md) — tarefas em detalhe
-- [`../SECURITY.md`](../SECURITY.md) — política de segurança
+- [`../SECURITY.md`](../SECURITY.md) — política de segurança (o arquivo entra com o PR #31)
 
 **Versão**: v1.2  
 **Última atualização**: 2026-10-14

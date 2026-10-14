@@ -30,7 +30,7 @@ Arquitetura detalhada: [`docs/specs/00-arquitetura.md`](docs/specs/00-arquitetur
 | Serviço | Função | Tecnologia |
 |---------|--------|-----------|
 | **API** | REST endpoints + SignalR hub (pedidos, grade, auth) | ASP.NET Core 10 |
-| **Worker** | Transições de grade, sanitização, limpeza | .NET 10 background service |
+| **Worker** | Eleição de líder e manutenção diária; transições de grade e sanitização entram nos Épicos 2 e 4 | .NET 10 background service |
 | **db-init** | Criação do schema, logins SQL | one-shot sqlcmd |
 | **migrator** | Aplicação de migrations EF | one-shot efbundle |
 | **Icecast** | Distribuição do stream HTTP | Icecast 2 |
@@ -49,7 +49,7 @@ webradio/
 │   ├── conexao-sql-server.md      # Connection string, pool e identificação de sessão
 │   └── processo-de-desenvolvimento.md
 ├── backend/
-│   ├── WebRadio.sln
+│   ├── WebRadio.slnx
 │   ├── Directory.Build.props      # .NET 10, properties centralizadas
 │   ├── src/
 │   │   ├── WebRadio.Domain/       # Entidades, enums, invariantes
@@ -85,7 +85,7 @@ webradio/
 ├── .env.example                   # Configuração NÃO secreta; os segredos ficam em secrets/ (fora do git)
 ├── .gitattributes                 # Scripts shell com LF em Windows
 ├── .gitignore                     # .env, .maestri/, node_modules/
-├── SECURITY.md                    # Política de segurança e divulgação
+├── SECURITY.md                    # Política de segurança e divulgação (entra com o PR #31)
 └── LICENSE
 ```
 
@@ -156,7 +156,7 @@ infra/scripts/smoke-compose.sh
 - **Portas de diagnóstico, só no dev e só em `127.0.0.1`:** SQL Server `1433`, console do MinIO `9001`, harbor do Liquidsoap `8005`.
 - **Parar:** `docker compose -f docker-compose.yml -f docker-compose.dev.yml down`. Sem `-v`, os dados dos volumes são preservados.
 
-O `docker-compose.dev.yml` precisa ser passado com `-f`; ele não é carregado sozinho. É o mesmo roteiro que o job `compose-smoke` do CI executa a cada PR. O `gerar-segredos.ps1` ainda não foi validado em Windows real.
+O `docker-compose.dev.yml` precisa ser passado com `-f`; ele não é carregado sozinho. Este roteiro é só de **desenvolvimento**: em produção usa-se apenas o `docker-compose.yml`, com `gerar-segredos.sh prod`, sem as portas de diagnóstico e atrás de TLS. É o mesmo roteiro que o job `compose-smoke` do CI executa a cada PR. O `gerar-segredos.ps1` ainda não foi validado em Windows real.
 
 Para rodar só o backend ou só o frontend fora do Docker, veja `backend/` (`dotnet build`, `dotnet test`) e [`frontend/README.md`](frontend/README.md).
 
@@ -164,9 +164,9 @@ Para rodar só o backend ou só o frontend fora do Docker, veja `backend/` (`dot
 
 WebRadio é um projeto **público no GitHub**. Nenhum segredo, credencial, e-mail pessoal ou IP pode ser commitado.
 
-- 🔒 Política de segurança: [`SECURITY.md`](SECURITY.md)
+- 🔒 Política de segurança: [`SECURITY.md`](SECURITY.md) (o arquivo entra com o PR #31)
 - 🔍 Auditoria de segurança: [`docs/specs/05-seguranca-auditoria.md`](docs/specs/05-seguranca-auditoria.md)
-- 🚨 Relatar vulnerabilidade: veja [`SECURITY.md`](SECURITY.md)
+- 🚨 Relatar vulnerabilidade: pelo *private vulnerability reporting* do GitHub, na aba Security do repositório
 
 ## Especificações
 
