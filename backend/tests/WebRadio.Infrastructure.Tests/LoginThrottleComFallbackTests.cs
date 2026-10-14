@@ -25,6 +25,14 @@ public class LoginThrottleComFallbackTests
         public Task RegistrarFalhaAsync(string e, byte[] i, CancellationToken ct) => Contar();
 
         public Task LimparAsync(string e, byte[] i, CancellationToken ct) => Contar();
+
+        public int Desbloqueios { get; private set; }
+
+        public Task DesbloquearContaAsync(string e, CancellationToken ct)
+        {
+            Desbloqueios++;
+            return quebrado ? throw new InvalidOperationException("Redis fora do ar (simulado)") : Task.CompletedTask;
+        }
     }
 
     private static readonly byte[] Ip = new byte[32];

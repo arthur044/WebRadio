@@ -93,6 +93,9 @@ public interface ILoginThrottle
     Task RegistrarFalhaAsync(string emailNormalizado, byte[] ipHash, CancellationToken ct);
 
     Task LimparAsync(string emailNormalizado, byte[] ipHash, CancellationToken ct);
+
+    /// <summary>Ação do Admin (02 §3): zera a conta inteira — todos os pares (conta, IP), os bloqueios e o contador por conta.</summary>
+    Task DesbloquearContaAsync(string emailNormalizado, CancellationToken ct);
 }
 
 public interface ISenhasVazadas

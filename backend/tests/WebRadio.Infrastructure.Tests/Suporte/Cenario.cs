@@ -1,11 +1,14 @@
 using System.Buffers.Text;
 using System.Security.Cryptography;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using WebRadio.Application.Abstracoes;
 using WebRadio.Application.Features.Auth;
+using WebRadio.Application.Features.Usuarios;
 using WebRadio.Domain.Enums;
 using WebRadio.Domain.Usuarios;
 using WebRadio.Infrastructure.Persistencia;
+using WebRadio.Infrastructure.Persistencia.Outbox;
 using WebRadio.Infrastructure.Seguranca;
 
 namespace WebRadio.Infrastructure.Tests.Suporte;
@@ -55,7 +58,18 @@ public sealed class Cenario(BancoDeTeste banco)
     public TrocarSenhaHandler NovoTrocarSenha()
     {
         var db = NovoDb();
-        return new TrocarSenhaHandler(db, Hasher, NovoRefresh(db), ThrottleReal(), Relogio);
+        return new TrocarSenhaHandler(db, Hasher, NovoRefresh(db), ThrottleReal(), NovaVersaoDeSeguranca(db), new OutboxEf(db), Relogio);
+    }
+
+    /// <summary>Um cache só para o cenário inteiro, como o singleton da Api: é ele que segura a versão por 15 s.</summary>
+    public MemoryCache Cache { get; } = new(new MemoryCacheOptions());
+
+    public VersaoDeSeguranca NovaVersaoDeSeguranca(RadioDbContext? db = null) => new(db ?? NovoDb(), Cache);
+
+    public AlterarUsuarioHandler NovoAlterarUsuario()
+    {
+        var db = NovoDb();
+        return new AlterarUsuarioHandler(db, new TransacaoComTrava(db), NovoRefresh(db), new OutboxEf(db), NovaVersaoDeSeguranca(db), Relogio);
     }
 
     public MemoryLoginThrottle ThrottleReal() =>

@@ -45,9 +45,9 @@ Claims do JWT: `sub` (id), `name`, `role`, `jti`, `iat`, `exp`; `iss = webradio-
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/usuarios?role=&busca=&pagina=&tamanho=` | lista paginada de `UsuarioDto & { ativo, criadoEmUtc }` |
-| POST | `/usuarios` | `{ nome, email, senhaInicial, role }` → 201 |
-| PATCH | `/usuarios/{id}` | `{ role?, ativo? }` + `If-Match` → 200. Mudar o papel ou desativar revoga as sessões e derruba o hub do usuário; o último Admin ativo não pode ser rebaixado nem desativado → 409 |
+| GET | `/usuarios?role=&busca=&pagina=&tamanho=` | lista paginada de `UsuarioDto & { ativo, criadoEmUtc, versao }`. **Não existe `GET /usuarios/{id}`**: `versao` (RowVersion em base64) é o valor que o cliente manda no `If-Match` do `PATCH` |
+| POST | `/usuarios` | `{ nome, email, senhaInicial, role }` → 201 + `ETag`; o corpo também traz `versao` |
+| PATCH | `/usuarios/{id}` | `{ role?, ativo? }` + `If-Match` → 200 + `ETag` novo (e `versao` no corpo). Mudar o papel ou desativar revoga as sessões e derruba o hub do usuário; o último Admin ativo não pode ser rebaixado nem desativado → 409 |
 | POST | `/usuarios/{id}/desbloquear-login` | → 204; limpa os contadores de falha de login (Redis) da conta |
 
 ## 4. Programas — `/programas`
@@ -133,7 +133,7 @@ Grupos atribuídos pelo servidor no `OnConnectedAsync` (o cliente **não** escol
 - `listener:{deviceHash}` → derivado do `listenerId`
 - `locutores` → se o JWT tiver `role ∈ {Locutor, Admin}`
 
-Eventos servidor → cliente (todos com `eventoId` e `ocorridoEmUtc`; o cliente descarta `eventoId` repetido):
+Eventos servidor → cliente (todos com `eventoId` e `ocorridoEmUtc`; o cliente descarta `eventoId` repetido). **A ordem de chegada não é garantida** quando há mais de uma réplica da API: para eventos de estado (`ProgramaStatusAlterado` por `programaId`, `TocandoAgora`), o cliente guarda o último `eventoId` aplicado por chave e ignora o que chegar com `eventoId` menor. A comparação é **numérica** (o `eventoId` é o id inteiro do outbox enviado como texto; como texto, "10" < "9"); `TocandoAgora` tem uma chave só:
 
 | Evento | Destino | Payload |
 |---|---|---|
@@ -145,4 +145,4 @@ Eventos servidor → cliente (todos com `eventoId` e `ocorridoEmUtc`; o cliente 
 | `MidiaSanitizada` | `locutores` | `{ midiaId, statusSanitizacao, motivoRejeicao? }` |
 
 No MVP não há métodos cliente → servidor: toda ação passa pela REST (`MaximumReceiveMessageSize` = 1 KB).
-Segurança do hub (S-M08, S-M09): `CloseOnAuthenticationExpiration = true`; mudar o papel ou desativar o usuário derruba as conexões dele; `listenerId` precisa ser um UUID válido (senão a conexão é recusada); a query string do hub **não** vai para os logs do nginx nem do Serilog.
+Segurança do hub (S-M08, S-M09): `CloseOnAuthenticationExpiration = true`; mudar o papel, desativar o usuário ou trocar a senha derruba as conexões dele; `listenerId` precisa ser um UUID válido (senão a conexão é recusada); a query string do hub **não** vai para os logs do nginx nem do Serilog.

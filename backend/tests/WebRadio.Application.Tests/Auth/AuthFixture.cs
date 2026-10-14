@@ -30,6 +30,8 @@ public sealed class ThrottleFalso : ILoginThrottle
     public Task<AvaliacaoDeLogin> AvaliarAsync(string e, byte[] i, CancellationToken ct) { Chaves.Add(e); return Task.FromResult(new AvaliacaoDeLogin(Bloqueado, TimeSpan.Zero)); }
     public Task RegistrarFalhaAsync(string e, byte[] i, CancellationToken ct) { Falhas++; return Task.CompletedTask; }
     public Task LimparAsync(string e, byte[] i, CancellationToken ct) => Task.CompletedTask;
+    public List<string> Desbloqueadas { get; } = [];
+    public Task DesbloquearContaAsync(string e, CancellationToken ct) { Desbloqueadas.Add(e); return Task.CompletedTask; }
 }
 
 public static class AuthFixture

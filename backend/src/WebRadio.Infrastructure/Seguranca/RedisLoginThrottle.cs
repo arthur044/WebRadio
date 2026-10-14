@@ -58,6 +58,28 @@ public sealed class RedisLoginThrottle(IConnectionMultiplexer redis, IIpHasher p
         // Só zera o par: o contador por conta continua, para um atacante não zerá-lo logando na própria conta.
         await redis.GetDatabase().KeyDeleteAsync([ChavePar(emailNormalizado, ipHash), ChaveBloqueio(emailNormalizado, ipHash)]);
 
+    /// <summary>
+    /// Os pares são por IP, que o Admin não conhece: acha as chaves da conta com SCAN (nunca KEYS) em cada primário.
+    /// Ação rara e fora do caminho do login. A conta entra como HMAC de tamanho fixo, então o padrão não casa com outra conta.
+    /// </summary>
+    public async Task DesbloquearContaAsync(string emailNormalizado, CancellationToken ct)
+    {
+        var conta = pseudonimizador.ChaveOpaca(emailNormalizado);
+        var db = redis.GetDatabase();
+        var chaves = new List<RedisKey> { ChaveConta(emailNormalizado) };
+
+        foreach (var endpoint in redis.GetEndPoints())
+        {
+            var servidor = redis.GetServer(endpoint);
+            if (!servidor.IsConnected || servidor.IsReplica) continue;
+            foreach (var padrao in new[] { $"wr:login:falhas:{conta}:*", $"wr:login:bloqueio:{conta}:*" })
+                await foreach (var chave in servidor.KeysAsync(db.Database, padrao, pageSize: 250).WithCancellation(ct))
+                    chaves.Add(chave);
+        }
+
+        await db.KeyDeleteAsync([.. chaves]);
+    }
+
     private string ChavePar(string email, byte[] ipHash) => $"wr:login:falhas:{pseudonimizador.ChaveOpaca(email)}:{Convert.ToHexString(ipHash)}";
 
     private string ChaveBloqueio(string email, byte[] ipHash) => $"wr:login:bloqueio:{pseudonimizador.ChaveOpaca(email)}:{Convert.ToHexString(ipHash)}";

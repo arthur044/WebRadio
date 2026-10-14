@@ -23,6 +23,9 @@
     <PackageVersion Include="Scalar.AspNetCore" Version="2.17.12" />
     <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageVersion Include="Serilog.Formatting.Compact" Version="3.0.0" />
+    <!-- SignalR (E1-F10): backplane Redis na Api; cliente só nos testes -->
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.12" />
   </ItemGroup>
 
   <!-- Teste de arquitetura (E1-F02) -->
@@ -33,7 +36,10 @@
   <!-- Worker (E1-F11): host generico fora do ciclo de vida da Api -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <!-- Segredos por arquivo no Worker (a Api recebe o mesmo pacote pelo shared framework do ASP.NET) -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration.KeyPerFile" Version="10.0.0" />
     <PackageVersion Include="StackExchange.Redis" Version="2.8.16" />
+    <PackageVersion Include="Minio" Version="6.0.4" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
   </ItemGroup>
 

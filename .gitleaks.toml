@@ -1,6 +1,7 @@
 # gitleaks (CI: `gitleaks detect --source . --redact -v`, v8.30.1, fetch-depth 0: varre TODAS as branches).
 # A regra padrão continua ligada. As exceções abaixo são estreitas: cada uma exige caminho E valor (condition = "AND"),
-# só vale para a regra generic-api-key, e um segredo real no mesmo arquivo continua sendo detectado.
+# só vale para as regras listadas em targetRules (generic-api-key e curl-auth-user), e um segredo real no mesmo
+# arquivo continua sendo detectado.
 title = "WebRadio"
 
 [extend]
@@ -19,3 +20,10 @@ targetRules = ["generic-api-key"]
 condition = "AND"
 paths = ['''^docs/runbooks/rotacao-de-segredos\.md$''']
 regexes = ['''^aB-cD_123456789012345678$''']
+
+[[allowlists]]
+description = "teste.sh do Icecast: prova que a credencial PADRÃO (admin:hackme) é rejeitada com 401 (valor sabidamente falso, nunca usado)."
+targetRules = ["curl-auth-user"]
+condition = "AND"
+paths = ['''^infra/icecast/teste\.sh$''']
+regexes = ['''hackme''']

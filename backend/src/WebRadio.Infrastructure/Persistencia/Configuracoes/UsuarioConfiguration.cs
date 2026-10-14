@@ -46,6 +46,10 @@ public sealed class UsuarioConfiguration : IEntityTypeConfiguration<Usuario>
             .HasDefaultValue(false)
             .HasDefaultConstraintName("DF_Usuario_DeveTrocarSenha");
 
+        builder.Property(u => u.VersaoSeguranca)
+            .HasDefaultValue(0)
+            .HasDefaultConstraintName("DF_Usuario_VersaoSeguranca");
+
         builder.Property(u => u.CriadoEmUtc)
             .HasColumnType("datetime2(3)")
             .HasDefaultValueSql("SYSUTCDATETIME()")

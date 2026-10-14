@@ -1,0 +1,53 @@
+# =============================================================================
+# WebRadio — docker-compose.dev.yml (E1-F16) · uso EXPLÍCITO, nunca override automático (S-M12):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait
+#
+# Só muda o que é de desenvolvimento: ambiente Development (seed da grade, scanner NoOp liberado) e portas
+# de diagnóstico em 127.0.0.1 (1433, console do MinIO 9001, harbor 8005). Segredos: os mesmos arquivos.
+# =============================================================================
+x-dev-env: &dev-env
+  ASPNETCORE_ENVIRONMENT: Development
+
+services:
+  sqlserver:
+    environment:
+      MSSQL_PID: Developer
+    ports:
+      - "127.0.0.1:1433:1433"
+    networks: [dados, diag-sql]
+
+  db-init:
+    environment:
+      <<: *dev-env
+      SEED_DEV: "${SEED_DEV:-false}"
+
+  migrator:
+    environment: *dev-env
+
+  minio:
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_BROWSER: "on"
+    ports:
+      - "127.0.0.1:9001:9001"
+    networks: [dados, playout, midia-borda, diag-minio]
+
+  api:
+    environment:
+      <<: *dev-env
+      Seguranca__PermitirScannerNoOp: "true"
+
+  worker:
+    environment: *dev-env
+
+  liquidsoap:
+    ports:
+      - "127.0.0.1:8005:8005"
+    networks: [playout, diag-liquidsoap]
+
+# Porta publicada não funciona em rede "internal". Cada serviço com porta de diagnóstico ganha uma rede SÓ
+# sua (nunca uma compartilhada: o Liquidsoap não pode ganhar rota até o sqlserver por aqui).
+networks:
+  diag-sql: {}
+  diag-minio: {}
+  diag-liquidsoap: {}

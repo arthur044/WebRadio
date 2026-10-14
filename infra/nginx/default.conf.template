@@ -109,6 +109,9 @@ server {
         # sufixo literal colado no mesmo proxy_pass é ambíguo sobre reescrita de URI —
         # confirmado com um eco na mesma rede (aliases api/icecast/minio) que o Icecast
         # recebe exatamente /radio.mp3, nunca /stream/radio.mp3.
+        # O Icecast 2.4 responde 400 a HEAD: o upstream sempre recebe GET, e o nginx devolve só os
+        # cabeçalhos quando o cliente pediu HEAD (DoD: curl -I /stream/radio.mp3 → 200 audio/mpeg).
+        proxy_method GET;
         set $icecast_upstream http://icecast:8000;
         rewrite ^/stream/radio\.mp3$ /radio.mp3 break;
         proxy_pass $icecast_upstream;
