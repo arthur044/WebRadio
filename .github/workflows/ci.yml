@@ -185,6 +185,58 @@ jobs:
       - name: infra/liquidsoap/teste.sh
         run: infra/liquidsoap/teste.sh
 
+  # F17: o 03-schema-sqlserver.sql (contrato, ADR D14) e as migrations do EF precisam gerar o MESMO schema. Dois bancos
+  # descartáveis no SQL Server do próprio job; o resultado (catálogo e diff) vai para o resumo do job, para o Atlas.
+  ddl-check:
+    name: DDL (03 × migrations do EF)
+    runs-on: ubuntu-latest
+    needs: seguranca
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: backend/global.json
+
+      - name: dotnet-ef (a mesma versão do EF Core, 10.0.0)
+        run: dotnet tool install dotnet-ef --version 10.0.0 --tool-path "$RUNNER_TEMP/tools"
+
+      - name: SQL Server 2022 (senha gerada nesta execução, nenhum segredo cadastrado)
+        run: |
+          set -euo pipefail
+          senha="Wr$(openssl rand -hex 16)A1"
+          echo "::add-mask::${senha}"
+          docker run -d --name mssql-ddl \
+            -e ACCEPT_EULA=Y -e MSSQL_PID=Developer -e "MSSQL_SA_PASSWORD=${senha}" "${MSSQL_IMAGEM}" >/dev/null
+          for _ in $(seq 1 60); do
+            if docker exec -e "SQLCMDPASSWORD=${senha}" mssql-ddl /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -b -Q "SELECT 1" >/dev/null 2>&1; then
+              echo "SQLCMDPASSWORD=${senha}" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::O SQL Server de teste não ficou pronto em 2 minutos."
+          docker logs --tail 30 mssql-ddl
+          exit 1
+
+      - name: ddl-check (03 e migrations aplicados com sqlcmd -b -I e catálogos comparados)
+        env:
+          DDL_SQL_CONTAINER: mssql-ddl
+        run: |
+          export DOTNET_EF="$RUNNER_TEMP/tools/dotnet-ef"
+          infra/scripts/ddl-check.sh
+
+      - name: Derrubar o SQL Server
+        if: always()
+        run: docker rm -f mssql-ddl >/dev/null 2>&1 || true
+
   compose-smoke:
     name: Compose (smoke da Definição de Pronto)
     runs-on: ubuntu-latest
