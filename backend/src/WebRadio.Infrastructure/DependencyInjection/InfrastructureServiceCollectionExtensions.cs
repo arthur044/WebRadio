@@ -164,22 +164,10 @@ public static class InfrastructureServiceCollectionExtensions
             return;
         }
 
-        // Lazy no primeiro uso e tolerante a queda: sem Redis a Api sobe e o login usa o fallback em memória.
-        services.AddSingleton<IConnectionMultiplexer>(_ =>
-        {
-            var opcoes = new ConfigurationOptions
-            {
-                Password = configuration["Redis:Password"],
-                AbortOnConnectFail = false,
-                BacklogPolicy = BacklogPolicy.FailFast,
-                ConnectTimeout = 1000,
-                AsyncTimeout = 500,
-                SyncTimeout = 500,
-                ClientName = "webradio-api",
-            };
-            opcoes.EndPoints.Add(configuration["Redis:Host"]!, int.TryParse(configuration["Redis:Porta"], out var porta) ? porta : 6379);
-            return ConnectionMultiplexer.Connect(opcoes);
-        });
+        // Conexão aberta no boot (ConnectAsync) e tolerante a queda: sem Redis a Api sobe e o login usa o fallback em memória.
+        services.AddSingleton<ConexaoRedis>();
+        services.AddHostedService(sp => sp.GetRequiredService<ConexaoRedis>());
+        services.AddSingleton<IConnectionMultiplexer>(sp => sp.GetRequiredService<ConexaoRedis>().Multiplexador);
         services.AddSingleton<RedisLoginThrottle>();
         services.AddSingleton<IRequestThrottle, RedisRequestThrottle>();
         services.AddSingleton<ILoginThrottle>(sp => new LoginThrottleComFallback(

@@ -132,13 +132,19 @@ public sealed class PlayoutOptionsValidator : IValidateOptions<PlayoutOptions>
                     : RegraSegredo.Verificar("Playout:TokenAnterior", options.TokenAnterior, 32, base64Url: false)));
 }
 
-/// <summary>Redis é opcional em Development (cai para a memória); configurado, a senha segue o fail-fast do S-C02.</summary>
+/// <summary>
+/// Redis é opcional em Development (cai para a memória); configurado, a senha segue o fail-fast do S-C02 e a porta (opcional,
+/// padrão 6379) precisa estar entre 1 e 65535, em vez de cair calada na padrão.
+/// </summary>
 public sealed class RedisOptionsValidator : IValidateOptions<RedisOptions>
 {
     public ValidateOptionsResult Validate(string? name, RedisOptions options)
         => string.IsNullOrWhiteSpace(options.Host)
             ? ValidateOptionsResult.Success
-            : RegraSegredo.Resultado(RegraSegredo.Verificar("Redis:Password", options.Password, 16, base64Url: false));
+            : RegraSegredo.Resultado(
+                options.Porta is < 1 or > 65535
+                    ? "Redis:Porta precisa ser um número de 1 a 65535."
+                    : RegraSegredo.Verificar("Redis:Password", options.Password, 16, base64Url: false));
 }
 
 /// <summary>Storage é opcional em Development; configurado, a credencial segue o fail-fast do S-C02 e a URL pública precisa ser absoluta.</summary>
