@@ -19,6 +19,9 @@ env:
   # não autenticidade. Ao subir a versão, o valor novo vem de uma conferência independente da release, nunca do próprio download.
   GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
   # Imagem do SQL Server dos testes: a mesma, por digest, do docker-compose.yml.
+  # trivy: binário com sha256 esperado fixado aqui, como o gitleaks (05 §9.2).
+  TRIVY_VERSION: "0.75.0"
+  TRIVY_SHA256: "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f"
   MSSQL_IMAGEM: "mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090"
 
 jobs:
@@ -261,6 +264,99 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/npm \
             -v "$PWD/frontend:/app" -w /app "${imagem}" \
             sh -c 'set -e; npm ci --no-audit --no-fund; npm run lint; npm test; npm run build'
+
+  # F17 (05 §9.5): vulnerabilidades. O `dotnet list package --vulnerable` sai com 0 MESMO havendo vulnerabilidade, então a
+  # saída é que é conferida. Sem exceção (.trivyignore): um achado com correção disponível quebra o job.
+  vulnerabilidades:
+    name: Vulnerabilidades (NuGet, npm e trivy)
+    runs-on: ubuntu-latest
+    needs: seguranca
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: backend/global.json
+
+      - name: NuGet (dotnet list package --vulnerable --include-transitive, conferido pela saída)
+        run: |
+          set -euo pipefail
+          achados=0
+          # Um projeto por vez: a solução inteira num só comando estoura a memória do runner.
+          while IFS= read -r projeto; do
+            saida="$(dotnet list "${projeto}" package --vulnerable --include-transitive 2>&1)" || { echo "${saida}"; echo "::error::dotnet list falhou em ${projeto}"; exit 1; }
+            if grep -q "has the following vulnerable packages" <<<"${saida}"; then
+              echo "${saida}"
+              achados=$((achados + 1))
+            fi
+          done < <(find backend -name '*.csproj' -not -path '*/obj/*' | sort)
+          if [ "${achados}" -ne 0 ]; then
+            echo "::error::${achados} projeto(s) com pacote NuGet vulnerável (acima)."
+            exit 1
+          fi
+          echo "Nenhum pacote NuGet vulnerável."
+
+      - name: npm audit --audit-level=high (imagem node do frontend/Dockerfile)
+        run: |
+          set -euo pipefail
+          imagem="$(grep -m1 '^FROM node@' frontend/Dockerfile | awk '{print $2}')"
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/npm \
+            -v "$PWD/frontend:/app" -w /app "${imagem}" npm audit --audit-level=high
+
+      - name: Instalar trivy (binário com sha256 esperado fixado no workflow)
+        run: |
+          set -euo pipefail
+          curl -sSLO "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" | sha256sum -c -
+          tar -xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy
+          sudo mv trivy /usr/local/bin/trivy
+
+      - name: trivy fs (lockfiles do frontend)
+        run: trivy fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 frontend/package-lock.json
+
+      - name: Build das imagens do projeto
+        run: |
+          infra/scripts/gerar-segredos.sh dev
+          docker compose -f docker-compose.yml build
+
+      - name: trivy image (HIGH e CRITICAL com correção disponível) em cada imagem construída
+        run: |
+          set -euo pipefail
+          falhas=0
+          for imagem in webradio-api:local webradio-worker:local webradio-migrator:local webradio-web:local webradio-icecast:local webradio-minio-init:local; do
+            echo "== ${imagem}"
+            trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${imagem}" || falhas=$((falhas + 1))
+          done
+          if [ "${falhas}" -ne 0 ]; then
+            echo "::error::${falhas} imagem(ns) com vulnerabilidade HIGH/CRITICAL corrigível (acima)."
+            exit 1
+          fi
+
+      - name: "Imagens de terceiros do compose (informativo, não quebra o job)"
+        run: |
+          # sqlserver, redis, minio e liquidsoap não são construídos aqui; a atualização delas é manual (digest). Os achados
+          # aparecem como aviso e no resumo do job, para quem decide a troca do digest.
+          {
+            echo "### Imagens de terceiros do compose (HIGH/CRITICAL com correção disponível)"
+            echo "| Imagem | HIGH | CRITICAL |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for imagem in $(grep -hoE 'image: [^ ]+@sha256:[0-9a-f]+' docker-compose.yml | awk '{print $2}' | sort -u); do
+            contagem="$(trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --format json "${imagem}" 2>/dev/null \
+              | python3 -c "import json,sys; d=json.load(sys.stdin); v=[x for r in d.get('Results',[]) for x in (r.get('Vulnerabilities') or [])]; print(sum(x['Severity']=='HIGH' for x in v), sum(x['Severity']=='CRITICAL' for x in v))" || echo "? ?")"
+            read -r altas criticas <<<"${contagem}"
+            echo "| \`${imagem%%@*}\` | ${altas} | ${criticas} |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "${altas}" != "0" ] || [ "${criticas}" != "0" ]; then
+              echo "::warning::${imagem%%@*}: ${altas} HIGH, ${criticas} CRITICAL com correção disponível (imagem de terceiros, sem build aqui)."
+            fi
+          done
 
   compose-smoke:
     name: Compose (smoke da Definição de Pronto)
