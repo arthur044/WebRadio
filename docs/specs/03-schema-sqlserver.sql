@@ -375,8 +375,9 @@ GO
            WHERE CriadoEmUtc < DATEADD(DAY, -30, SYSUTCDATETIME()) AND (ListenerDeviceHash IS NOT NULL OR ListenerIpHash IS NOT NULL);
            (em lotes de 5.000 para não escalar o lock)
    - Outbox: DELETE infra.EventoOutbox WHERE ProcessadoEmUtc < DATEADD(DAY, -7, SYSUTCDATETIME());
-   - RefreshToken (em dois passos; um DELETE simples violaria a FK_RefreshToken_SubstituidoPor,
-     que é RESTRICT, e o lote não tem ordem):
+   - RefreshToken (em dois passos; um DELETE em lotes violaria a FK_RefreshToken_SubstituidoPor,
+     que é NO ACTION e checada ao fim de cada statement: o TOP não tem ordem e pode apagar o
+     sucessor sem o predecessor):
        1) UPDATE seg.RefreshToken SET SubstituidoPorId = NULL
           WHERE SubstituidoPorId IS NOT NULL AND ExpiraEmUtc < DATEADD(DAY, -1, SYSUTCDATETIME());
        2) DELETE t FROM seg.RefreshToken AS t
