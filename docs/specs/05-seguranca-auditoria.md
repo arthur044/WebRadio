@@ -243,6 +243,10 @@ O Liquidsoap interpreta URIs com protocolos como `annotate:`, `process:` (que **
 > (2) **Imagens de terceiros com HIGH/CRITICAL corrigíveis, só informativas no CI** (`sqlserver`, `redis`, `minio`, `liquidsoap`; medido em a7498eb: liquidsoap 77 HIGH e 24 CRITICAL, sqlserver 71 HIGH, redis 2 HIGH (uma CVE de OpenSSL, CVE-2026-84782, com correção no Alpine 3.21 aguardando rebuild da imagem oficial; o Redis do stack não usa TLS), minio 0 (digest atualizado neste PR)). Desvio do S-B08 e do 9.5. Aceito enquanto: as imagens ficam só em redes `internal` e nenhum áudio de terceiro chega ao Liquidsoap. **Prazo:** antes de o Épico 4 liberar upload, e antes do primeiro deploy público, CRITICAL corrigível = 0 nas quatro (troca de digest, ou imagem própria do Liquidsoap) e o passo do CI passa a falhar em CRITICAL. Até lá, rodada semanal do `vulnerabilidades` e revisão mensal do número.
 > (3) **Retenção de 14 dias dos logs (S-B04)** depende do cron do host (`docs/operacao-logs.md`): é operacional e nenhum job confere.
 
+> **Riscos aceitos do Épico 2 (dono do produto, 2026-10-15, por recomendação do Nexus e do Sentinel; detalhe em `06-epico-2-tarefas.md`).**
+> (1) **Falha aberta do ao vivo** (E2-F07 c): com a API ou o SQL fora, o locutor **já autorizado** continua no ar até `min(fimUtc + 1 min, último 200 + 15 min)`, ou seja, no máximo 15 min sem confirmação. Só erro de transporte (timeout, conexão recusada, 5xx) mantém o locutor; qualquer 4xx derruba na hora. Uma credencial revogada ou um programa encerrado durante a queda só derrubam o locutor quando a API voltar ou no teto. Conexão nova com a API fora é sempre recusada.
+> (2) **Harbor sem TLS**: aceito enquanto (i) a porta do ao vivo só é alcançável por VPN ou lista de IPs no proxy `harbor-borda` (E2-F11); (ii) a credencial de transmissão vale só na janela do programa do dono e é revogável; (iii) com a API no ar, a revogação derruba o ao vivo em ≤ 15 s. **Se (i) deixar de valer**, o TLS vira pré-requisito, terminado no `harbor-borda`. Reavaliar a cada mudança na exposição da porta do ao vivo.
+
 ---
 
 ## 5. Política de segredos

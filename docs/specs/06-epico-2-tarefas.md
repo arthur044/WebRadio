@@ -4,6 +4,7 @@
 > Donos: **Forge** (backend, Worker, Liquidsoap, contêineres), **Atlas** (banco), **Prism** (frontend), **Sentinel** (revisão de segurança do ao vivo).
 > Escopo decidido pelo dono do produto em 2026-10-15: **inclui o locutor ao vivo**, com credencial de transmissão própria (identificador opaco + segredo aleatório guardado só como hash com salt).
 > O `05` continua **normativo**: cada achado que cita uma tarefa `E2-*` vira critério de aceite dela. A checklist da §8 do `05` é o quality gate de todo PR.
+> **v1.3 (2026-10-15):** os dois riscos aceitos (falha aberta do ao vivo e harbor sem TLS) foram confirmados pelo dono do produto e registrados no `05` §4.
 > **v1.2 (2026-10-15):** re-review do PR #38: encerrar também um `Agendado` com a janela em curso (Worker parado); prazo de queda corrigido para 15 s; throttle atrás do proxy só no proxy; senha errada conta no limite de geração; seed antigo removido.
 > **v1.1 (2026-10-15):** incorpora a revisão do PR #38 (Guardian, Atlas e Sentinel): autorização do harbor pela **janela de horário** calculada no SQL, e não pelo `Status` que o Worker muda; falha aberta com teto; throttle por par (identificador, IP); validação estrita do que vem do source client; proxy na frente do harbor em produção; evento de grade também no encerrar e no cancelar; seed de dev pelo `DevDataSeeder`.
 
@@ -19,7 +20,7 @@
 - **Fila de pedidos** (`fila_api` com pedidos aprovados): Épico 3. O `GET /internal/playout/proxima` continua respondendo **204**.
 - **Biblioteca de mídia, upload e sanitização**: Épico 4. A rotação continua com a **playlist local** montada em volume, e **nada é gravado em `midia.Reproducao`** (a tabela exige `MidiaId`, e a playlist local não tem). O "tocando agora" segue pelos metadados, como no Épico 1.
 - **Grade recorrente**: fora da v1 (`00 §6`).
-- **TLS no harbor**: fora, como risco aceito com gatilhos (ver "Riscos aceitos"), **pendente de confirmação do dono do produto**.
+- **TLS no harbor**: fora, como risco aceito com gatilhos (ver "Riscos aceitos"; aceito pelo dono do produto em 2026-10-15).
 
 ## Definição de pronto do Épico
 
@@ -180,9 +181,9 @@ O B3 pode começar pelo P01 e pelo P02 assim que o B1 estiver mergeado, em paral
 | MÉDIO | API fora do ar derruba o locutor no meio do programa | Falha aberta só para erro de transporte, só para quem já foi autorizado, com teto de `min(fimUtc + 1 min, último 200 + 15 min)` |
 | BAIXO | Relógio divergente na transição | Só o `SYSUTCDATETIME()` do SQL vale na transição e na janela (`00 §5`) |
 
-## Riscos aceitos (pendentes de confirmação do dono do produto)
+## Riscos aceitos
 
-Entram no `05` §4, ao lado dos riscos aceitos do B3, quando o dono do produto confirmar.
+**Aceitos pelo dono do produto em 2026-10-15**, por recomendação do Nexus e do Sentinel, e registrados no `05` §4 ("Riscos aceitos do Épico 2").
 
 1. **Falha aberta do ao vivo** (E2-F07 c): com a API ou o SQL fora, o locutor já autorizado continua no ar até o teto de `min(fimUtc + 1 min, último 200 + 15 min)`, ou seja, **no máximo 15 min** sem confirmação. Uma credencial revogada ou um programa encerrado durante a queda só derrubam o locutor quando a API voltar ou no teto. Conexão nova com a API fora é sempre recusada.
 2. **Harbor sem TLS** (Sentinel, PR #38): aceito **enquanto** (i) a porta do ao vivo só é alcançável por VPN ou lista de IPs no proxy da E2-F11; (ii) a credencial vale só na janela do programa e é revogável; (iii) com a API no ar, o 403 derruba em ≤ 15 s. **Se (i) deixar de valer** (locutor entrando de IP qualquer, porta aberta para a internet), o TLS vira pré-requisito, terminado no proxy da E2-F11.
