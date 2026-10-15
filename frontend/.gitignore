@@ -13,9 +13,10 @@ dist-e2e
 dist-ssr
 *.local
 
-# Artefatos de teste (Playwright)
+# Artefatos de teste (Playwright e Vitest)
 playwright-report
 test-results
+.vitest
 
 # Editor directories and files
 .vscode/*

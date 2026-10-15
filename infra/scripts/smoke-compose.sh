@@ -29,6 +29,17 @@ esperar() { # $1 descrição, $2 esperado, $3 obtido
   if [[ "$2" == "$3" ]]; then ok "$1 ($3)"; else falha "$1: esperado $2, veio $3"; fi
 }
 status() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$@"; }
+# Cabeçalhos de segurança do nginx (S-M14) numa rota: CSP (default-src, script-src e frame-ancestors) e nosniff. O add_header não é
+# herdado entre locations, então cada location precisa do seu include de security-headers.conf; a API não emite nenhum destes
+# cabeçalhos, logo o que aparece aqui vem do nginx, qualquer que seja o status do upstream.
+confere_cabecalhos() { # $1 caminho
+  local cab
+  cab="$(curl -s -I --max-time 10 "$BASE$1" | tr -d '\r')"
+  if grep -qi "^content-security-policy: .*default-src 'self'" <<<"$cab" \
+     && grep -qi "^content-security-policy: .*script-src 'self'" <<<"$cab" \
+     && grep -qi "^content-security-policy: .*frame-ancestors 'none'" <<<"$cab"; then ok "CSP em $1"; else falha "CSP ausente ou diferente em $1"; fi
+  grep -qi '^x-content-type-options: nosniff' <<<"$cab" && ok "nosniff em $1" || falha "X-Content-Type-Options ausente em $1"
+}
 
 echo "== 1. todos os serviços healthy e os one-shots com exit 0"
 while read -r servico estado; do
@@ -40,10 +51,8 @@ done < <("${COMPOSE[@]}" ps -a --format '{{.Service}} {{.Status}}' | grep -v '^s
 
 echo "== 2. SPA e stream"
 esperar "GET / (SPA)" 200 "$(status "$BASE/")"
-# Cabeçalhos de segurança do nginx (S-M14): a base do web é trocada de tempos em tempos e nada mais afirma que continuam saindo.
-cabecalhos_spa="$(curl -s -I --max-time 10 "$BASE/" | tr -d '\r')"
-grep -qi "^content-security-policy: .*default-src 'self'" <<<"$cabecalhos_spa" && ok "CSP em /" || falha "CSP ausente ou diferente em /"
-grep -qi '^x-content-type-options: nosniff' <<<"$cabecalhos_spa" && ok "nosniff em /" || falha "X-Content-Type-Options ausente em /"
+# A base do web é trocada de tempos em tempos e nada mais afirma que os cabeçalhos continuam saindo: uma rota de cada location.
+for rota in / /api/v1/auth/me /api/v1/stream/qualquer /hubs/x /stream/radio.mp3 /storage/midia/x; do confere_cabecalhos "$rota"; done
 # O allowlist de /storage/: objeto de mídia sem assinatura e listagem de bucket nunca respondem (S-A05).
 esperar "/storage/midia/x sem assinatura" 404 "$(status "$BASE/storage/midia/x")"
 esperar "/storage/midia/ (listagem do bucket)" 404 "$(status "$BASE/storage/midia/")"
