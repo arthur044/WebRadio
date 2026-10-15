@@ -65,18 +65,24 @@ public sealed class DevDataSeeder(RadioDbContext db, ISenhaHasher hasher, IClock
     }
 
     /// <summary>
-    /// 7 dias a partir de amanhã, das 12:00 às 14:00 UTC (9h–11h em Brasília), alternando os locutores. Só roda se ainda não houver
-    /// programa do seed; um dia que conflita com outro programa é pulado, sem derrubar o boot.
+    /// 7 dias a partir de amanhã, das 12:00 às 14:00 UTC (9h–11h em Brasília), alternando os locutores. Cada dia só é criado se ainda
+    /// não houver um programa do seed naquele horário: rodar de novo não duplica, completa o que falta e, num ambiente de dev que
+    /// ficou parado (a grade antiga toda no passado), recria a semana seguinte sem apagar a antiga. Um dia que conflita com outro
+    /// programa é pulado, sem derrubar o boot.
     /// </summary>
     private async Task SemearGradeAsync(IReadOnlyList<Guid> locutores, CancellationToken ct)
     {
-        if (await db.Programas.AnyAsync(p => p.Titulo.StartsWith(Prefixo), ct)) return;
-
         var amanha = clock.UtcNow.Date.AddDays(1);
+        var existentes = await db.Programas.AsNoTracking()
+            .Where(p => p.Titulo.StartsWith(Prefixo) && p.InicioUtc >= amanha)
+            .Select(p => p.InicioUtc)
+            .ToListAsync(ct);
+
         var criados = 0;
         for (var dia = 0; dia < DiasDeGrade; dia++)
         {
             var inicio = amanha.AddDays(dia).AddHours(12);
+            if (existentes.Contains(inicio)) continue;
             try
             {
                 await mediator.Send(new CriarProgramaCommand($"{Prefixo}Programa Dia {dia + 1}",
@@ -89,7 +95,7 @@ public sealed class DevDataSeeder(RadioDbContext db, ISenhaHasher hasher, IClock
             }
         }
 
-        logger.LogInformation("DEV_SEED: {Criados} programa(s) de exemplo criados na grade", criados);
+        if (criados > 0) logger.LogInformation("DEV_SEED: {Criados} programa(s) de exemplo criados na grade", criados);
     }
 
     private async Task SemearDivulgacoesAsync(Guid locutor1, Guid locutor2, CancellationToken ct)

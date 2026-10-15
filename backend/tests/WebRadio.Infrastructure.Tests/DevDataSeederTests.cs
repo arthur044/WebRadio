@@ -105,4 +105,40 @@ public class DevDataSeederTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste
         Assert.Equal(6, criados.Count);
         Assert.DoesNotContain(criados, p => p.InicioUtc == terceiroDia);
     }
+
+    [SqlFact]
+    public async Task Grade_toda_no_passado_e_recriada_para_a_proxima_semana_sem_apagar_a_antiga()
+    {
+        var c = new Cenario(banco);
+        await LimparSeedAsync(c);
+        await Novo(c, true).ExecutarAsync(default);
+        // O ambiente de dev ficou parado: o relógio andou 30 dias e a grade do seed ficou toda no passado (a tela aparece vazia).
+        c.Relogio.Avancar(TimeSpan.FromDays(30));
+
+        await Novo(c, true).ExecutarAsync(default);
+
+        await using var db = c.NovoDb();
+        var amanha = c.Relogio.UtcNow.Date.AddDays(1);
+        var futuros = await db.Programas.AsNoTracking().Where(p => p.Titulo.StartsWith("[seed] ") && p.InicioUtc >= amanha).OrderBy(p => p.InicioUtc).ToListAsync();
+        Assert.Equal(Enumerable.Range(0, 7).Select(n => amanha.AddDays(n).AddHours(12)), futuros.Select(p => p.InicioUtc));
+        Assert.Equal(14, await db.Programas.CountAsync(p => p.Titulo.StartsWith("[seed] "))); // os 7 antigos ficam (histórico)
+        Assert.Equal(3, await db.Divulgacoes.CountAsync(d => d.Titulo.StartsWith("[seed] "))); // divulgações não duplicam
+    }
+
+    [SqlFact]
+    public async Task Dias_que_faltam_na_semana_sao_completados_e_os_que_existem_nao_se_repetem()
+    {
+        var c = new Cenario(banco);
+        await LimparSeedAsync(c);
+        await Novo(c, true).ExecutarAsync(default);
+        var amanha = c.Relogio.UtcNow.Date.AddDays(1);
+        await using (var db = c.NovoDb())
+            await db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM grade.Programa WHERE InicioUtc IN ({amanha.AddHours(12)}, {amanha.AddDays(3).AddHours(12)}, {amanha.AddDays(6).AddHours(12)})");
+
+        await Novo(c, true).ExecutarAsync(default);
+
+        await using var leitura = c.NovoDb();
+        var inicios = await leitura.Programas.AsNoTracking().Where(p => p.Titulo.StartsWith("[seed] ")).Select(p => p.InicioUtc).OrderBy(i => i).ToListAsync();
+        Assert.Equal(Enumerable.Range(0, 7).Select(n => amanha.AddDays(n).AddHours(12)), inicios); // sete, sem repetição
+    }
 }
