@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using WebRadio.Domain.Enums;
 using WebRadio.Infrastructure.Persistencia;
 
 namespace WebRadio.Infrastructure.Trabalhos;
@@ -28,32 +29,38 @@ public interface ITransicoesDaGrade
 /// </summary>
 public sealed class TransicoesDaGrade(RadioDbContext db) : ITransicoesDaGrade
 {
-    private const string Sql = """
+    // Os números e os nomes do status vêm do enum, não de literais no SQL: se o enum mudar, o SQL acompanha (e o teste que fixa os
+    // valores avisa que a migration e o índice filtrado IX_Programa_Worker precisam acompanhar também).
+    private static readonly byte Agendado = (byte)StatusPrograma.Agendado;
+    private static readonly byte AoVivo = (byte)StatusPrograma.AoVivo;
+    private static readonly byte Finalizado = (byte)StatusPrograma.Finalizado;
+
+    private static readonly string Sql = $"""
         SET XACT_ABORT ON;
         BEGIN TRAN;
         DECLARE @agora datetime2(3) = SYSUTCDATETIME();
         DECLARE @iniciados TABLE (Id uniqueidentifier, Titulo nvarchar(120), LocutorId uniqueidentifier);
         DECLARE @finalizados TABLE (Id uniqueidentifier, Titulo nvarchar(120), LocutorId uniqueidentifier);
 
-        UPDATE grade.Programa SET Status = 2, AtualizadoEmUtc = @agora
+        UPDATE grade.Programa SET Status = {AoVivo}, AtualizadoEmUtc = @agora
         OUTPUT inserted.Id, inserted.Titulo, inserted.LocutorId INTO @iniciados
-        WHERE Status = 1 AND InicioUtc <= @agora AND FimUtc > @agora;
+        WHERE Status = {Agendado} AND InicioUtc <= @agora AND FimUtc > @agora;
 
-        UPDATE grade.Programa SET Status = 3, AtualizadoEmUtc = @agora
+        UPDATE grade.Programa SET Status = {Finalizado}, AtualizadoEmUtc = @agora
         OUTPUT inserted.Id, inserted.Titulo, inserted.LocutorId INTO @finalizados
-        WHERE Status IN (1, 2) AND FimUtc <= @agora;
+        WHERE Status IN ({Agendado}, {AoVivo}) AND FimUtc <= @agora;
 
         INSERT infra.EventoOutbox (Tipo, Payload)
         SELECT 'ProgramaStatusAlterado',
                JSON_OBJECT('grupos': NULL,
                            'dados': JSON_OBJECT('programaId': LOWER(CONVERT(varchar(36), p.Id)), 'titulo': p.Titulo,
-                                                'status': 'AoVivo', 'locutorNome': u.Nome))
+                                                'status': '{nameof(StatusPrograma.AoVivo)}', 'locutorNome': u.Nome))
         FROM @iniciados p JOIN seg.Usuario u ON u.Id = p.LocutorId
         UNION ALL
         SELECT 'ProgramaStatusAlterado',
                JSON_OBJECT('grupos': NULL,
                            'dados': JSON_OBJECT('programaId': LOWER(CONVERT(varchar(36), p.Id)), 'titulo': p.Titulo,
-                                                'status': 'Finalizado', 'locutorNome': u.Nome))
+                                                'status': '{nameof(StatusPrograma.Finalizado)}', 'locutorNome': u.Nome))
         FROM @finalizados p JOIN seg.Usuario u ON u.Id = p.LocutorId;
 
         SELECT (SELECT COUNT(*) FROM @iniciados) AS Iniciados, (SELECT COUNT(*) FROM @finalizados) AS Finalizados;
