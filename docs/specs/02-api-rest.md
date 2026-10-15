@@ -66,6 +66,10 @@ Claims do JWT: `sub` (id), `name`, `role`, `jti`, `iat`, `exp`; `iss = webradio-
 
 Validação de horário: `inicioUtc`/`fimUtc` **precisam** terminar em `Z` (offset ≠ 0 → 400). O frontend converte o horário local para UTC antes de enviar.
 
+### 4.1 Credencial de transmissão do locutor (Épico 2)
+
+Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin) e `DELETE /usuarios/{id}/credencial-transmissao` (Admin). O segredo só aparece na resposta do `POST`, com `Cache-Control: no-store`. Contrato completo em `06-epico-2-tarefas.md`.
+
 ## 5. Pedidos de música — `/pedidos`
 
 `PedidoDto = { id, nomeOuvinte, tituloMusica, artista, mensagem, status, criadoEmUtc, moderadoEmUtc, motivoRejeicao, tocadoEmUtc, programaId }`
@@ -110,7 +114,7 @@ Validação de horário: `inicioUtc`/`fimUtc` **precisam** terminar em `Z` (offs
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/stream/info` | público → `{ url: "/stream/radio.mp3", formato: "audio/mpeg", bitrateKbps: 128, tocandoAgora: { titulo, artista, tipo } \| null }` |
+| GET | `/stream/info` | público → `{ url: "/stream/radio.mp3", formato: "audio/mpeg", bitrateKbps: 128, tocandoAgora: { titulo, artista, tipo } \| null, aoVivo: { noAr, programaId?, locutorNome? } }` (`aoVivo` a partir do Épico 2) |
 | GET | `/health/live` | **só na porta interna `:8081`** (D17, S-B05): processo de pé |
 | GET | `/health/ready` | **só na `:8081`**: SQL, MinIO, Redis (Redis fora → `Degraded`, não `Unhealthy`) |
 
@@ -122,7 +126,9 @@ O grupo `/api/v1/internal` (e `/health/*`) tem um filtro de endpoint que exige `
 |---|---|---|
 | GET | `/internal/playout/proxima` | **200** `{ midiaId, pedidoId, url, titulo, artista }` (URL pré-assinada interna `http://minio:9000/midia/…`, 30 min) ou **204** |
 | POST | `/internal/playout/eventos` | `{ tipo: "FaixaIniciada", midiaId?, pedidoId?, titulo?, artista?, ocorridoEmUtc }` → 202. `midiaId` nulo = faixa da rotação local ou do ao vivo (só atualiza "tocando agora"). `titulo`/`artista` com até 200 caracteres, sem caracteres de controle (S-A09) |
-| POST | `/internal/harbor/auth` | **Épico 2 (reservado)**: `{ usuario, senha }` do source client → 200/401. Aceita só o locutor dono do programa `AoVivo` (S-A08) |
+| POST | `/internal/harbor/auth` | **Épico 2**: `{ usuario, senha, enderecoIp }` do source client → 200/401. `usuario` é o **identificador opaco** da credencial de transmissão do locutor (nunca o e-mail) e `senha` é o segredo dela, não a senha da conta. Aceita só o locutor dono do programa `AoVivo` (S-A08). Contrato completo em `06-epico-2-tarefas.md` |
+| GET | `/internal/harbor/autorizacao/{identificador}` | **Épico 2**: 200 enquanto a autorização do `auth` valer; 403 quando deixar de valer (o Liquidsoap derruba o ao vivo). Ver `06` |
+| POST | `/internal/harbor/eventos` | **Épico 2**: `{ tipo: "Conectado" \| "Desconectado", identificador, ocorridoEmUtc }` → 202; publica `TransmissaoAoVivoAlterada`. Ver `06` |
 
 ## 10. SignalR — hub `/hubs/radio`
 
@@ -139,6 +145,7 @@ Eventos servidor → cliente (todos com `eventoId` e `ocorridoEmUtc`; o cliente 
 |---|---|---|
 | `ProgramaStatusAlterado` | todos | `{ programaId, titulo, status, locutorNome }` |
 | `TocandoAgora` | todos | `{ titulo, artista, tipoMidia, pedidoId? }` |
+| `TransmissaoAoVivoAlterada` | todos | `{ noAr, programaId?, locutorNome? }` (Épico 2) |
 | `PedidoCriado` | `locutores` | `PedidoDto` |
 | `PedidoModerado` | `listener:{hash}` + `locutores` | `{ pedidoId, status, motivoRejeicao? }` |
 | `PedidoTocado` | `listener:{hash}` + `locutores` | `{ pedidoId }` |
