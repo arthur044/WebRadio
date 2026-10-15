@@ -42,7 +42,8 @@ def main():
     ap.add_argument("pasta")
     ap.add_argument("assemblies", nargs="*", default=["WebRadio.Domain", "WebRadio.Application"])
     ap.add_argument("--minimo", type=float, default=80.0)
-    args = ap.parse_args()
+    # intermixed: o argparse do Python 3.12 (runner) não retoma os posicionais depois de uma opção (`pasta --minimo 80 A B`); o 3.14 aceita.
+    args = ap.parse_intermixed_args()
 
     relatorios, linhas = ler(args.pasta)
     if not relatorios:
