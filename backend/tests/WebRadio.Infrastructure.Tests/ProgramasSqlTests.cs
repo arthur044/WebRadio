@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using WebRadio.Application.Features.Programas;
 using WebRadio.Domain.Enums;
 using WebRadio.Domain.Erros;
@@ -201,6 +202,74 @@ public class ProgramasSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         Assert.False(string.IsNullOrEmpty(porId.Versao));
         var aoVivo = await new ProgramaAoVivoHandler(db).Handle(new ProgramaAoVivoQuery(), default);
         Assert.NotEqual(p.Id, aoVivo?.Id); // Agendado não é "ao vivo": quem muda o status é o Worker
+    }
+
+    // ---- L2: Worker x encerrar/cancelar (RowVersion + ComUmaRepeticaoAsync) ----
+
+    /// <summary>Roda <paramref name="acao"/> UMA vez, no primeiro SaveChanges: o momento entre a leitura do handler e o UPDATE dele.</summary>
+    private sealed class CorridaNoPrimeiroSave(Func<Task> acao) : SaveChangesInterceptor
+    {
+        private int _feito;
+
+        public int Disparos => Volatile.Read(ref _feito);
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Exchange(ref _feito, 1) == 0) await acao();
+            return result;
+        }
+    }
+
+    private RadioDbContext DbComCorrida(CorridaNoPrimeiroSave corrida) =>
+        new(new DbContextOptionsBuilder<RadioDbContext>().UseSqlServer(banco.ConnectionString).AddInterceptors(corrida).Options);
+
+    /// <summary>Programa Agendado cuja janela já começou pelo relógio do handler (o Worker ainda não o iniciou).</summary>
+    private async Task<(Guid Locutor, Guid Id)> AgendadoEmCursoAsync()
+    {
+        var locutor = await LocutorAsync();
+        var p = await CriarAsync(locutor, Dia().AddHours(2), TimeSpan.FromHours(1));
+        var agora = Truncar(_c.Relogio.UtcNow);
+        await using var db = _c.NovoDb();
+        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE grade.Programa SET InicioUtc = {agora.AddMinutes(-5)}, FimUtc = {agora.AddHours(1)} WHERE Id = {p.Id}");
+        return (locutor, p.Id);
+    }
+
+    private async Task WorkerIniciaAsync(Guid id)
+    {
+        await using var db = _c.NovoDb();
+        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE grade.Programa SET Status = {(byte)StatusPrograma.AoVivo}, AtualizadoEmUtc = SYSUTCDATETIME() WHERE Id = {id}");
+    }
+
+    [SqlFact]
+    public async Task Encerrar_quando_o_Worker_muda_a_linha_no_meio_repete_lendo_o_status_novo_e_grava_um_evento_so()
+    {
+        var (locutor, id) = await AgendadoEmCursoAsync();
+        var corrida = new CorridaNoPrimeiroSave(() => WorkerIniciaAsync(id)); // o Worker passa o programa para AoVivo entre a leitura e o UPDATE
+        await using var db = DbComCorrida(corrida);
+        var handler = new EncerrarProgramaHandler(db, new TransacaoComTrava(db), new OutboxEf(db), _c.Relogio);
+
+        var dto = await handler.Handle(new EncerrarProgramaCommand(id, locutor, SolicitanteEhAdmin: false), default);
+
+        Assert.Equal(1, corrida.Disparos);
+        Assert.Equal("Finalizado", dto.Status);
+        Assert.Equal(1, await EventosDoProgramaAsync(id)); // o da 1ª tentativa (revertida) não ficou
+    }
+
+    [SqlFact]
+    public async Task Cancelar_quando_o_Worker_inicia_o_programa_no_meio_vira_409_sem_evento()
+    {
+        var (_, id) = await AgendadoEmCursoAsync();
+        var corrida = new CorridaNoPrimeiroSave(() => WorkerIniciaAsync(id));
+        await using var db = DbComCorrida(corrida);
+        var handler = new CancelarProgramaHandler(db, new TransacaoComTrava(db), new OutboxEf(db), _c.Relogio);
+
+        // A repetição relê o status (AoVivo): só Agendado se cancela.
+        await Assert.ThrowsAsync<TransicaoInvalidaException>(() => handler.Handle(new CancelarProgramaCommand(id), default));
+
+        Assert.Equal(1, corrida.Disparos);
+        Assert.Equal(0, await EventosDoProgramaAsync(id));
+        await using var leitura = _c.NovoDb();
+        Assert.Equal(StatusPrograma.AoVivo, (await leitura.Programas.AsNoTracking().SingleAsync(p => p.Id == id)).Status);
     }
 
     private static async Task<object> Tentar(Func<Task<ProgramaDto>> acao)
