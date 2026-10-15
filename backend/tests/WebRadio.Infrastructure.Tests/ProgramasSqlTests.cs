@@ -195,6 +195,9 @@ public class ProgramasSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
 
         Assert.Equal(p.Id, Assert.Single(lista).Id);
         Assert.Equal("Listado", porId.Titulo);
+        // O EF lê datetime2 como Unspecified: sem o Kind=Utc o JSON sairia sem o "Z" e o navegador leria como hora local.
+        Assert.All(new[] { lista[0], porId }, d => Assert.Equal((DateTimeKind.Utc, DateTimeKind.Utc), (d.InicioUtc.Kind, d.FimUtc.Kind)));
+        Assert.Contains("\"inicioUtc\":\"" + inicio.ToString("yyyy-MM-ddTHH:mm:ss") + "Z\"", System.Text.Json.JsonSerializer.Serialize(porId, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
         Assert.False(string.IsNullOrEmpty(porId.Versao));
         var aoVivo = await new ProgramaAoVivoHandler(db).Handle(new ProgramaAoVivoQuery(), default);
         Assert.NotEqual(p.Id, aoVivo?.Id); // Agendado não é "ao vivo": quem muda o status é o Worker
