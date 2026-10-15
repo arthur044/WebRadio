@@ -115,7 +115,7 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
         // 02 §10: todo evento sai com eventoId e ocorridoEmUtc; o id do outbox é estável entre reenvios.
         var carga = JsonObject.Create(dados.Clone())!;
         carga["eventoId"] = evento.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        carga["ocorridoEmUtc"] = DateTime.SpecifyKind(evento.CriadoEmUtc, DateTimeKind.Utc);
+        carga["ocorridoEmUtc"] = evento.CriadoEmUtc; // Kind = Utc: o RadioDbContext lê toda data como UTC
 
         return grupos is null
             ? notifier.NotificarTodosAsync(evento.Tipo, carga, ct)

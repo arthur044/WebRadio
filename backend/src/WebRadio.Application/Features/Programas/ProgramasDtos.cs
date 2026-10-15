@@ -20,12 +20,7 @@ public sealed record ProgramaDto(
     [property: JsonIgnore] string Versao)
 {
     public static ProgramaDto De(Programa p, string locutorNome) =>
-        new(p.Id, p.Titulo, p.Descricao, new LocutorDto(p.LocutorId, locutorNome), EmUtc(p.InicioUtc), EmUtc(p.FimUtc), p.Status.ToString(),
+        new(p.Id, p.Titulo, p.Descricao, new LocutorDto(p.LocutorId, locutorNome), p.InicioUtc, p.FimUtc, p.Status.ToString(),
             Convert.ToBase64String(p.RowVersion));
 
-    /// <summary>
-    /// O EF materializa <c>datetime2</c> como <c>Unspecified</c>, e o JSON de um <c>Unspecified</c> sai SEM o sufixo Z: o navegador
-    /// leria a hora como local. Tudo no banco é UTC (02 §4), então o Kind é marcado aqui, na saída.
-    /// </summary>
-    private static DateTime EmUtc(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
 }
