@@ -62,6 +62,8 @@ A ordem do Fluxo C (magic bytes **+** ffprobe) não basta se o ffprobe rodar ant
 4. No compose, usar `${VAR:?defina VAR no .env}` para segredos obrigatórios. Sem `.env`, o `compose up` falha com mensagem clara, em vez de subir com o segredo vazio.
 5. A CI (E1-F17) roda o gitleaks **e** um grep que reprova qualquer valor de segredo em `.env.example` diferente de `__GERAR__`.
 
+> **Como foi entregue (PR #29, F18; registrado em 2026-10-15, B3-13):** os itens 1, 2 e 4 foram superados por um desenho mais restrito. Os segredos ficam **sempre** em arquivos `secrets/<nome>`, montados em `/run/secrets`, em dev **e** em produção; o `gerar-segredos.sh dev|prod` (e o `.ps1`) cria esses arquivos e nunca sobrescreve; o `.env` e o `.env.example` têm **só** configuração não secreta (nenhum segredo, nem placeholder `__GERAR__`), e o grep do item 5 reprova qualquer chave de segredo que apareça no `.env.example`. Os itens 3 e 5 valem como estão.
+
 ---
 
 ## 2. ALTOS
@@ -277,7 +279,7 @@ O Liquidsoap interpreta URIs com protocolos como `annotate:`, `process:` (que **
 Itens que não estavam na lista do Nexus e foram acrescentados: **Redis**, **credenciais de serviço do MinIO**, **senha de relay do Icecast** e o login do **db-init**.
 
 ### 5.2 `.env.example`
-- Todo segredo aparece com o valor `__GERAR__` e, na linha anterior, um comentário com o comando de geração e o mínimo. Nenhum valor funcional (S-C02).
+- *(Como foi entregue, B3-13:)* **nenhum** segredo aparece no `.env.example`, nem como `__GERAR__`: os segredos vivem só em `secrets/<nome>`. O arquivo lista, em comentário, os segredos que o `gerar-segredos` cria e o comando de geração. Nenhum valor funcional (S-C02).
 - Valores que **não** são segredo podem vir preenchidos (`Storage__PublicEndpoint=http://localhost:8080/storage`, nomes de bucket, `ASPNETCORE_ENVIRONMENT=Development`).
 - O cabeçalho do arquivo diz: "rode `infra/scripts/gerar-segredos.sh`; nunca copie este arquivo como está".
 - O `.gitignore` inclui `.env`, `.env.*` (exceto `.env.example`) e `secrets/`.
