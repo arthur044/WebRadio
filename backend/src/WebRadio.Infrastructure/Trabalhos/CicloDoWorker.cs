@@ -12,6 +12,14 @@ public sealed class CicloOptions
     public TimeSpan IntervaloDaManutencao { get; set; } = TimeSpan.FromHours(24);
 
     /// <summary>
+    /// Manutenção que falha (banco fora, por exemplo) não é refeita a cada ciclo de 10 s: espera este tempo, que dobra a
+    /// cada falha seguida até <see cref="RecuoMaximoDaManutencao"/> (B3-07).
+    /// </summary>
+    public TimeSpan RecuoInicialDaManutencao { get; set; } = TimeSpan.FromMinutes(1);
+
+    public TimeSpan RecuoMaximoDaManutencao { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>
     /// Arquivo tocado a cada tick, num <c>tmpfs</c> (04 §Serviços): o healthcheck do contêiner confere a idade dele, porque
     /// o Worker é host genérico, sem HTTP nem porta. Nulo = sem heartbeat (testes).
     /// </summary>
@@ -28,10 +36,15 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
     ILogger<CicloDoWorker> logger) : BackgroundService
 {
     private DateTime? _ultimaManutencaoUtc;
+    private DateTime? _proximaTentativaUtc;
+    private int _falhasDaManutencao;
     private bool _heartbeatFalhou;
     private int _ciclos;
 
     public int Ciclos => Volatile.Read(ref _ciclos);
+
+    /// <summary>Quantas vezes seguidas a manutenção falhou (zera ao dar certo). Os testes esperam por ele antes de mexer no relógio.</summary>
+    public int FalhasSeguidasDaManutencao => Volatile.Read(ref _falhasDaManutencao);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -57,8 +70,11 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
         }
     }
 
-    private bool ManutencaoDevida() =>
-        _ultimaManutencaoUtc is not { } ultima || clock.UtcNow - ultima >= opcoes.IntervaloDaManutencao;
+    private bool ManutencaoDevida()
+    {
+        if (_proximaTentativaUtc is { } recuo && clock.UtcNow < recuo) return false; // ainda no recuo de uma falha
+        return _ultimaManutencaoUtc is not { } ultima || clock.UtcNow - ultima >= opcoes.IntervaloDaManutencao;
+    }
 
     private async Task ManterAsync(CancellationToken ct)
     {
@@ -67,6 +83,9 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
             await using var escopo = escopos.CreateAsyncScope();
             var r = await escopo.ServiceProvider.GetRequiredService<IManutencao>().ExecutarAsync(ct);
             _ultimaManutencaoUtc = clock.UtcNow;
+            _proximaTentativaUtc = null;
+            var falhas = Interlocked.Exchange(ref _falhasDaManutencao, 0);
+            if (falhas > 0) logger.LogInformation("WORKER_MANUTENCAO: voltou a funcionar depois de {Falhas} falha(s) seguida(s).", falhas);
             logger.LogInformation("WORKER_MANUTENCAO: {Pedidos} pedidos anonimizados, {Eventos} eventos e {Refresh} refresh tokens apagados.",
                 r.PedidosAnonimizados, r.EventosApagados, r.RefreshApagados);
         }
@@ -76,9 +95,23 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
         }
         catch (Exception e)
         {
-            // Banco fora, por exemplo: o laço nunca morre (um BackgroundService que lança derruba o host).
-            logger.LogError(e, "WORKER_MANUTENCAO: falhou; nova tentativa no próximo ciclo.");
+            // Banco fora, por exemplo: o laço nunca morre (um BackgroundService que lança derruba o host). Recuo exponencial,
+            // e um único erro (com a stack) por sequência de falhas: as seguintes saem como aviso curto, sem a stack.
+            var recuo = RecuoDepoisDe(_falhasDaManutencao);
+            _proximaTentativaUtc = clock.UtcNow + recuo;
+            if (_falhasDaManutencao == 0)
+                logger.LogError(e, "WORKER_MANUTENCAO: falhou; nova tentativa em {Recuo}, com recuo crescente, e sem repetir este erro enquanto a falha durar.", recuo);
+            else
+                logger.LogWarning("WORKER_MANUTENCAO: segue falhando ({Tipo}); nova tentativa em {Recuo}.", e.GetType().Name, recuo);
+            Interlocked.Increment(ref _falhasDaManutencao);
         }
+    }
+
+    private TimeSpan RecuoDepoisDe(int falhasAnteriores)
+    {
+        // Dobra a cada falha seguida; o limite do expoente evita estourar o TimeSpan.
+        var recuo = opcoes.RecuoInicialDaManutencao * Math.Pow(2, Math.Min(falhasAnteriores, 20));
+        return recuo > opcoes.RecuoMaximoDaManutencao ? opcoes.RecuoMaximoDaManutencao : recuo;
     }
 
     private void Heartbeat()

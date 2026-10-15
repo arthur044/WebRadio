@@ -18,12 +18,10 @@ public sealed class TrocarSenhaValidator : AbstractValidator<TrocarSenhaCommand>
     public TrocarSenhaValidator(ISenhasVazadas vazadas)
     {
         RuleFor(x => x.SenhaAtual).NotEmpty().WithMessage("Informe a senha atual.")
-            .MaximumLength(128).WithMessage("A senha pode ter no máximo 128 caracteres.");
+            .MaximumLength(PoliticaDeSenha.Maximo).WithMessage("A senha pode ter no máximo 128 caracteres.");
         RuleFor(x => x.NovaSenha)
             .NotEmpty().WithMessage("Informe a nova senha.")
-            .MinimumLength(12).WithMessage("A senha precisa ter de 12 a 128 caracteres.")
-            .MaximumLength(128).WithMessage("A senha precisa ter de 12 a 128 caracteres.")
-            .Must(s => !vazadas.EhVazada(s)).WithMessage("Esta senha é muito comum. Escolha outra.")
+            .SenhaNova(vazadas)
             .Must((c, nova) => nova != c.SenhaAtual).WithMessage("A nova senha precisa ser diferente da atual.");
     }
 }

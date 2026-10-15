@@ -18,7 +18,7 @@ public static class WorkerServiceCollectionExtensions
     public static IServiceCollection AddWorkerInfrastructure(this IServiceCollection services, IConfiguration configuration,
         bool exigirSenhaDeSegredo = false)
     {
-        var connectionString = InfrastructureServiceCollectionExtensions.ConnectionStringDoBanco(configuration, exigirSenhaDeSegredo);
+        var connectionString = InfrastructureServiceCollectionExtensions.ConnectionStringDoBanco(configuration, exigirSenhaDeSegredo, NomesDeAplicacao.Worker);
         services.AddRadioDbContext(connectionString);
         services.AddSingleton<IClock, SistemaRelogio>();
 

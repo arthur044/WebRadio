@@ -4,42 +4,84 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Semanal (segunda, 06:17 UTC), SÓ para o job `vulnerabilidades` (e o `seguranca`, de que ele depende): CVE nova aparece sem
+  # esperar um commit. Roda na main (agendamento só vale no branch padrão); os demais jobs não rodam no cron.
+  schedule:
+    - cron: "17 6 * * 1"
 
-permissions:
-  contents: read
+# Permissões mínimas (05 §9.1): nada no topo, `contents: read` só em cada job. Concorrência: um PR novo cancela a rodada
+# anterior do mesmo PR; na `main` nenhuma rodada é cancelada (cada commit mergeado fica com o resultado dele).
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   GITLEAKS_VERSION: "8.30.1"
+  # sha256 ESPERADO do tarball, fixado aqui (05 §9.2): o checksums.txt da mesma release só provaria integridade do download,
+  # não autenticidade. Ao subir a versão, o valor novo vem de uma conferência independente da release, nunca do próprio download.
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  # Imagem do Redis dos testes do throttle: a mesma, por digest, do docker-compose.yml.
+  REDIS_IMAGEM: "redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"
+  # trivy: binário com sha256 esperado fixado aqui, como o gitleaks (05 §9.2).
+  TRIVY_VERSION: "0.75.0"
+  TRIVY_SHA256: "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f"
+  # Imagem do SQL Server dos testes (backend-sql e ddl-check): a mesma, por digest, do docker-compose.yml.
+  MSSQL_IMAGEM: "mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090"
 
 jobs:
   seguranca:
     name: Segurança (gitleaks)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Instalar gitleaks (binário verificado por checksum, sem Action de terceiros com licença)
+      - name: Instalar gitleaks (binário com sha256 esperado fixado no workflow)
         run: |
           set -euo pipefail
           curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
-          sha256sum --ignore-missing -c "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          echo "${GITLEAKS_SHA256}  gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | sha256sum -c -
           tar -xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
           sudo mv gitleaks /usr/local/bin/gitleaks
 
       - name: gitleaks detect
         run: gitleaks detect --source . --redact -v
 
+      - name: .env.example sem segredo com valor (S-C02, 05 §9.5)
+        run: |
+          # Não usar "! grep ...": com o "bash -e" do Actions, um pipeline negado que não é o último comando do passo não
+          # derruba o passo. -i é obrigatório: as chaves .NET são em caixa mista (Jwt__SigningKey, Seguranca__Pepper).
+          violacoes=$(grep -iE '^[A-Za-z0-9_]*(PASSWORD|SECRET|SENHA|TOKEN|KEY|PEPPER)[A-Za-z0-9_]*=' .env.example \
+              | grep -vE '=__GERAR__$' | cut -d= -f1 || true)
+          if [ -n "$violacoes" ]; then
+            echo "::error::Segredo com valor real no .env.example: $violacoes"   # só os nomes, nunca o valor
+            exit 1
+          fi
+
+      - name: Paridade dos segredos (gerar-segredos.sh × .ps1 × compose, B3-10)
+        run: infra/scripts/verificar-paridade-segredos.sh
+
   backend-unit:
     name: Backend (unit + arquitetura)
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     needs: seguranca
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -59,11 +101,317 @@ jobs:
           --logger "trx"
           --collect:"XPlat Code Coverage"
 
+  # B3-01: o aceite da F11 (liderança, reeleição, manutenção em lotes) só existe contra SQL Server de verdade. Aqui os
+  # [SqlFact] rodam com WEBRADIO_TEST_SQL apontando para um SQL Server do próprio job; se o servidor não responder o teste
+  # FALHA (BancoDeTeste não ignora com a variável definida) e, no fim, um passo recusa qualquer teste pulado.
+  backend-sql:
+    name: Backend (SQL Server real)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    needs: seguranca
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: backend/global.json
+
+      - name: Restore e build
+        run: |
+          dotnet restore backend/WebRadio.slnx
+          dotnet build backend/WebRadio.slnx --no-restore --configuration Release
+
+      - name: SQL Server de teste (senha gerada nesta execução, nenhum segredo cadastrado)
+        run: |
+          set -euo pipefail
+          senha="Wr$(openssl rand -hex 16)A1"
+          echo "::add-mask::${senha}"
+          docker run -d --name mssql-teste -p 127.0.0.1:1433:1433 \
+            -e ACCEPT_EULA=Y -e MSSQL_PID=Developer -e "MSSQL_SA_PASSWORD=${senha}" "${MSSQL_IMAGEM}" >/dev/null
+          for _ in $(seq 1 60); do
+            if docker exec -e "SQLCMDPASSWORD=${senha}" mssql-teste /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -b -Q "SELECT 1" >/dev/null 2>&1; then
+              echo "WEBRADIO_TEST_SQL=Server=127.0.0.1,1433;User Id=sa;Password=${senha};TrustServerCertificate=True;Encrypt=True;Connect Timeout=15" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::O SQL Server de teste não ficou pronto em 2 minutos."
+          docker logs --tail 30 mssql-teste
+          exit 1
+
+      - name: Redis de teste (testes do throttle de login, com Lua e SCAN de verdade)
+        run: |
+          set -euo pipefail
+          docker run -d --name redis-teste -p 127.0.0.1:6379:6379 "${REDIS_IMAGEM}" >/dev/null
+          for _ in $(seq 1 30); do
+            if [ "$(docker exec redis-teste redis-cli ping 2>/dev/null)" = "PONG" ]; then
+              echo "WEBRADIO_TEST_REDIS=127.0.0.1:6379" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::O Redis de teste não respondeu em 30 segundos."
+          exit 1
+
+      - name: Test (Infrastructure.Tests inteiro, com SQL e Redis reais)
+        run: >
+          dotnet test backend/tests/WebRadio.Infrastructure.Tests --no-build --configuration Release
+          --logger "trx;LogFileName=sql.trx" --results-directory "$RUNNER_TEMP/resultados"
+
+      - name: Nenhum teste pulado (um [SqlFact] ignorado seria um verde falso)
+        run: |
+          trx="$RUNNER_TEMP/resultados/sql.trx"
+          # Sem o .trx as contagens ficariam vazias e o passo passaria sem provar nada.
+          [ -s "${trx}" ] || { echo "::error::O arquivo de resultados ${trx} não existe ou está vazio."; exit 1; }
+          executados=$(grep -c 'outcome="Passed"' "$trx" || true)
+          pulados=$(grep -c 'outcome="NotExecuted"' "$trx" || true)
+          echo "executados=${executados} pulados=${pulados}"
+          if [ "${pulados}" -ne 0 ]; then
+            echo "::error::${pulados} teste(s) pulado(s) no job com SQL Server."
+            exit 1
+          fi
+          # Piso contra um filtro que passe a não rodar nada; sobe quando entrarem mais testes.
+          if [ "${executados}" -lt 100 ]; then
+            echo "::error::Só ${executados} teste(s) executado(s); o esperado é no mínimo 100."
+            exit 1
+          fi
+
+      - name: Estado em caso de falha
+        if: failure()
+        run: docker logs --tail 40 mssql-teste || true
+
+      - name: Derrubar o SQL Server e o Redis
+        if: always()
+        run: docker rm -f mssql-teste redis-teste >/dev/null 2>&1 || true
+
+  # B3-01: os dois teste.sh de infraestrutura (hardening do Icecast e playout do Liquidsoap) não rodavam em nenhum job.
+  # O do Liquidsoap usa a imagem webradio-icecast:teste que o do Icecast constrói: a ordem importa.
+  infra-testes:
+    name: Infra (teste.sh do Icecast e do Liquidsoap)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    needs: seguranca
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: infra/icecast/teste.sh
+        run: infra/icecast/teste.sh
+
+      - name: infra/liquidsoap/teste.sh
+        run: infra/liquidsoap/teste.sh
+
+  # F17: o 03-schema-sqlserver.sql (contrato, ADR D14) e as migrations do EF precisam gerar o MESMO schema. Dois bancos
+  # descartáveis no SQL Server do próprio job; o resultado (catálogo e diff) vai para o resumo do job, para o Atlas.
+  ddl-check:
+    name: DDL (03 × migrations do EF)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    needs: seguranca
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: backend/global.json
+
+      - name: dotnet-ef (a mesma versão do EF Core, 10.0.0)
+        run: dotnet tool install dotnet-ef --version 10.0.0 --tool-path "$RUNNER_TEMP/tools"
+
+      - name: SQL Server 2022 (senha gerada nesta execução, nenhum segredo cadastrado)
+        run: |
+          set -euo pipefail
+          senha="Wr$(openssl rand -hex 16)A1"
+          echo "::add-mask::${senha}"
+          docker run -d --name mssql-ddl \
+            -e ACCEPT_EULA=Y -e MSSQL_PID=Developer -e "MSSQL_SA_PASSWORD=${senha}" "${MSSQL_IMAGEM}" >/dev/null
+          for _ in $(seq 1 60); do
+            if docker exec -e "SQLCMDPASSWORD=${senha}" mssql-ddl /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -b -Q "SELECT 1" >/dev/null 2>&1; then
+              echo "SQLCMDPASSWORD=${senha}" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::O SQL Server de teste não ficou pronto em 2 minutos."
+          docker logs --tail 30 mssql-ddl
+          exit 1
+
+      - name: ddl-check (03 e migrations aplicados com sqlcmd -b -I e catálogos comparados)
+        env:
+          DDL_SQL_CONTAINER: mssql-ddl
+        run: |
+          export DOTNET_EF="$RUNNER_TEMP/tools/dotnet-ef"
+          infra/scripts/ddl-check.sh
+
+      - name: Derrubar o SQL Server
+        if: always()
+        run: docker rm -f mssql-ddl >/dev/null 2>&1 || true
+
+  # F17: lint, testes e build do frontend. O vitest exige Node >= 22.12 e o Node do runner é mais antigo, então os comandos
+  # rodam na MESMA imagem node (por digest) do build de produção (frontend/Dockerfile): o que passa aqui é o que vai para a
+  # imagem, sem uma action nova (actions/setup-node precisaria entrar no patterns_allowed do repositório).
+  frontend:
+    name: Frontend (lint, testes e build)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    needs: seguranca
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: npm ci, lint, testes e build (imagem node do frontend/Dockerfile)
+        run: |
+          set -euo pipefail
+          imagem="$(grep -m1 '^FROM node:' frontend/Dockerfile | awk '{print $2}')"
+          [[ "${imagem}" == node:*@sha256:* ]] || { echo "::error::Não achei a imagem node (tag@digest) no frontend/Dockerfile."; exit 1; }
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/npm \
+            -v "$PWD/frontend:/app" -w /app "${imagem}" \
+            sh -c 'set -e; npm ci --no-audit --no-fund; npm run lint; npm test; npm run build'
+
+  # F17 (05 §9.5): vulnerabilidades. O `dotnet list package --vulnerable` sai com 0 MESMO havendo vulnerabilidade, então a
+  # saída é que é conferida. Sem exceção (.trivyignore): um achado com correção disponível quebra o job.
+  vulnerabilidades:
+    name: Vulnerabilidades (NuGet, npm e trivy)
+    runs-on: ubuntu-latest
+    needs: seguranca
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: backend/global.json
+
+      - name: NuGet (dotnet list package --vulnerable --include-transitive, conferido pela saída)
+        run: |
+          set -euo pipefail
+          achados=0
+          total=0
+          # Um projeto por vez: a solução inteira num só comando estoura a memória do runner. Falha FECHADA: cada projeto precisa
+          # produzir uma das duas frases conhecidas do dotnet; qualquer outra saída (SDK novo, locale, erro) quebra o passo,
+          # e zero projetos encontrados também.
+          while IFS= read -r projeto; do
+            total=$((total + 1))
+            saida="$(dotnet list "${projeto}" package --vulnerable --include-transitive 2>&1)" || { echo "${saida}"; echo "::error::dotnet list falhou em ${projeto}"; exit 1; }
+            if grep -q "has the following vulnerable packages" <<<"${saida}"; then
+              echo "${saida}"
+              achados=$((achados + 1))
+            elif ! grep -q "has no vulnerable packages" <<<"${saida}"; then
+              echo "${saida}"
+              echo "::error::Saída inesperada do dotnet list em ${projeto} (nem 'has no vulnerable packages' nem 'has the following vulnerable packages')."
+              exit 1
+            fi
+          done < <(find backend -name '*.csproj' -not -path '*/obj/*' | sort)
+          if [ "${total}" -eq 0 ]; then
+            echo "::error::Nenhum .csproj encontrado em backend/."
+            exit 1
+          fi
+          if [ "${achados}" -ne 0 ]; then
+            echo "::error::${achados} projeto(s) com pacote NuGet vulnerável (acima)."
+            exit 1
+          fi
+          echo "Nenhum pacote NuGet vulnerável em ${total} projeto(s)."
+
+      - name: npm audit --audit-level=high (imagem node do frontend/Dockerfile)
+        run: |
+          set -euo pipefail
+          imagem="$(grep -m1 '^FROM node:' frontend/Dockerfile | awk '{print $2}')"
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/npm \
+            -v "$PWD/frontend:/app" -w /app "${imagem}" npm audit --audit-level=high
+
+      - name: Instalar trivy (binário com sha256 esperado fixado no workflow)
+        run: |
+          set -euo pipefail
+          curl -sSLO "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" | sha256sum -c -
+          tar -xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy
+          sudo mv trivy /usr/local/bin/trivy
+
+      - name: trivy fs (lockfiles do frontend)
+        run: trivy fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 frontend/package-lock.json
+
+      - name: Build das imagens do projeto
+        run: |
+          infra/scripts/gerar-segredos.sh dev
+          docker compose -f docker-compose.yml build
+
+      - name: trivy image (HIGH e CRITICAL com correção disponível) em cada imagem construída
+        run: |
+          set -euo pipefail
+          falhas=0
+          for imagem in webradio-api:local webradio-worker:local webradio-migrator:local webradio-web:local webradio-icecast:local webradio-minio-init:local; do
+            echo "== ${imagem}"
+            trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${imagem}" || falhas=$((falhas + 1))
+          done
+          if [ "${falhas}" -ne 0 ]; then
+            echo "::error::${falhas} imagem(ns) com vulnerabilidade HIGH/CRITICAL corrigível (acima)."
+            exit 1
+          fi
+
+      - name: "Imagens de terceiros do compose (informativo, não quebra o job)"
+        run: |
+          # sqlserver, redis, minio e liquidsoap não são construídos aqui; a atualização delas é manual (digest). Os achados
+          # aparecem como aviso e no resumo do job, para quem decide a troca do digest.
+          {
+            echo "### Imagens de terceiros do compose (HIGH/CRITICAL com correção disponível)"
+            echo "| Imagem | HIGH | CRITICAL |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          lidas=0
+          for imagem in $(grep -hoE 'image: [^ ]+@sha256:[0-9a-f]+' docker-compose.yml | awk '{print $2}' | sort -u); do
+            contagem="$(trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --format json "${imagem}" 2>/dev/null \
+              | python3 -c "import json,sys; d=json.load(sys.stdin); v=[x for r in d.get('Results',[]) for x in (r.get('Vulnerabilities') or [])]; print(sum(x['Severity']=='HIGH' for x in v), sum(x['Severity']=='CRITICAL' for x in v))" || echo "? ?")"
+            read -r altas criticas <<<"${contagem}"
+            [ "${altas}" != "?" ] && lidas=$((lidas + 1))
+            echo "| \`${imagem%%@*}\` | ${altas} | ${criticas} |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "${altas}" != "0" ] || [ "${criticas}" != "0" ]; then
+              echo "::warning::${imagem%%@*}: ${altas} HIGH, ${criticas} CRITICAL com correção disponível (imagem de terceiros, sem build aqui)."
+            fi
+          done
+          # Informativo não quer dizer cego: se o trivy quebrou e nenhuma contagem foi lida, o passo falha.
+          if [ "${lidas}" -eq 0 ]; then
+            echo "::error::O trivy não leu nenhuma imagem de terceiros (todas as contagens são '?')."
+            exit 1
+          fi
+
   compose-smoke:
     name: Compose (smoke da Definição de Pronto)
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     needs: seguranca
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,7 +422,9 @@ jobs:
         run: infra/scripts/gerar-segredos.sh dev
 
       - name: docker compose config (sem segredo literal)
-        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
 
       - name: Build das imagens
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml build
@@ -82,7 +432,7 @@ jobs:
       - name: Subir e esperar healthy (DoD 1, < 3 min)
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait --wait-timeout 180
 
-      - name: Smoke (DoD 2–4, 7, 8 e isolamento de rede)
+      - name: Smoke (DoD 2–4, 7, 8, isolamento de rede e topologia da base de produção)
         run: infra/scripts/smoke-compose.sh
 
       - name: Estado e logs em caso de falha

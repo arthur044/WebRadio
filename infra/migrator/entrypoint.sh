@@ -8,7 +8,8 @@
 #
 # Variáveis: DB_SERVER (padrão sqlserver), DB_NAME (padrão WebRadio),
 #   DB_MIGRATOR_PASSWORD_FILE (padrão /run/secrets/db_migrator_password),
-#   ASPNETCORE_ENVIRONMENT (Development|Production; Encrypt/Trust por ambiente),
+#   ASPNETCORE_ENVIRONMENT (Development|Production),
+#   DB_TRUST_SERVER_CERTIFICATE (True|False, obrigatória; o compose passa o MESMO valor da Api e do Worker, B3-03),
 #   EFBUNDLE (padrão ./efbundle).
 # =============================================================================
 set -euo pipefail
@@ -26,9 +27,16 @@ EFBUNDLE="${EFBUNDLE:-./efbundle}"
 [[ "$DB_NAME" =~ ^[A-Za-z0-9_]+$ ]] || { echo "migrator: DB_NAME inválido." >&2; exit 1; }
 
 case "$AMBIENTE" in
-  Development) TRUST="True" ;;
-  Production)  TRUST="False" ;;
+  Development|Production) ;;
   *) echo "migrator: ASPNETCORE_ENVIRONMENT precisa ser Development ou Production (valor: '${AMBIENTE}')." >&2; exit 1 ;;
+esac
+
+# Sem valor padrão: um padrão aqui poderia divergir do da Api e do Worker sem ninguém ver. O certificado do SQL Server no
+# contêiner é autoassinado; aceitá-lo em produção é risco aceito (docs/conexao-sql-server.md §2, gatilhos de revisão).
+TRUST="${DB_TRUST_SERVER_CERTIFICATE:-}"
+case "$TRUST" in
+  True|False) ;;
+  *) echo "migrator: DB_TRUST_SERVER_CERTIFICATE precisa ser True ou False (valor: '${TRUST}')." >&2; exit 1 ;;
 esac
 
 [[ -r "$ARQ" ]] || { echo "migrator: não consegui ler $ARQ." >&2; exit 1; }
@@ -43,5 +51,5 @@ esac
 # processo. Mitigação: contêiner one-shot e efêmero, sem outro processo, sem
 # `ps` exposto a terceiros; o webradio_migrator não é sysadmin.
 echo "migrator: aplicando migrations (Ambiente=$AMBIENTE)..."
-"$EFBUNDLE" --connection "Server=${DB_SERVER};Database=${DB_NAME};User Id=webradio_migrator;Password=${SENHA};Encrypt=True;TrustServerCertificate=${TRUST};Application Name=webradio-migrator;Connect Timeout=30"
+"$EFBUNDLE" --connection "Server=${DB_SERVER};Database=${DB_NAME};User Id=webradio_migrator;Password=${SENHA};Encrypt=True;TrustServerCertificate=${TRUST};Application Name=WebRadio.Migrator;Max Pool Size=5;Min Pool Size=0;Connect Timeout=30"
 echo "migrator: concluído."

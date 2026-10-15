@@ -27,19 +27,24 @@ public sealed class LiderancaDoWorker(string connectionString, LiderancaOptions 
     : BackgroundService, ILideranca
 {
     /// <summary>Application Name da conexão dedicada: identifica a sessão do líder em <c>sys.dm_exec_sessions</c>.</summary>
-    public const string NomeDaAplicacao = "webradio-worker-leader";
+    public const string NomeDaAplicacao = "WebRadio.Worker.Lideranca";
 
     private SqlConnection? _conexao;
     private volatile bool _lider;
+    private int _tentativas;
     private bool _semBanco; // já avisado: uma mensagem por sequência de falhas, não uma a cada ciclo
 
     public bool EhLider => _lider;
+
+    /// <summary>Quantas vezes o laço tentou (ou conferiu) a liderança, com sucesso ou não. Os testes esperam por ele em vez de dormir.</summary>
+    public int Tentativas => Volatile.Read(ref _tentativas);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var ct = stoppingToken;
         while (!ct.IsCancellationRequested)
         {
+            Interlocked.Increment(ref _tentativas);
             try
             {
                 if (_lider)

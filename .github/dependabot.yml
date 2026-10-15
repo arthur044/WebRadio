@@ -1,0 +1,50 @@
+# F17b (05 §9.2): sem isto os SHAs das Actions e as dependências envelhecem sem aviso. Atualizações semanais, agrupadas por
+# ecossistema para não abrir um PR por pacote. Os FROM dos Dockerfiles são `imagem:tag@sha256:...` (a tag dá ao Dependabot o que
+# comparar; o digest fixa o conteúdo). As imagens do docker-compose.yml são só por digest e o Dependabot só acompanha Dockerfile:
+# a troca delas é manual, conferida no PR que a faz (e o job `vulnerabilidades` acusa o envelhecimento).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: "nuget"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    groups:
+      nuget:
+        patterns: ["*"]
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    groups:
+      npm:
+        patterns: ["*"]
+
+  # Um bloco por pasta com Dockerfile.
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/infra/icecast"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/infra/minio"
+    schedule:
+      interval: "weekly"

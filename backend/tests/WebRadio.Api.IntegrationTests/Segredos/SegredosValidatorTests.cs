@@ -62,4 +62,27 @@ public class SegredosValidatorTests
         Assert.True(v.Validate(null, new PlayoutOptions { Token = "__GERAR__" }).Failed);
         Assert.True(v.Validate(null, new PlayoutOptions { Token = null }).Failed);
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    [InlineData(65536)]
+    public void Redis_porta_fora_de_1_a_65535_recusa_o_boot(int porta)
+    {
+        var r = new RedisOptionsValidator().Validate(null, new RedisOptions { Host = "redis", Password = "uma-senha-do-redis-bem-longa", Porta = porta });
+
+        Assert.True(r.Failed);
+        Assert.Contains("Redis:Porta", r.FailureMessage);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(6379)]
+    [InlineData(65535)]
+    public void Redis_porta_ausente_ou_valida_e_aceita(int? porta)
+        => Assert.True(new RedisOptionsValidator().Validate(null, new RedisOptions { Host = "redis", Password = "uma-senha-do-redis-bem-longa", Porta = porta }).Succeeded);
+
+    [Fact]
+    public void Redis_sem_host_nao_valida_a_porta_porque_o_Redis_e_opcional_em_Development()
+        => Assert.True(new RedisOptionsValidator().Validate(null, new RedisOptions { Porta = 0 }).Succeeded);
 }

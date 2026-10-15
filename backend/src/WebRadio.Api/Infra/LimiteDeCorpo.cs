@@ -19,6 +19,13 @@ public static class LimiteDeCorpo
                 if (ctx.Request.ContentLength > BytesDeAuth)
                 {
                     ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                    await ctx.Response.WriteAsJsonAsync(new Microsoft.AspNetCore.Mvc.ProblemDetails
+                    {
+                        Status = StatusCodes.Status413PayloadTooLarge,
+                        Type = "/erros/corpo-grande-demais",
+                        Title = "Corpo grande demais.",
+                        Detail = $"O corpo desta rota pode ter no máximo {BytesDeAuth / 1024} KB.",
+                    }, options: null, contentType: "application/problem+json");
                     return;
                 }
 

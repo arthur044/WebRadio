@@ -100,7 +100,14 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
     o.KnownIPNetworks.Clear();
     if (subnetValida)
         o.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(subnet!));
+    // Mesma lista do AllowedHosts (#19): um X-Forwarded-Host fora dela é ignorado em vez de virar o Host da requisição.
+    // Vazio (ou com '*', só aceito em Development) = sem restrição, como o próprio AllowedHosts.
+    var permitidos = builder.Configuration["AllowedHosts"];
+    if (!string.IsNullOrWhiteSpace(permitidos) && !permitidos.Contains('*'))
+        foreach (var host in permitidos.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            o.AllowedHosts.Add(host);
 });
+builder.Services.AddSingleton<WebRadio.Api.Infra.OrigensPermitidas>();
 
 // JWT (parâmetros do 05 §6). Emissão, refresh e políticas entram na F07; aqui só a validação que a
 // FallbackPolicy exige para devolver 401 em vez de estourar sem esquema de autenticação.

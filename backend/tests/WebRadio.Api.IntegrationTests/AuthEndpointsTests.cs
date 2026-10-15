@@ -268,6 +268,11 @@ public class AuthEndpointsTests
     {
         var r = await Login(Cliente(NovaFactory()), "a@example.com", new string('x', 20_000));
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, r.StatusCode);
+        // Mesmo formato dos demais erros (#19): ProblemDetails, não um 413 de corpo vazio.
+        Assert.Equal("application/problem+json", r.Content.Headers.ContentType?.MediaType);
+        var problema = await r.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(413, problema.GetProperty("status").GetInt32());
+        Assert.Equal("/erros/corpo-grande-demais", problema.GetProperty("type").GetString());
     }
 
     [Fact]

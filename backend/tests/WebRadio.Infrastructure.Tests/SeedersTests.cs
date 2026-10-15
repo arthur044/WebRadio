@@ -32,8 +32,10 @@ public class SeedersTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
     private static IConfiguration Config(params (string, string?)[] valores) =>
         new ConfigurationBuilder().AddInMemoryCollection(valores.ToDictionary(v => v.Item1, v => v.Item2)).Build();
 
-    private AdminSeeder NovoAdminSeeder(Cenario c, IConfiguration config) =>
-        new(c.NovoDb(), c.Hasher, c.Relogio, config, NullLogger<AdminSeeder>.Instance);
+    private static readonly WebRadio.Infrastructure.Seguranca.SenhasVazadas Vazadas = new();
+
+    private AdminSeeder NovoAdminSeeder(Cenario c, IConfiguration config, Microsoft.Extensions.Logging.ILogger<AdminSeeder>? log = null) =>
+        new(c.NovoDb(), c.Hasher, c.Relogio, config, Vazadas, log ?? NullLogger<AdminSeeder>.Instance);
 
     private async Task LimparAdminsAsync(Cenario c)
     {
@@ -84,6 +86,61 @@ public class SeedersTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         await using var db = c.NovoDb();
         Assert.Empty(await db.Usuarios.Where(u => u.Role == Role.Admin).ToListAsync());
         Assert.Equal(Role.Ouvinte, (await db.Usuarios.SingleAsync(u => u.EmailNormalizado == "OCUPADO@EXAMPLE.COM")).Role);
+    }
+
+    [SqlTheory]
+    [InlineData("curta")]                                   // < 12
+    [InlineData("123456789012")]                            // vazada (lista local)
+    public async Task AdminSeeder_recusa_senha_que_o_trocar_senha_recusaria_e_nao_cria_o_Admin(string senha)
+    {
+        var c = new Cenario(banco);
+        await LimparAdminsAsync(c);
+
+        var e = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            NovoAdminSeeder(c, Config(("Seed:AdminEmail", "root@example.com"), ("Seed:AdminSenha", senha))).ExecutarAsync(default));
+
+        Assert.Contains("Seed:AdminSenha", e.Message);
+        Assert.DoesNotContain(senha, e.Message);
+        await using var db = c.NovoDb();
+        Assert.Empty(await db.Usuarios.Where(u => u.Role == Role.Admin).ToListAsync());
+    }
+
+    [SqlFact]
+    public async Task AdminSeeder_recusa_senha_com_mais_de_128_caracteres()
+    {
+        var c = new Cenario(banco);
+        await LimparAdminsAsync(c);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            NovoAdminSeeder(c, Config(("Seed:AdminEmail", "root@example.com"), ("Seed:AdminSenha", new string('x', 129)))).ExecutarAsync(default));
+    }
+
+    [SqlFact]
+    public async Task AdminSeeder_avisa_a_cada_boot_enquanto_a_senha_do_seed_estiver_no_ambiente_mesmo_com_Admin_existente()
+    {
+        var c = new Cenario(banco);
+        await LimparAdminsAsync(c);
+        await c.CriarUsuarioAsync("primeiro@example.com", Role.Admin);
+        var log = new LoggerDeTeste<AdminSeeder>();
+        var config = Config(("Seed:AdminEmail", "root@example.com"), ("Seed:AdminSenha", "senha-do-admin-123"));
+
+        await NovoAdminSeeder(c, config, log).ExecutarAsync(default);
+        await NovoAdminSeeder(c, config, log).ExecutarAsync(default);
+
+        var avisos = log.Linhas.Where(l => l.Nivel == Microsoft.Extensions.Logging.LogLevel.Warning && l.Texto.Contains("Seed__AdminSenha")).ToArray();
+        Assert.Equal(2, avisos.Length); // um por boot
+        Assert.DoesNotContain(log.Linhas, l => l.Texto.Contains("senha-do-admin-123"));
+    }
+
+    [SqlFact]
+    public async Task AdminSeeder_sem_senha_no_ambiente_nao_avisa()
+    {
+        var c = new Cenario(banco);
+        var log = new LoggerDeTeste<AdminSeeder>();
+
+        await NovoAdminSeeder(c, Config(), log).ExecutarAsync(default);
+
+        Assert.Empty(log.Linhas);
     }
 
     [SqlFact]

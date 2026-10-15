@@ -30,6 +30,39 @@ public class LoginHandlerTests
     }
 
     [Fact]
+    public async Task Login_acima_do_teto_de_sessoes_revoga_as_familias_mais_antigas_e_so_elas()
+    {
+        var u = CriarUsuario(_db, _hasher);
+        // 10 sessões (famílias) ativas, da mais antiga à mais nova, e uma sessão de OUTRO usuário (nunca é tocada).
+        var familias = Enumerable.Range(0, LoginHandler.MaximoDeSessoesPorUsuario).Select(_ => Guid.NewGuid()).ToArray();
+        for (var i = 0; i < familias.Length; i++)
+            _db.RefreshTokens.Add(new WebRadio.Domain.Autenticacao.RefreshToken(Guid.NewGuid(), u.Id, Enumerable.Repeat((byte)i, 32).ToArray(),
+                familias[i], Agora.AddMinutes(-100 + i), TimeSpan.FromDays(7), null));
+        var outro = CriarUsuario(_db, _hasher, email: "outro@example.com");
+        _db.RefreshTokens.Add(new WebRadio.Domain.Autenticacao.RefreshToken(Guid.NewGuid(), outro.Id, Enumerable.Repeat((byte)99, 32).ToArray(),
+            Guid.NewGuid(), Agora.AddMinutes(-200), TimeSpan.FromDays(7), null));
+        await _db.SaveChangesAsync();
+
+        await Handler().Handle(new LoginCommand("ana@example.com", SenhaOk, IpHash), default);
+
+        var ativas = await _db.RefreshTokens.Where(t => t.UsuarioId == u.Id && t.RevogadoEmUtc == null).Select(t => t.FamiliaId).ToListAsync();
+        Assert.Equal(LoginHandler.MaximoDeSessoesPorUsuario, ativas.Count);          // a nova entrou; o teto vale
+        Assert.DoesNotContain(familias[0], ativas);                                    // a mais antiga saiu
+        Assert.All(familias.Skip(1), f => Assert.Contains(f, ativas));                 // as outras ficaram
+        Assert.Single(await _db.RefreshTokens.Where(t => t.UsuarioId == outro.Id && t.RevogadoEmUtc == null).ToListAsync()); // a de outro usuário não
+    }
+
+    [Fact]
+    public async Task Login_abaixo_do_teto_nao_revoga_nada()
+    {
+        var u = CriarUsuario(_db, _hasher);
+        for (var i = 0; i < 3; i++)
+            await Handler().Handle(new LoginCommand("ana@example.com", SenhaOk, IpHash), default);
+
+        Assert.Equal(3, await _db.RefreshTokens.CountAsync(t => t.UsuarioId == u.Id && t.RevogadoEmUtc == null));
+    }
+
+    [Fact]
     public async Task Senha_errada_email_inexistente_inativo_e_bloqueado_dao_a_MESMA_excecao_e_UMA_verificacao_de_senha()
     {
         CriarUsuario(_db, _hasher);

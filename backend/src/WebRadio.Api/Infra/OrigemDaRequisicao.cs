@@ -8,7 +8,7 @@ namespace WebRadio.Api.Infra;
 /// </summary>
 public static class OrigemDaRequisicao
 {
-    public static bool EhPermitida(HttpContext http, IConfiguration config)
+    public static bool EhPermitida(HttpContext http, OrigensPermitidas extras)
     {
         var origem = http.Request.Headers.Origin.ToString();
         if (string.IsNullOrEmpty(origem)) return false;
@@ -20,10 +20,35 @@ public static class OrigemDaRequisicao
             return fetchSite.Length == 0 || fetchSite.Equals("same-origin", StringComparison.OrdinalIgnoreCase);
 
         // Origem extra da allowlist (ex.: SPA em outro subdomínio): o navegador marca same-site, nunca cross-site.
-        var extras = config.GetSection("Seguranca:OrigensPermitidas").Get<string[]>() ?? [];
-        return extras.Contains(origem, StringComparer.OrdinalIgnoreCase)
+        return extras.Contem(origem)
             && (fetchSite.Length == 0
                 || fetchSite.Equals("same-origin", StringComparison.OrdinalIgnoreCase)
                 || fetchSite.Equals("same-site", StringComparison.OrdinalIgnoreCase));
+    }
+}
+
+/// <summary>
+/// <c>Seguranca:OrigensPermitidas</c> normalizada UMA vez (singleton): esquema://host[:porta] em minúsculas, sem barra final e
+/// sem a porta padrão. Entrada que não é uma origem http(s) (esquema estranho, caminho, texto solto) é ignorada, em vez de
+/// virar uma regra que nunca casa ou, pior, uma que casa por engano. Antes a configuração era ligada a cada requisição.
+/// </summary>
+public sealed class OrigensPermitidas
+{
+    private readonly HashSet<string> _origens;
+
+    public OrigensPermitidas(IConfiguration config)
+        => _origens = (config.GetSection("Seguranca:OrigensPermitidas").Get<string[]>() ?? [])
+            .Select(Normalizar).OfType<string>().ToHashSet(StringComparer.Ordinal);
+
+    public bool Contem(string? origem) => Normalizar(origem) is { } n && _origens.Contains(n);
+
+    private static string? Normalizar(string? origem)
+    {
+        if (string.IsNullOrWhiteSpace(origem)) return null;
+        if (!Uri.TryCreate(origem.Trim(), UriKind.Absolute, out var uri)) return null;
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return null;
+        // Origem não tem caminho, consulta nem fragmento ("/" sozinho é a barra final).
+        if (uri.AbsolutePath != "/" || uri.Query.Length > 0 || uri.Fragment.Length > 0 || uri.UserInfo.Length > 0) return null;
+        return uri.GetLeftPart(UriPartial.Authority).ToLowerInvariant();
     }
 }

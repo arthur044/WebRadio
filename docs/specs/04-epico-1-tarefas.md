@@ -56,7 +56,7 @@ Redes (D19): `borda` (web) · `app` (web, api:8080; **subnet fixa** em `ipam`, u
 | `minio-init` | `cgr.dev/chainguard/minio-client` (**digest fixado**, D24) | dados | — | root + chaves de `svc-api`/`svc-worker` | one-shot: buckets `quarentena`, `midia`, `publico` + políticas JSON do S-A04/S-A05 + quota da quarentena |
 | `redis` | `redis:7-alpine` | dados | — | `REDIS_PASSWORD` | `redis-cli -a` lendo de arquivo `ping` |
 | `api` | build → `WebRadio.Api` | app, dados, playout | — | JWT, pepper, `Playout__Token(+Anterior)`, `DB_APP_PASSWORD`, `svc-api`, Redis, seed do Admin | `:8081/health/ready` |
-| `worker` | build → `WebRadio.Worker` | dados | — | `DB_APP_PASSWORD`, `svc-worker`, Redis (**sem** pepper nem JWT). Hoje o código só usa `DB_APP_PASSWORD`; ver B3-11 | arquivo de heartbeat em `tmpfs`, tocado a cada tick; o healthcheck confere a idade do arquivo (o Worker é host genérico, sem HTTP nem porta) |
+| `worker` | build → `WebRadio.Worker` | dados | — | `DB_APP_PASSWORD` **só** (B3-11): sem pepper, JWT, Redis nem MinIO; `redis_password` e `minio_worker_*` voltam quando um job do Worker precisar deles (Épico 4). `DOTNET_ENVIRONMENT` (host genérico, B3-04). `depends_on` só o `migrator` | arquivo de heartbeat em `tmpfs`, tocado a cada tick; o healthcheck confere a idade do arquivo (o Worker é host genérico, sem HTTP nem porta) |
 | `sanitizer` | `profiles: [sanitizacao]` no Épico 1 (imagem no Épico 4) | **`network_mode: none`** | — | **nenhum** | — |
 | `icecast` | build `infra/icecast` (Alpine, sem root) | playout, midia-borda | — | `ICECAST_SOURCE/ADMIN/RELAY_PASSWORD`, `ICECAST_ADMIN_USER` | `wget /status-json.xsl` |
 | `liquidsoap` | `savonet/liquidsoap` (tag 2.x fixada, conferir se roda sem root) | playout | 8005 só no `dev.yml` em `127.0.0.1`; em prod, só com allowlist/VPN (S-A08) | `ICECAST_SOURCE_PASSWORD`, `LIQUIDSOAP_HARBOR_PASSWORD`, `Playout__Token` | `GET http://icecast:8000/radio.mp3` responde 200 (o mount é `hidden`, S-A07, e não aparece no `status-json`; o Icecast só responde 200 com a fonte conectada) |
@@ -149,7 +149,7 @@ A pedido do dono do produto, o que falta do backend do Épico 1 entra por **feat
 |---|---|---|---|
 | **B1** | Runtime da API | F08, F09, F10, F12, `/usuarios` + coluna `seg.Usuario.VersaoSeguranca` (claim `sv`, complemento da F07; aceite: desativar, rebaixar ou trocar a senha → access token antigo responde 401 em até 15 s) | F07b (#16) |
 | **B2** | Worker e playout | F11, F14, F15, F16 (+ F18, que a F16 exigia). **Entregue no PR #29 (2026-10-13)** | B1 |
-| **B3** | CI e pendências | F17b, sobras do PR #14 (entrypoint do db-init, dependabot), LOWs das issues #10 e #19, pendências do review do PR #29 (lista abaixo). A F18 já entrou no B2 | B2 |
+| **B3** | CI e pendências | F17b, sobras do PR #14 (entrypoint do db-init, dependabot), LOWs das issues #10 e #19, pendências do review do PR #29 (lista abaixo), restante da F17: jobs `ddl-check`, `frontend` e `vulnerabilidades` (decisão do usuário em 13/10). A F18 já entrou no B2 | B2 |
 
 ### Pendências do review do PR #29 (entram no B3)
 

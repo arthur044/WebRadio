@@ -55,9 +55,9 @@ public sealed class AuthEndpoints : IEndpointModule
             .AllowAnonymous()
             .RequireRateLimiting(PoliticaRegistrar);
 
-        auth.MapPost("/refresh", async (HttpContext http, IMediator mediator, IIpHasher ipHasher, IEmissorDeTokens emissor, IConfiguration config, CancellationToken ct) =>
+        auth.MapPost("/refresh", async (HttpContext http, IMediator mediator, IIpHasher ipHasher, IEmissorDeTokens emissor, OrigensPermitidas origens, CancellationToken ct) =>
             {
-                if (!OrigemDaRequisicao.EhPermitida(http, config)) return Results.Problem(Proibido());
+                if (!OrigemDaRequisicao.EhPermitida(http, origens)) return Results.Problem(Proibido());
 
                 var token = http.Request.Cookies[CookieRefresh];
                 if (string.IsNullOrEmpty(token)) return SessaoInvalida(http);
@@ -89,9 +89,9 @@ public sealed class AuthEndpoints : IEndpointModule
             .AllowAnonymous()
             .RequireRateLimiting(PoliticaSessao);
 
-        auth.MapPost("/logout", async (HttpContext http, IMediator mediator, IConfiguration config, CancellationToken ct) =>
+        auth.MapPost("/logout", async (HttpContext http, IMediator mediator, OrigensPermitidas origens, CancellationToken ct) =>
             {
-                if (!OrigemDaRequisicao.EhPermitida(http, config)) return Results.Problem(Proibido());
+                if (!OrigemDaRequisicao.EhPermitida(http, origens)) return Results.Problem(Proibido());
 
                 await mediator.Send(new LogoutCommand(http.Request.Cookies[CookieRefresh]), ct);
                 ApagarCookie(http);
@@ -112,6 +112,7 @@ public sealed class AuthEndpoints : IEndpointModule
                 return Results.NoContent();
             })
             .RequireAuthorization()
+            .PermitirComTrocaDeSenhaPendente()
             .RequireRateLimiting(PoliticaTrocarSenha);
 
         auth.MapGet("/me", async (ClaimsPrincipal user, HttpContext http, IMediator mediator, CancellationToken ct) =>
@@ -121,7 +122,7 @@ public sealed class AuthEndpoints : IEndpointModule
             return Guid.TryParse(user.FindFirstValue("sub"), out var id)
                 ? Results.Ok(await mediator.Send(new MeQuery(id), ct))
                 : Results.Unauthorized();
-        }).RequireAuthorization();
+        }).RequireAuthorization().PermitirComTrocaDeSenhaPendente();
     }
 
     private static IResult RespostaDeSessao(HttpContext http, LoginResultado r, IEmissorDeTokens emissor)

@@ -87,12 +87,17 @@ validar_alfabeto_senha "DB_APP_PASSWORD" "$APP_PASSWORD"
 validar_alfabeto_senha "DB_MIGRATOR_PASSWORD" "$MIGRATOR_PASSWORD"
 validar_alfabeto_senha "DB_RELATORIO_PASSWORD" "$RELATORIO_PASSWORD"
 
+# Argumentos comuns. -N exige a conexão cifrada (gatilho iii do risco aceito: Encrypt=True fixo, sem depender do padrão do cliente) e -C aceita
+# o certificado autoassinado (mesmo risco aceito do migrator, Api e Worker; docs/conexao-sql-server.md §2). -l 30 = Connect Timeout da §4. O sqlcmd NÃO deixa trocar o Application Name (ele fixa program_name = SQLCMD, mesmo
+# com APP= num DSN): o db-init se identifica por -H, em sys.dm_exec_sessions.host_name = WebRadio.DbInit.
+SQLCMD_BASE=(-b -C -N -I -S "$DB_SERVER" -U sa -l 30 -H WebRadio.DbInit)
+
 # SQLCMDPASSWORD, nunca -P (S-A10): -P fica visível por inteiro em `ps aux` e em
 # `docker inspect` (args do processo), SQLCMDPASSWORD só existe no ambiente do processo.
 export SQLCMDPASSWORD="$SA_PASSWORD"
 
 echo "entrypoint: rodando init-db.sql (Ambiente=$AMBIENTE)..."
-sqlcmd -b -C -I -S "$DB_SERVER" -U sa -v Ambiente="$AMBIENTE" -i "$DIR_SQL/init-db.sql"
+sqlcmd "${SQLCMD_BASE[@]}" -v Ambiente="$AMBIENTE" -i "$DIR_SQL/init-db.sql"
 
 echo "entrypoint: rodando logins.sql..."
 # As senhas vão por ambiente (o sqlcmd resolve $(VAR) do ambiente), nunca por -v:
@@ -100,11 +105,11 @@ echo "entrypoint: rodando logins.sql..."
 DB_APP_PASSWORD="$APP_PASSWORD" \
 DB_MIGRATOR_PASSWORD="$MIGRATOR_PASSWORD" \
 DB_RELATORIO_PASSWORD="$RELATORIO_PASSWORD" \
-  sqlcmd -b -C -I -S "$DB_SERVER" -U sa -i "$DIR_SQL/logins.sql"
+  sqlcmd "${SQLCMD_BASE[@]}" -i "$DIR_SQL/logins.sql"
 
 if [[ "${SEED_DEV:-}" == "true" && "$AMBIENTE" == "Development" ]]; then
   echo "entrypoint: SEED_DEV=true em Development — rodando seed-dev.sql..."
-  sqlcmd -b -C -I -S "$DB_SERVER" -U sa \
+  sqlcmd "${SQLCMD_BASE[@]}" \
     -v Ambiente="$AMBIENTE" \
        Locutor1Email="locutor1@example.com" \
        Locutor2Email="locutor2@example.com" \

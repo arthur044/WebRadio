@@ -10,18 +10,30 @@
 # gerar-segredos.sh para a explicação completa do porquê.
 #
 # Uso:
-#   .\infra\scripts\gerar-segredos.ps1 -Modo dev    # secrets\ + .env de desenvolvimento
-#   .\infra\scripts\gerar-segredos.ps1 -Modo prod   # só secrets\
+#   .\infra\scripts\gerar-segredos.ps1 -Modo dev                                   # secrets\ + .env de desenvolvimento
+#   .\infra\scripts\gerar-segredos.ps1 -Modo prod -AdminEmail admin@radio.exemplo.br  # só secrets\
+#
+# Em prod o e-mail do Admin é obrigatório (um e-mail fixo e conhecido é metade da credencial, B3-10); em dev vale
+# admin@webradio.local. A pasta secrets\ fica com ACL restrita ao usuário atual e ao SYSTEM (equivale ao chmod 700 do .sh).
 # =============================================================================
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('dev', 'prod')]
-    [string]$Modo
+    [string]$Modo,
+
+    [string]$AdminEmail
 )
 
 $ErrorActionPreference = 'Stop'
 $DirRaiz = Resolve-Path (Join-Path $PSScriptRoot '..\..')
+
+if ($AdminEmail -and $AdminEmail -cnotmatch '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\z') {
+    throw 'E-mail do Admin inválido.'
+}
+if ($Modo -eq 'prod' -and -not $AdminEmail -and -not (Test-Path (Join-Path $DirRaiz 'secrets\seed_admin_email'))) {
+    throw 'Em prod informe o e-mail do Admin: -AdminEmail admin@seu-dominio.'
+}
 
 # RandomNumberGenerator.Fill (estatico) so existe em .NET Core/5+; Windows PowerShell 5.1
 # roda em .NET Framework, onde so RNGCryptoServiceProvider.GetBytes (instancia) existe.
@@ -80,6 +92,14 @@ $Receitas = [ordered]@{
 $DestinoDir = Join-Path $DirRaiz 'secrets'
 New-Item -ItemType Directory -Force -Path $DestinoDir | Out-Null
 
+# ACL: só o usuário atual e o SYSTEM entram em secrets\ (o .sh faz chmod 700). Remove a herança da pasta do repositório.
+# Só no Windows: em outros sistemas (o script também roda no PowerShell 7 do Linux/macOS) o icacls não existe.
+if ([Environment]::OSVersion.Platform -eq 'Win32NT') {
+    $usuario = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    & icacls.exe $DestinoDir /inheritance:r /grant:r "*${usuario}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "icacls falhou ao restringir a ACL de $DestinoDir." }
+}
+
 function Write-Secret {
     # Sem BOM e sem newline no fim: o .NET e o sqlcmd leriam qualquer byte a mais como parte da senha.
     param([string]$Arquivo, [string]$Valor)
@@ -101,7 +121,8 @@ foreach ($nome in $Receitas.Keys) {
 
 $emailPath = Join-Path $DestinoDir 'seed_admin_email'
 if (-not (Test-Path $emailPath)) {
-    Write-Secret -Arquivo $emailPath -Valor 'admin@webradio.local'
+    $email = if ($AdminEmail) { $AdminEmail } else { 'admin@webradio.local' }
+    Write-Secret -Arquivo $emailPath -Valor $email
 }
 
 Write-Host "secrets\: $criados segredo(s) novo(s); os que já existiam foram preservados."
