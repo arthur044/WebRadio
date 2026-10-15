@@ -68,7 +68,7 @@ Validação de horário: `inicioUtc`/`fimUtc` **precisam** terminar em `Z` (offs
 
 ### 4.1 Credencial de transmissão do locutor (Épico 2)
 
-Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin) e `DELETE /usuarios/{id}/credencial-transmissao` (Admin). O segredo só aparece na resposta do `POST`, com `Cache-Control: no-store`. Contrato completo em `06-epico-2-tarefas.md`.
+Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin; o `POST` exige `{ senhaAtual }`), `GET /credenciais-transmissao` e `DELETE /usuarios/{id}/credencial-transmissao` (Admin). O segredo só aparece na resposta do `POST`, com `Cache-Control: no-store`. `encerrar` e `cancelar` de `/programas` publicam `ProgramaStatusAlterado`. Contrato completo em `06-epico-2-tarefas.md`.
 
 ## 5. Pedidos de música — `/pedidos`
 
@@ -126,8 +126,8 @@ O grupo `/api/v1/internal` (e `/health/*`) tem um filtro de endpoint que exige `
 |---|---|---|
 | GET | `/internal/playout/proxima` | **200** `{ midiaId, pedidoId, url, titulo, artista }` (URL pré-assinada interna `http://minio:9000/midia/…`, 30 min) ou **204** |
 | POST | `/internal/playout/eventos` | `{ tipo: "FaixaIniciada", midiaId?, pedidoId?, titulo?, artista?, ocorridoEmUtc }` → 202. `midiaId` nulo = faixa da rotação local ou do ao vivo (só atualiza "tocando agora"). `titulo`/`artista` com até 200 caracteres, sem caracteres de controle (S-A09) |
-| POST | `/internal/harbor/auth` | **Épico 2**: `{ usuario, senha, enderecoIp }` do source client → 200/401. `usuario` é o **identificador opaco** da credencial de transmissão do locutor (nunca o e-mail) e `senha` é o segredo dela, não a senha da conta. Aceita só o locutor dono do programa `AoVivo` (S-A08). Contrato completo em `06-epico-2-tarefas.md` |
-| GET | `/internal/harbor/autorizacao/{identificador}` | **Épico 2**: 200 enquanto a autorização do `auth` valer; 403 quando deixar de valer (o Liquidsoap derruba o ao vivo). Ver `06` |
+| POST | `/internal/harbor/auth` | **Épico 2**: `{ usuario, senha, enderecoIp }` do source client → **200** `{ programaId, fimUtc }` ou 401. `usuario` é o **identificador opaco** da credencial de transmissão do locutor (nunca o e-mail) e `senha` é o segredo dela, não a senha da conta. Aceita só o locutor dono do programa cuja **janela** (`InicioUtc <= agora < FimUtc`, calculada no SQL) está em curso (S-A08). Contrato completo em `06-epico-2-tarefas.md` |
+| GET | `/internal/harbor/autorizacao/{identificador}` | **Épico 2**: **200** `{ programaId, fimUtc }` enquanto a autorização do `auth` valer; 403 quando deixar de valer (o Liquidsoap derruba o ao vivo). Ver `06` |
 | POST | `/internal/harbor/eventos` | **Épico 2**: `{ tipo: "Conectado" \| "Desconectado", identificador, ocorridoEmUtc }` → 202; publica `TransmissaoAoVivoAlterada`. Ver `06` |
 
 ## 10. SignalR — hub `/hubs/radio`

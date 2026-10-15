@@ -151,7 +151,7 @@ O proxy `/stream/` → `icecast:8000/` também publica `/stream/admin/*` (a `lis
 
 O harbor tem **prioridade máxima** no `fallback`. Quem tiver a senha substitui a programação inteira. O protocolo source do Icecast manda a senha em Basic auth sem TLS, ela é compartilhada por todos os locutores e não tem bloqueio de tentativas.
 - **Épico 1:** a senha tem ≥ 24 caracteres aleatórios. A porta 8005 é publicada **só** se houver transmissão ao vivo, e com lista de IPs permitidos no firewall do host (ou atrás de uma VPN como WireGuard/Tailscale). No override de dev, `127.0.0.1:8005`.
-- **Épico 2:** usar o `auth` do `input.harbor` com callback para a API (`POST /internal/harbor/auth`, na porta interna do S-A06), que valida **o login do próprio locutor** e só aceita se ele for o dono do programa `AoVivo` naquele momento. Essa rota é nova e precisa do Nexus. Avaliar TLS no harbor (o Liquidsoap 2.x suporta transporte TLS).
+- **Épico 2:** ~~validar o login do próprio locutor~~ — substituído pela decisão abaixo. O `auth` do `input.harbor` chama a API (`POST /internal/harbor/auth`, na porta interna do S-A06), que só aceita o locutor dono do programa cuja janela de horário está em curso.
 - **Decisão do Épico 2 (Nexus e dono do produto, 2026-10-15):** o harbor **não** usa o login do site. Cada locutor tem uma **credencial de transmissão** própria: identificador opaco (GUID, nunca o e-mail) e segredo aleatório de 256 bits, guardado só como `SHA-256(salt ‖ segredo)`, mostrado uma vez e revogável. A senha da conta nunca trafega pelo harbor, que continua sem TLS. Contrato e tarefas em `06-epico-2-tarefas.md` (E2-F04, E2-F05, E2-F07, E2-F08).
 - Registrar no log conexão e desconexão do harbor (quem, quando), sem registrar a senha.
 
