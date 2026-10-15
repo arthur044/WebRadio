@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using WebRadio.Application.Features.Programas;
@@ -202,6 +203,42 @@ public class ProgramasSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         Assert.False(string.IsNullOrEmpty(porId.Versao));
         var aoVivo = await new ProgramaAoVivoHandler(db).Handle(new ProgramaAoVivoQuery(), default);
         Assert.NotEqual(p.Id, aoVivo?.Id); // Agendado não é "ao vivo": quem muda o status é o Worker
+    }
+
+    // ---- L1: a trava de grade, de forma determinística ----
+
+    [SqlFact]
+    public async Task Criar_espera_a_trava_da_grade_e_depois_enxerga_o_programa_de_quem_a_segurava()
+    {
+        var locutor = await LocutorAsync();
+        var inicio = Dia().AddHours(9);
+
+        // Quem "ganhou a corrida": segura o sp_getapplock 'grade:programa' numa transação própria, exatamente como o handler faz.
+        await using var segura = new SqlConnection(banco.ConnectionString);
+        await segura.OpenAsync();
+        await using var tx = (SqlTransaction)await segura.BeginTransactionAsync();
+        await ExecutarAsync(segura, tx, "DECLARE @r int; EXEC @r = sp_getapplock @Resource = N'grade:programa', @LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = 5000; IF @r < 0 THROW 50001, N'sem trava', 1;");
+
+        var criar = CriarAsync(locutor, inicio, TimeSpan.FromHours(1), "Espera a trava");
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+
+        // Sem a trava o handler terminaria em milissegundos (e criaria o programa, sem ver o que ainda não foi confirmado): esta é a prova.
+        Assert.False(criar.IsCompleted, "o criar não esperou a trava da grade");
+
+        // Ainda segurando a trava: o programa conflitante é gravado e só então confirmado.
+        await ExecutarAsync(segura, tx, $"INSERT grade.Programa (Titulo, LocutorId, InicioUtc, FimUtc, Status) VALUES (N'Quem ganhou', '{locutor}', '{inicio:yyyy-MM-dd HH:mm:ss}', '{inicio.AddHours(1):yyyy-MM-dd HH:mm:ss}', 1)");
+        await tx.CommitAsync();
+
+        var e = await Assert.ThrowsAsync<ConflitoDeGradeException>(() => criar.WaitAsync(TimeSpan.FromSeconds(30)));
+        await using var db = _c.NovoDb();
+        Assert.Equal((await db.Programas.AsNoTracking().SingleAsync(p => p.Titulo == "Quem ganhou")).Id, e.ProgramaConflitanteId);
+        Assert.Equal(1, await db.Programas.CountAsync(p => p.InicioUtc == inicio)); // o 409 não deixou o "Espera a trava" entrar
+    }
+
+    private static async Task ExecutarAsync(SqlConnection conexao, SqlTransaction tx, string sql)
+    {
+        await using var cmd = new SqlCommand(sql, conexao, tx);
+        await cmd.ExecuteNonQueryAsync();
     }
 
     // ---- L2: Worker x encerrar/cancelar (RowVersion + ComUmaRepeticaoAsync) ----
