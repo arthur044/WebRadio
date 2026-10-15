@@ -106,18 +106,31 @@ public sealed class Programa : Entidade
         AtualizadoEmUtc = agora;
     }
 
-    /// <summary>Locutor dono ou Admin encerram um programa AoVivo antes do fim previsto.</summary>
+    /// <summary>
+    /// Locutor dono ou Admin encerram o programa antes do fim previsto. Vale para <c>AoVivo</c> e também para <c>Agendado</c>
+    /// cuja janela já começou (E2-F01): com o Worker parado o programa nunca passou para AoVivo, e o locutor que está no ar
+    /// precisa conseguir encerrar mesmo assim. <c>FimUtc = máx(agora, InicioUtc + 1 s)</c>, truncado ao segundo (a coluna é
+    /// <c>datetime2(0)</c>, que ARREDONDA): com <c>FimUtc = InicioUtc</c> o <c>CK_Programa_Intervalo</c> falharia no primeiro
+    /// segundo. Nunca estende a janela: depois do fim previsto, <c>FimUtc</c> não muda.
+    /// </summary>
     public void Encerrar(DateTime agora)
     {
         UtcGuard.Exigir(agora, nameof(agora));
-        GarantirStatus(StatusPrograma.AoVivo);
 
-        if (agora <= InicioUtc)
+        if (Status is not (StatusPrograma.AoVivo or StatusPrograma.Agendado))
+        {
+            throw new TransicaoInvalidaException($"Não é possível encerrar um programa {Status}.");
+        }
+
+        if (agora < InicioUtc)
         {
             throw new TransicaoInvalidaException("Não é possível encerrar um programa antes do próprio início.");
         }
 
-        FimUtc = agora;
+        var noSegundo = new DateTime(agora.Ticks - (agora.Ticks % TimeSpan.TicksPerSecond), DateTimeKind.Utc);
+        var novoFim = noSegundo > InicioUtc.AddSeconds(1) ? noSegundo : InicioUtc.AddSeconds(1);
+
+        FimUtc = novoFim < FimUtc ? novoFim : FimUtc;
         Status = StatusPrograma.Finalizado;
         AtualizadoEmUtc = agora;
     }

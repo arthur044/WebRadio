@@ -134,11 +134,74 @@ public class ProgramaTests
     }
 
     [Fact]
-    public void Encerrar_a_partir_de_Agendado_lanca_TransicaoInvalida()
+    public void Encerrar_um_Agendado_cuja_janela_ja_comecou_funciona_com_o_Worker_parado()
+    {
+        // E2-F01: o Worker não passou o programa para AoVivo (parado), mas a janela está em curso: encerrar vale.
+        var programa = Criar(inicio: Agora.AddMinutes(10), fim: Agora.AddHours(2), agora: Agora);
+
+        programa.Encerrar(Agora.AddMinutes(40));
+
+        Assert.Equal(StatusPrograma.Finalizado, programa.Status);
+        Assert.Equal(Agora.AddMinutes(40), programa.FimUtc);
+    }
+
+    [Fact]
+    public void Encerrar_um_Agendado_antes_do_inicio_lanca_TransicaoInvalida()
     {
         var programa = Criar(inicio: Agora.AddHours(1), fim: Agora.AddHours(2), agora: Agora);
 
-        Assert.Throws<TransicaoInvalidaException>(() => programa.Encerrar(Agora.AddHours(1).AddMinutes(1)));
+        Assert.Throws<TransicaoInvalidaException>(() => programa.Encerrar(Agora.AddMinutes(59)));
+    }
+
+    [Theory]
+    [InlineData(false)] // Agendado, Worker parado
+    [InlineData(true)]  // AoVivo
+    public void Encerrar_no_segundo_exato_do_inicio_deixa_FimUtc_um_segundo_depois_do_inicio(bool aoVivo)
+    {
+        // FimUtc = máx(agora, InicioUtc + 1 s): com FimUtc = InicioUtc o CK_Programa_Intervalo (Fim > Início) falharia.
+        var inicio = Agora.AddHours(1);
+        var programa = Criar(inicio: inicio, fim: inicio.AddHours(1), agora: Agora);
+        if (aoVivo) programa.IniciarAoVivo(inicio);
+
+        programa.Encerrar(inicio);
+
+        Assert.Equal(StatusPrograma.Finalizado, programa.Status);
+        Assert.Equal(inicio.AddSeconds(1), programa.FimUtc);
+        Assert.True(programa.FimUtc > programa.InicioUtc);
+    }
+
+    [Fact]
+    public void Encerrar_trunca_FimUtc_para_o_segundo_porque_a_coluna_e_datetime2_0()
+    {
+        // datetime2(0) ARREDONDA: 12:40:00.700 viraria 12:40:01, depois do "agora" de quem encerrou.
+        var programa = Criar(inicio: Agora, fim: Agora.AddHours(2), agora: Agora);
+        programa.IniciarAoVivo(Agora.AddMinutes(1));
+
+        programa.Encerrar(Agora.AddMinutes(40).AddMilliseconds(700));
+
+        Assert.Equal(Agora.AddMinutes(40), programa.FimUtc);
+    }
+
+    [Fact]
+    public void Encerrar_depois_do_fim_previsto_nao_estende_a_janela()
+    {
+        // Janela já vencida (Worker parado há tempo): encerrar finaliza, mas nunca aumenta FimUtc (o limite de 12 h e o
+        // histórico dependem dele).
+        var programa = Criar(inicio: Agora.AddMinutes(10), fim: Agora.AddMinutes(40), agora: Agora);
+
+        programa.Encerrar(Agora.AddHours(5));
+
+        Assert.Equal(StatusPrograma.Finalizado, programa.Status);
+        Assert.Equal(Agora.AddMinutes(40), programa.FimUtc);
+    }
+
+    [Fact]
+    public void Encerrar_a_partir_de_Cancelado_lanca_TransicaoInvalida()
+    {
+        var programa = Criar(inicio: Agora.AddHours(1), fim: Agora.AddHours(2), agora: Agora);
+        programa.Cancelar(Agora.AddMinutes(1));
+
+        Assert.Throws<TransicaoInvalidaException>(() => programa.Encerrar(Agora.AddHours(1).AddMinutes(5)));
     }
 
     [Fact]
@@ -148,15 +211,6 @@ public class ProgramaTests
         programa.FinalizarPorFimDeJanela(Agora.AddHours(1));
 
         Assert.Throws<TransicaoInvalidaException>(() => programa.Encerrar(Agora.AddHours(2)));
-    }
-
-    [Fact]
-    public void Encerrar_com_agora_antes_ou_igual_ao_inicio_lanca_TransicaoInvalida()
-    {
-        var programa = Criar(inicio: Agora, fim: Agora.AddHours(1), agora: Agora);
-        programa.IniciarAoVivo(Agora.AddMinutes(1));
-
-        Assert.Throws<TransicaoInvalidaException>(() => programa.Encerrar(Agora));
     }
 
     [Fact]
