@@ -100,6 +100,13 @@ jobs:
           --filter "Categoria!=Integracao"
           --logger "trx"
           --collect:"XPlat Code Coverage"
+          --results-directory "$RUNNER_TEMP/cobertura"
+
+      # Item 6 da Definição de Pronto (04): cobertura de linhas >= 80% em Domain e Application. Cada projeto de teste gera um
+      # relatório e o mesmo assembly aparece em vários (o Application roda também nos testes da Api): o script UNE as linhas
+      # cobertas antes de medir. Abaixo de 80% (ou sem relatório) o job falha.
+      - name: Cobertura (Domain e Application >= 80%)
+        run: python3 -I infra/scripts/verificar-cobertura.py "$RUNNER_TEMP/cobertura" --minimo 80 WebRadio.Domain WebRadio.Application
 
   # B3-01: o aceite da F11 (liderança, reeleição, manutenção em lotes) só existe contra SQL Server de verdade. Aqui os
   # [SqlFact] rodam com WEBRADIO_TEST_SQL apontando para um SQL Server do próprio job; se o servidor não responder o teste
