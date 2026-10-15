@@ -71,7 +71,8 @@ Máquina de estados:
 ```
 Agendado ──(worker: Inicio ≤ agora < Fim)──► AoVivo ──(worker: Fim ≤ agora)──► Finalizado
    │                                           │
-   │                                           └─(locutor dono/admin: Encerrar) ──► Finalizado (FimUtc = agora)
+   │                                           └─(locutor dono/admin: Encerrar) ──► Finalizado (FimUtc = mín(FimUtc, máx(agora, Inicio + 1 s)))
+   Encerrar também vale para Agendado cuja janela já começou (Worker parado); nunca estende a janela.
    ├──(worker: Fim ≤ agora, janela perdida)──► Finalizado
    └──(admin: Cancelar)──► Cancelado
 ```
