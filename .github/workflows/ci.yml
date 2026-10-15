@@ -436,10 +436,14 @@ jobs:
       - name: Build das imagens
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml build
 
-      - name: Subir e esperar healthy (DoD 1, < 3 min)
+      - name: Subir e esperar healthy (DoD 1, < 3 min), com o seed de dev ligado (E2-A03)
+        env:
+          SEED_DEV_DATA: "true"
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait --wait-timeout 180
 
-      - name: Smoke (DoD 2–4, 7, 8, isolamento de rede e topologia da base de produção)
+      - name: Smoke (DoD 2–4, 7, 8, isolamento de rede, topologia da base de produção e a semana de grade do seed)
+        env:
+          SMOKE_SEED_DEV: "1"
         run: infra/scripts/smoke-compose.sh
 
       # DoD 2: o player toca o /stream/radio.mp3 real (Liquidsoap -> Icecast -> nginx) sem pausar ao navegar entre Mural, Grade e

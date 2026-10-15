@@ -17,9 +17,7 @@ services:
     networks: [dados, diag-sql]
 
   db-init:
-    environment:
-      <<: *dev-env
-      SEED_DEV: "${SEED_DEV:-false}"
+    environment: *dev-env
 
   migrator:
     environment: *dev-env
@@ -36,6 +34,11 @@ services:
     environment:
       <<: *dev-env
       Seguranca__PermitirScannerNoOp: "true"
+      # Seed de dev pelo DevDataSeeder, no boot da Api (E2-A03): locutores, uma semana de grade e 3 divulgações. Desligado por
+      # padrão; ligue com SEED_DEV_DATA=true no `up`. A senha dos locutores vem do arquivo de segredo, nunca do YAML.
+      Seed__DevData: "${SEED_DEV_DATA:-false}"
+    secrets:
+      - { source: seed_dev_senha, target: Seed__DevSenha }
 
   worker:
     environment:
