@@ -86,6 +86,15 @@ else
 fi
 esperar "/auth/me sem token" 401 "$(status "$BASE/api/v1/auth/me")"
 
+if [[ "${SMOKE_SEED_DEV:-}" == "1" ]]; then
+  echo "== A03. seed de dev (SEED_DEV_DATA=true): a semana de grade criada pelo DevDataSeeder aparece na API pública"
+  de="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  ate="$(date -u -d '+10 days' +%Y-%m-%dT%H:%M:%SZ)"
+  grade="$(curl -s --max-time 10 "$BASE/api/v1/programas?deUtc=$de&ateUtc=$ate")"
+  sementes="$(python3 -I -c 'import json,sys; print(sum(1 for p in json.loads(sys.stdin.read()) if p["titulo"].startswith("[seed] ")))' <<<"$grade" 2>/dev/null || echo "?")"
+  esperar "programas do seed na grade dos próximos 10 dias" 7 "$sementes"
+fi
+
 echo "== 4. health só no :8081 e bypass do S-A06 pela :8080"
 ready="$("${COMPOSE[@]}" exec -T api wget -qO- http://127.0.0.1:8081/health/ready || true)"
 [[ "$ready" == *'"status":"Healthy"'* ]] && ok "/health/ready interno: Healthy" || falha "/health/ready interno: $ready"

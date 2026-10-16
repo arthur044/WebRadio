@@ -19,6 +19,9 @@ public static class Travas
 {
     /// <summary>Serializa tudo que conta ou altera Admins: o "último Admin ativo" só é confiável sob esta trava.</summary>
     public const string Admins = "seg:admins";
+
+    /// <summary>D7: serializa criar/editar programa. A consulta de interseção só vale sob esta trava (Fluxo A, passo 1).</summary>
+    public const string GradePrograma = "grade:programa";
 }
 
 /// <summary>
@@ -51,6 +54,12 @@ public static class EventosDoOutbox
 
     /// <summary>Carga <c>{ titulo, artista, iniciadoEmUtc }</c>: vai para todos os clientes do hub.</summary>
     public const string TocandoAgora = "TocandoAgora";
+
+    /// <summary>
+    /// Carga <c>{ programaId, titulo, status, locutorNome }</c> (02 §10): vai para todos. Gravado pelo Worker (início e fim por
+    /// horário, em SQL) e pelos comandos encerrar e cancelar (E2-F01); o <c>status</c> é o nome do enum.
+    /// </summary>
+    public const string ProgramaStatusAlterado = "ProgramaStatusAlterado";
 }
 
 /// <summary>

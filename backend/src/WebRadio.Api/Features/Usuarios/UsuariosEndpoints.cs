@@ -1,6 +1,4 @@
 using MediatR;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Net.Http.Headers;
 using WebRadio.Api.Infra;
 using WebRadio.Application.Features.Usuarios;
 using WebRadio.Domain.Enums;
@@ -37,21 +35,11 @@ public sealed class UsuariosEndpoints : IEndpointModule
 
         usuarios.MapPatch("/{id:guid}", async (Guid id, AlterarUsuarioRequest req, HttpContext http, IMediator mediator, CancellationToken ct) =>
         {
-            // 02, cabeçalho: sem If-Match → 428; If-Match que não é um RowVersion nosso é um valor divergente → 412.
-            var ifMatch = http.Request.Headers.IfMatch.ToString();
-            if (string.IsNullOrWhiteSpace(ifMatch))
-            {
-                return Results.Problem(new ProblemDetails
-                {
-                    Status = StatusCodes.Status428PreconditionRequired,
-                    Type = "/erros/precondicao-obrigatoria",
-                    Title = "Pré-condição obrigatória.",
-                    Detail = "Envie o cabeçalho If-Match com a versão lida do registro.",
-                });
-            }
+            // 02, cabeçalho: sem If-Match → 428; If-Match que não é um RowVersion nosso → 412 (ver PreCondicaoIfMatch).
+            var versao = PreCondicaoIfMatch.Exigir(http, out var faltou);
+            if (faltou is not null) return faltou;
 
-            var versao = VersaoDoIfMatch(ifMatch) ?? throw new VersaoDesatualizadaException();
-            return ComETag(http, await mediator.Send(new AlterarUsuarioCommand(id, req.Role, req.Ativo, versao), ct), StatusCodes.Status200OK);
+            return ComETag(http, await mediator.Send(new AlterarUsuarioCommand(id, req.Role, req.Ativo, versao!), ct), StatusCodes.Status200OK);
         });
 
         usuarios.MapPost("/{id:guid}/desbloquear-login", async (Guid id, IMediator mediator, CancellationToken ct) =>
@@ -66,16 +54,6 @@ public sealed class UsuariosEndpoints : IEndpointModule
         http.Response.Headers.ETag = $"\"{usuario.Versao}\"";
         SemCache(http);
         return Results.Json(usuario, statusCode: status);
-    }
-
-    /// <summary>Aceita um único ETag forte entre aspas (o que a API emite). Lista, <c>*</c>, <c>W/</c> ou base64 inválido → null.</summary>
-    private static byte[]? VersaoDoIfMatch(string ifMatch)
-    {
-        if (!EntityTagHeaderValue.TryParse(ifMatch, out var etag) || etag.IsWeak) return null;
-
-        var base64 = etag.Tag.ToString().Trim('"');
-        var bytes = new byte[base64.Length]; // base64 decodificado nunca é maior que o texto
-        return Convert.TryFromBase64String(base64, bytes, out var lidos) ? bytes[..lidos] : null;
     }
 
     // Dados pessoais de terceiros: nunca em cache de navegador nem de proxy.

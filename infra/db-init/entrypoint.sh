@@ -4,9 +4,9 @@
 # Autor: Forge · tarefa E1-F05 (D20) · docs/specs/04-epico-1-tarefas.md
 #
 # Serviço one-shot "db-init": o ÚNICO ponto do stack autenticado como SA
-# (S-A10). Roda infra/sql/init-db.sql, depois infra/sql/logins.sql e, só em
-# dev com SEED_DEV=true, infra/sql/seed-dev.sql. Idempotente: rodar 2x
-# seguidas não falha nem duplica nada (os próprios .sql garantem isso).
+# (S-A10). Roda infra/sql/init-db.sql e depois infra/sql/logins.sql. Idempotente: rodar 2x
+# seguidas não falha nem duplica nada (os próprios .sql garantem isso). O seed de dev (locutores, grade, divulgações)
+# NÃO é daqui: roda no boot da Api, depois do migrator, pelo DevDataSeeder (E2-A03).
 #
 # Contrato de segurança (docs/specs/05-seguranca-auditoria.md §5):
 #   - Toda senha entra por SQLCMDPASSWORD (conexão) ou variável de ambiente
@@ -18,12 +18,11 @@
 #     defesa de segundo nível para quem trocar uma senha à mão. Uma senha
 #     com aspa quebraria o CREATE LOGIN por substituição de texto do sqlcmd
 #     (logins.sql), e nenhuma checagem DENTRO do .sql pegaria isso a tempo.
-#   - -v Ambiente é OBRIGATÓRIO e sem valor padrão (init-db.sql e
-#     seed-dev.sql abortam sem ele — fail-closed).
+#   - -v Ambiente é OBRIGATÓRIO e sem valor padrão (init-db.sql aborta
+#     sem ele — fail-closed).
 #
 # Variáveis de ambiente esperadas:
 #   ASPNETCORE_ENVIRONMENT       'Development' ou 'Production' (obrigatória)
-#   SEED_DEV                     'true' para rodar seed-dev.sql (só em dev)
 #   MSSQL_SA_PASSWORD_FILE       caminho do segredo da SA (padrão: /run/secrets/mssql_sa_password)
 #   DB_APP_PASSWORD_FILE         (padrão: /run/secrets/db_app_password)
 #   DB_MIGRATOR_PASSWORD_FILE    (padrão: /run/secrets/db_migrator_password)
@@ -44,8 +43,8 @@ DB_APP_PASSWORD_FILE="${DB_APP_PASSWORD_FILE:-/run/secrets/db_app_password}"
 DB_MIGRATOR_PASSWORD_FILE="${DB_MIGRATOR_PASSWORD_FILE:-/run/secrets/db_migrator_password}"
 DB_RELATORIO_PASSWORD_FILE="${DB_RELATORIO_PASSWORD_FILE:-/run/secrets/db_relatorio_password}"
 
-# -v Ambiente é obrigatório aqui também (defesa em profundidade — init-db.sql e
-# seed-dev.sql já abortam sozinhos, mas falhar antes de tocar o sqlcmd é mais barato
+# -v Ambiente é obrigatório aqui também (defesa em profundidade — init-db.sql já
+# aborta sozinho, mas falhar antes de tocar o sqlcmd é mais barato
 # e dá um erro mais claro do que "variável não definida" do sqlcmd).
 if [[ "$AMBIENTE" != "Development" && "$AMBIENTE" != "Production" ]]; then
   echo "entrypoint: ASPNETCORE_ENVIRONMENT precisa ser Development ou Production (valor: '${AMBIENTE}'). Abortando." >&2
@@ -106,16 +105,5 @@ DB_APP_PASSWORD="$APP_PASSWORD" \
 DB_MIGRATOR_PASSWORD="$MIGRATOR_PASSWORD" \
 DB_RELATORIO_PASSWORD="$RELATORIO_PASSWORD" \
   sqlcmd "${SQLCMD_BASE[@]}" -i "$DIR_SQL/logins.sql"
-
-if [[ "${SEED_DEV:-}" == "true" && "$AMBIENTE" == "Development" ]]; then
-  echo "entrypoint: SEED_DEV=true em Development — rodando seed-dev.sql..."
-  sqlcmd "${SQLCMD_BASE[@]}" \
-    -v Ambiente="$AMBIENTE" \
-       Locutor1Email="locutor1@example.com" \
-       Locutor2Email="locutor2@example.com" \
-    -i "$DIR_SQL/seed-dev.sql"
-else
-  echo "entrypoint: seed-dev.sql pulado (SEED_DEV='${SEED_DEV:-}', Ambiente=$AMBIENTE)."
-fi
 
 echo "entrypoint: db-init concluído."

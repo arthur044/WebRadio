@@ -85,7 +85,6 @@ services:
     entrypoint: ["/bin/bash", "/init/db-init/entrypoint.sh"]
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      SEED_DEV: "false"
       DB_SERVER: sqlserver
       PATH: "/opt/mssql-tools18/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     secrets: [mssql_sa_password, db_app_password, db_migrator_password, db_relatorio_password]
@@ -379,3 +378,5 @@ secrets:
   liquidsoap_harbor_password: { file: ./secrets/liquidsoap_harbor_password }
   seed_admin_email: { file: ./secrets/seed_admin_email }
   seed_admin_senha: { file: ./secrets/seed_admin_senha }
+  # Só o docker-compose.dev.yml o monta (Seed__DevSenha, DevDataSeeder); a base de produção não o usa.
+  seed_dev_senha: { file: ./secrets/seed_dev_senha }

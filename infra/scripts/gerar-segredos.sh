@@ -113,6 +113,7 @@ minio_worker_access_key=HEX:20
 minio_worker_secret_key=B64:30
 redis_password=B64:32
 seed_admin_senha=B64:18
+seed_dev_senha=B64:18
 LISTA
 }
 

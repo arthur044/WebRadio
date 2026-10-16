@@ -24,7 +24,7 @@ public class SeedersTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
     public async Task DevDataSeeder_fora_de_Development_falha_alto_e_nao_cria_nada(string ambiente)
     {
         var seeder = new DevDataSeeder(null!, null!, null!,
-            Config(("Seed:DevData", "true"), ("Seed:DevSenha", "senha-de-dev-1234")), new Ambiente(ambiente), NullLogger<DevDataSeeder>.Instance);
+            Config(("Seed:DevData", "true"), ("Seed:DevSenha", "senha-de-dev-1234")), new Ambiente(ambiente), NullLogger<DevDataSeeder>.Instance, null!);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.ExecutarAsync(default));
     }
@@ -159,9 +159,7 @@ public class SeedersTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
     public async Task DevDataSeeder_cria_os_dois_locutores_so_com_DevData_e_e_idempotente()
     {
         var c = new Cenario(banco);
-        DevDataSeeder Novo(bool ligado) => new(c.NovoDb(), c.Hasher, c.Relogio,
-            Config(("Seed:DevData", ligado ? "true" : "false"), ("Seed:DevSenha", "senha-de-dev-1234")), new Ambiente("Development"),
-            NullLogger<DevDataSeeder>.Instance);
+        DevDataSeeder Novo(bool ligado) => DevDataSeederTests.Novo(c, ligado);
 
         await Novo(false).ExecutarAsync(default);
         await using (var db = c.NovoDb())

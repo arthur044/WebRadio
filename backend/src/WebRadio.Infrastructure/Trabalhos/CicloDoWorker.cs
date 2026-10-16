@@ -29,12 +29,14 @@ public sealed class CicloOptions
 /// <summary>
 /// E1-F11: laço de 10 s (<c>PeriodicTimer</c>). TODO worker, líder ou não, toca o heartbeat a cada tick; só o LÍDER dispara
 /// os jobs — por enquanto a manutenção diária. O job roda fora do tick: um lote longo não atrasa o heartbeat (o
-/// healthcheck acusaria worker morto) e nunca há dois jobs ao mesmo tempo. As transições da grade, a expiração de
-/// pedidos e a sanitização entram aqui nos próximos épicos.
+/// healthcheck acusaria worker morto) e nunca há dois jobs ao mesmo tempo. As transições da grade (E2-F03) rodam a CADA tick
+/// do líder, em paralelo à manutenção (cada uma com a própria vaga); a expiração de pedidos e a sanitização entram aqui nos
+/// próximos épicos.
 /// </summary>
 public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory escopos, IClock clock, CicloOptions opcoes,
     ILogger<CicloDoWorker> logger) : BackgroundService
 {
+    private int _falhasDasTransicoes;
     private DateTime? _ultimaManutencaoUtc;
     private DateTime? _proximaTentativaUtc;
     private int _falhasDaManutencao;
@@ -49,6 +51,7 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var job = Task.CompletedTask;
+        var transicoes = Task.CompletedTask;
         using var timer = new PeriodicTimer(opcoes.Intervalo);
         try
         {
@@ -58,6 +61,8 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
                 Heartbeat();
                 if (lideranca.EhLider && job.IsCompleted && ManutencaoDevida())
                     job = ManterAsync(stoppingToken);
+                if (lideranca.EhLider && transicoes.IsCompleted)
+                    transicoes = TransicionarAsync(stoppingToken);
             } while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -67,6 +72,36 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
         finally
         {
             await job; // ManterAsync nunca lança: só espera o lote em curso perceber o cancelamento
+            await transicoes; // idem
+        }
+    }
+
+    /// <summary>
+    /// E2-F03. Cada tick do líder: dois UPDATEs baratos, sem recuo (o próximo ciclo é em 10 s). Falha não derruba o laço; o erro (com
+    /// a stack) sai UMA vez por sequência de falhas, as seguintes saem como aviso curto, e o retorno é registrado.
+    /// </summary>
+    private async Task TransicionarAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var escopo = escopos.CreateAsyncScope();
+            var r = await escopo.ServiceProvider.GetRequiredService<ITransicoesDaGrade>().ExecutarAsync(ct);
+            var falhas = Interlocked.Exchange(ref _falhasDasTransicoes, 0);
+            if (falhas > 0) logger.LogInformation("WORKER_TRANSICOES: voltou a funcionar depois de {Falhas} falha(s) seguida(s).", falhas);
+            if (r.Iniciados + r.Finalizados > 0)
+                logger.LogInformation("WORKER_TRANSICOES: {Iniciados} programa(s) ao vivo e {Finalizados} finalizado(s).", r.Iniciados, r.Finalizados);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // parada normal do host
+        }
+        catch (Exception e)
+        {
+            if (_falhasDasTransicoes == 0)
+                logger.LogError(e, "WORKER_TRANSICOES: falhou; tenta de novo no próximo ciclo e só repete o erro depois que voltar a funcionar.");
+            else
+                logger.LogWarning("WORKER_TRANSICOES: segue falhando ({Tipo}).", e.GetType().Name);
+            Interlocked.Increment(ref _falhasDasTransicoes);
         }
     }
 
