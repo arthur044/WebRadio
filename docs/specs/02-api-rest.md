@@ -62,7 +62,7 @@ Claims do JWT: `sub` (id), `name`, `role`, `jti`, `iat`, `exp`; `iss = webradio-
 | POST | `/programas` | Admin | `{ titulo, descricao?, locutorId, inicioUtc, fimUtc }` → **201** + `Location`; **409** conflito de grade |
 | PUT | `/programas/{id}` | Admin | mesmo corpo + `If-Match`; só `Agendado` |
 | POST | `/programas/{id}/cancelar` | Admin | → 200; só `Agendado` |
-| POST | `/programas/{id}/encerrar` | Locutor dono / Admin | → 200; só `AoVivo`; `fimUtc` passa a ser agora |
+| POST | `/programas/{id}/encerrar` | Locutor dono / Admin | → 200; vale para `AoVivo` e para `Agendado` cuja janela já começou; `fimUtc = mín(fimUtc, máx(agora truncado ao segundo, inicioUtc + 1 s))` (nunca estende); publica `ProgramaStatusAlterado`; Locutor que não é o dono → **403** |
 
 Validação de horário: `inicioUtc`/`fimUtc` **precisam** terminar em `Z` (offset ≠ 0 → 400). O frontend converte o horário local para UTC antes de enviar.
 
