@@ -306,9 +306,27 @@ public class CicloDoWorkerTests : IDisposable
         }
     }
 
+    private sealed class TransicoesFalsas : ITransicoesDaGrade
+    {
+        private int _execucoes;
+
+        public int Execucoes => Volatile.Read(ref _execucoes);
+        public volatile bool Falhar;
+        public TaskCompletionSource? Segurar { get; set; }
+
+        public async Task<ResultadoDasTransicoes> ExecutarAsync(CancellationToken ct)
+        {
+            Interlocked.Increment(ref _execucoes);
+            if (Segurar is { } segurar) await segurar.Task.WaitAsync(ct);
+            if (Falhar) throw new InvalidOperationException("banco fora do ar (simulado)");
+            return new ResultadoDasTransicoes(0, 0);
+        }
+    }
+
     private readonly string _pasta = Directory.CreateTempSubdirectory("webradio-worker-").FullName;
     private readonly LiderancaFalsa _lideranca = new();
     private readonly ManutencaoFalsa _manutencao = new();
+    private readonly TransicoesFalsas _transicoes = new();
     private readonly RelogioFalso _relogio = new(new DateTime(2026, 10, 13, 12, 0, 0, DateTimeKind.Utc));
 
     private string Heartbeat => Path.Combine(_pasta, "heartbeat");
@@ -323,7 +341,7 @@ public class CicloDoWorkerTests : IDisposable
 
     private CicloDoWorker Novo(string? arquivo = null, Microsoft.Extensions.Logging.ILogger<CicloDoWorker>? log = null)
     {
-        var servicos = new ServiceCollection().AddScoped<IManutencao>(_ => _manutencao).BuildServiceProvider();
+        var servicos = new ServiceCollection().AddScoped<IManutencao>(_ => _manutencao).AddScoped<ITransicoesDaGrade>(_ => _transicoes).BuildServiceProvider();
         var opcoes = new CicloOptions
         {
             Intervalo = TimeSpan.FromMilliseconds(40),
@@ -445,6 +463,59 @@ public class CicloDoWorkerTests : IDisposable
 
         // 4 falhas seguidas = 1 erro (com a stack); as demais saem sem repetir o erro.
         Assert.Single(log.Linhas, l => l.Nivel >= Microsoft.Extensions.Logging.LogLevel.Error);
+    }
+
+    [Fact]
+    public async Task Lider_roda_as_transicoes_da_grade_a_cada_tick_e_quem_nao_e_lider_nao()
+    {
+        using var semLider = Novo();
+        await semLider.StartAsync(default);
+        Assert.True(await Espera.Ate(() => semLider.Ciclos >= 5, TimeSpan.FromSeconds(10)));
+        await semLider.StopAsync(default);
+        Assert.Equal(0, _transicoes.Execucoes);
+
+        _lideranca.Lider = true;
+        using var ciclo = Novo();
+        await ciclo.StartAsync(default);
+        Assert.True(await Espera.Ate(() => _transicoes.Execucoes >= 4, TimeSpan.FromSeconds(10)));
+        await ciclo.StopAsync(default);
+    }
+
+    [Fact]
+    public async Task Transicao_demorada_nao_segura_o_heartbeat_nem_roda_em_dobro()
+    {
+        _lideranca.Lider = true;
+        _transicoes.Segurar = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var ciclo = Novo();
+        await ciclo.StartAsync(default);
+        Assert.True(await Espera.Ate(() => _transicoes.Execucoes == 1, TimeSpan.FromSeconds(10)));
+        var antes = ciclo.Ciclos;
+        var marca = File.GetLastWriteTimeUtc(Heartbeat);
+
+        Assert.True(await Espera.Ate(() => ciclo.Ciclos >= antes + 5 && File.GetLastWriteTimeUtc(Heartbeat) > marca, TimeSpan.FromSeconds(10)));
+        Assert.Equal(1, _transicoes.Execucoes); // a primeira ainda não terminou: não há segunda em paralelo
+
+        _transicoes.Segurar.SetResult();
+        await ciclo.StopAsync(default);
+    }
+
+    [Fact]
+    public async Task Falha_nas_transicoes_nao_derruba_o_laco_gera_um_unico_erro_e_o_retorno_e_registrado()
+    {
+        _lideranca.Lider = true;
+        _transicoes.Falhar = true;
+        var log = new LoggerDeTeste<CicloDoWorker>();
+        using var ciclo = Novo(log: log);
+        await ciclo.StartAsync(default);
+
+        // Tenta de novo a cada ciclo (são só dois UPDATEs baratos), mas o log não se repete: um erro por sequência de falhas.
+        Assert.True(await Espera.Ate(() => _transicoes.Execucoes >= 5, TimeSpan.FromSeconds(10)));
+        Assert.Single(log.Linhas, l => l.Nivel >= Microsoft.Extensions.Logging.LogLevel.Error && l.Texto.Contains("WORKER_TRANSICOES"));
+
+        _transicoes.Falhar = false;
+        Assert.True(await Espera.Ate(() => log.Linhas.Any(l => l.Nivel == Microsoft.Extensions.Logging.LogLevel.Information && l.Texto.Contains("WORKER_TRANSICOES")), TimeSpan.FromSeconds(10)));
+        await ciclo.StopAsync(default);
+        Assert.Single(log.Linhas, l => l.Nivel >= Microsoft.Extensions.Logging.LogLevel.Error && l.Texto.Contains("WORKER_TRANSICOES"));
     }
 
     [Fact]
@@ -571,5 +642,6 @@ public class ConexaoDoBancoTests
         Assert.Equal(2, provedor.GetServices<Microsoft.Extensions.Hosting.IHostedService>().Count());
         using var escopo = provedor.CreateScope();
         Assert.IsType<Manutencao>(escopo.ServiceProvider.GetRequiredService<IManutencao>());
+        Assert.IsType<TransicoesDaGrade>(escopo.ServiceProvider.GetRequiredService<ITransicoesDaGrade>());
     }
 }

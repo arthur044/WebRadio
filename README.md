@@ -74,7 +74,7 @@ webradio/
 │   ├── scripts/                   # gerar-segredos.sh/.ps1, smoke-compose.sh
 │   ├── db-init/                   # entrypoint do one-shot que cria banco e logins
 │   ├── migrator/                  # entrypoint do one-shot que aplica as migrations
-│   ├── sql/                       # init-db.sql, logins.sql, seed-dev.sql
+│   ├── sql/                       # init-db.sql, logins.sql
 │   ├── nginx/                     # default.conf.template (gateway)
 │   ├── icecast/                   # Dockerfile, icecast.xml.template
 │   ├── liquidsoap/                # radio.liq, playlist de teste

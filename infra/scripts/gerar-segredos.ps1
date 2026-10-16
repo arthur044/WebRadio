@@ -87,6 +87,7 @@ $Receitas = [ordered]@{
     'minio_worker_secret_key'    = { New-StrongSecret -Bytes 30 }
     'redis_password'             = { New-StrongSecret -Bytes 32 }
     'seed_admin_senha'           = { New-StrongSecret -Bytes 18 }
+    'seed_dev_senha'             = { New-StrongSecret -Bytes 18 }
 }
 
 $DestinoDir = Join-Path $DirRaiz 'secrets'

@@ -32,6 +32,7 @@ public static class WorkerServiceCollectionExtensions
         services.AddSingleton<ILideranca>(sp => sp.GetRequiredService<LiderancaDoWorker>());
         services.AddHostedService(sp => sp.GetRequiredService<LiderancaDoWorker>());
         services.AddScoped<IManutencao, Manutencao>();
+        services.AddScoped<ITransicoesDaGrade, TransicoesDaGrade>();
         services.AddHostedService<CicloDoWorker>();
         return services;
     }
