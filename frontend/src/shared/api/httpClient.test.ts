@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAuthStore } from './authStore'
-import { apiFetch } from './httpClient'
+import { apiFetch, apiFetchComEtag } from './httpClient'
 
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -130,5 +130,69 @@ describe('apiFetch — single-flight de refresh (S-M10)', () => {
     await expect(apiFetch('/pedidos/meus')).rejects.toMatchObject({ status: 401 })
     expect(calls()).toBe(1)
     expect(useAuthStore.getState().accessToken).toBeNull()
+  })
+})
+
+describe('apiFetchComEtag', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('devolve o corpo e o ETag da resposta', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ id: 'p1' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', ETag: '"AAAAAAAAB9E="' },
+          }),
+      ),
+    )
+
+    const { data, etag } = await apiFetchComEtag<{ id: string }>('/programas/p1')
+
+    expect(data).toEqual({ id: 'p1' })
+    expect(etag).toBe('"AAAAAAAAB9E="')
+  })
+
+  it('etag é null quando a resposta não traz o cabeçalho', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { id: 'p1' })),
+    )
+
+    expect((await apiFetchComEtag('/programas/p1')).etag).toBeNull()
+  })
+
+  it('repassa o If-Match recebido nos headers (o PUT da edição)', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse(200, {}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await apiFetchComEtag('/programas/p1', {
+      method: 'PUT',
+      headers: { 'If-Match': '"AAAAAAAAB9E="' },
+      body: { titulo: 'x' },
+    })
+
+    const init = fetchMock.mock.calls[0][1]!
+    expect(new Headers(init.headers).get('If-Match')).toBe('"AAAAAAAAB9E="')
+    expect(init.method).toBe('PUT')
+  })
+
+  it('erro HTTP vira ApiError, como no apiFetch', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(412, { type: '/erros/versao-desatualizada', title: 'Versão desatualizada.' }),
+      ),
+    )
+
+    await expect(
+      apiFetchComEtag('/programas/p1', { method: 'PUT', body: {} }),
+    ).rejects.toMatchObject({
+      status: 412,
+      problem: { type: '/erros/versao-desatualizada' },
+    })
   })
 })

@@ -34,6 +34,22 @@ export interface ProgramaDto {
   status: ProgramaStatus
 }
 
+/** `GET /usuarios` (Admin): `UsuarioDto & { ativo, criadoEmUtc, versao }` (02-api-rest.md §3). */
+export interface UsuarioAdminDto extends UsuarioDto {
+  ativo: boolean
+  criadoEmUtc: string
+  versao: string
+}
+
+/** Corpo de `POST /programas` e de `PUT /programas/{id}` (02-api-rest.md §4). */
+export interface ProgramaRequest {
+  titulo: string
+  descricao: string | null
+  locutorId: string
+  inicioUtc: string
+  fimUtc: string
+}
+
 export type PedidoStatus = 'Pendente' | 'Aprovado' | 'Rejeitado' | 'Tocado' | 'Expirado'
 
 export interface PedidoDto {

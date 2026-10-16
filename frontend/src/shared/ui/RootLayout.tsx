@@ -51,12 +51,15 @@ function AuthNavItem() {
 export function RootLayout() {
   useSessionRestore()
   useRealtimeHub()
+  const role = useAuthStore((s) => s.usuario?.role)
+  // A administração da grade só aparece no menu para quem pode usá-la (a rota também é guardada).
+  const itens = role === 'Admin' ? [...navItems, { to: '/admin/grade', label: 'Admin' }] : navItems
 
   return (
     <div className="bg-surface text-text flex min-h-svh flex-col">
       <header className="border-border border-b">
         <nav className="mx-auto flex max-w-4xl items-center gap-1 px-4 py-3" aria-label="Principal">
-          {navItems.map((item) => (
+          {itens.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
