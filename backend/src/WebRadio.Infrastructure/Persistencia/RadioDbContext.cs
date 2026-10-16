@@ -5,6 +5,7 @@ using WebRadio.Domain.Autenticacao;
 using WebRadio.Domain.Grade;
 using WebRadio.Domain.Interacao;
 using WebRadio.Domain.Midia;
+using WebRadio.Domain.Transmissao;
 using WebRadio.Domain.Usuarios;
 using WebRadio.Infrastructure.Persistencia.Outbox;
 
@@ -16,6 +17,8 @@ public sealed class RadioDbContext(DbContextOptions<RadioDbContext> options) : D
     public DbSet<Usuario> Usuarios => Set<Usuario>();
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+
+    public DbSet<CredencialTransmissao> CredenciaisTransmissao => Set<CredencialTransmissao>();
 
     public DbSet<Programa> Programas => Set<Programa>();
 

@@ -554,6 +554,53 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                     b.ToTable("Reproducao", "midia");
                 });
 
+            modelBuilder.Entity("WebRadio.Domain.Transmissao.CredencialTransmissao", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()", "DF_CredencialTransmissao_Id");
+
+                    b.Property<DateTime>("CriadaEmUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2(3)")
+                        .HasDefaultValueSql("SYSUTCDATETIME()", "DF_CredencialTransmissao_CriadaEmUtc");
+
+                    b.Property<Guid>("Identificador")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RevogadaEmUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<byte[]>("Salt")
+                        .IsRequired()
+                        .HasColumnType("binary(16)");
+
+                    b.Property<byte[]>("SegredoHash")
+                        .IsRequired()
+                        .HasColumnType("binary(32)");
+
+                    b.Property<DateTime?>("UltimoUsoEmUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id")
+                        .HasName("PK_CredencialTransmissao");
+
+                    b.HasIndex("Identificador")
+                        .IsUnique()
+                        .HasDatabaseName("UX_CredencialTransmissao_Identificador");
+
+                    b.HasIndex("UsuarioId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_CredencialTransmissao_Ativa")
+                        .HasFilter("[RevogadaEmUtc] IS NULL");
+
+                    b.ToTable("CredencialTransmissao", "seg");
+                });
+
             modelBuilder.Entity("WebRadio.Domain.Usuarios.Usuario", b =>
                 {
                     b.Property<Guid>("Id")
@@ -774,6 +821,16 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                         .HasForeignKey("ProgramaId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("FK_Reproducao_Programa");
+                });
+
+            modelBuilder.Entity("WebRadio.Domain.Transmissao.CredencialTransmissao", b =>
+                {
+                    b.HasOne("WebRadio.Domain.Usuarios.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("UsuarioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_CredencialTransmissao_Usuario");
                 });
 #pragma warning restore 612, 618
         }

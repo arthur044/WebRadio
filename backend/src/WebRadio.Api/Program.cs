@@ -26,7 +26,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);
 
 // Serilog JSON; request logging registra o path SEM a query string (S-M09: access_token na query do hub).
-builder.Host.UseSerilog((ctx, cfg) => cfg
+// ReadFrom.Services: sinks extras registrados no DI (os testes capturam os logs da requisição por ele).
+builder.Host.UseSerilog((ctx, services, cfg) => cfg
+    .ReadFrom.Services(services)
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
     // Cada comando SQL sairia como Information (texto do SQL a cada request e a cada tick do outbox).

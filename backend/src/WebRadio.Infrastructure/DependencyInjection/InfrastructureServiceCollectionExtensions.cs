@@ -8,6 +8,7 @@ using StackExchange.Redis;
 using WebRadio.Infrastructure.Armazenamento;
 using WebRadio.Infrastructure.Triagem;
 using WebRadio.Infrastructure.Persistencia;
+using WebRadio.Infrastructure.Persistencia.Eventos;
 using WebRadio.Infrastructure.Persistencia.Outbox;
 using WebRadio.Infrastructure.Playout;
 using WebRadio.Application.Features.Playout;
@@ -59,8 +60,8 @@ public static class InfrastructureServiceCollectionExtensions
 
     /// <summary>O <see cref="RadioDbContext"/> com a mesma configuração para a Api e para o Worker.</summary>
     internal static IServiceCollection AddRadioDbContext(this IServiceCollection services, string connectionString) =>
-        services.AddDbContext<RadioDbContext>(options =>
-            options.UseSqlServer(connectionString, sql =>
+        services.AddScoped<DespachanteDeEventosDeDominio>().AddDbContext<RadioDbContext>((escopo, options) =>
+            options.ComEventosDeDominio(escopo).UseSqlServer(connectionString, sql =>
             {
                 // ATENÇÃO: com EnableRetryOnFailure o EF recusa transações manuais (BeginTransaction) fora de uma
                 // execution strategy ("does not support user-initiated transactions"). Todo fluxo que abre

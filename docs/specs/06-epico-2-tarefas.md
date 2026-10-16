@@ -35,7 +35,7 @@
 
 ## Contratos novos e alterados
 
-Esta seção é o contrato. O `02-api-rest.md` é atualizado no mesmo PR desta spec. O DDL entra no `03` **no mesmo commit da migration**, no PR B2 (o job `ddl-check` compara o `03` com as migrations e falharia antes disso); nesse mesmo PR, o bloco de DDL abaixo vira um ponteiro para o `03` §3.1, para não haver duas fontes.
+Esta seção é o contrato. O `02-api-rest.md` é atualizado no mesmo PR desta spec. O DDL entra no `03` **no mesmo commit da migration**, no PR B2 (o job `ddl-check` compara o `03` com as migrations e falharia antes disso); nesse mesmo PR, o bloco de DDL que ficava aqui virou um ponteiro para o `03` §3.1, para não haver duas fontes.
 
 ### Credencial de transmissão (S-A08, decisão de 2026-10-15)
 
@@ -49,28 +49,7 @@ Esta seção é o contrato. O `02-api-rest.md` é atualizado no mesmo PR desta s
 - **Revogação automática**: desativar a conta, trocar a senha da conta ou mudar o papel para `Ouvinte` revoga a credencial. Troca entre `Admin` e `Locutor` **não** revoga (os dois podem transmitir). O gatilho é o evento `UsuarioCredenciaisAlteradas`, filtrado pelo motivo no handler.
 - **Não é o login do site.** A senha da conta nunca trafega pelo harbor. Vazar a credencial de transmissão permite, no máximo, transmitir na janela do programa daquele locutor, e o locutor ou o Admin a revoga na hora (o ao vivo cai em até 15 s: consulta a cada 10 s mais o timeout de 5 s).
 
-DDL proposto (entra no `03` §3.1 e na migration no B2; aprovado pelo Atlas no PR #38):
-
-```sql
-/* ---------- 3.1 seg.CredencialTransmissao (Épico 2, S-A08) ---------- */
-CREATE TABLE seg.CredencialTransmissao (
-    Id               uniqueidentifier NOT NULL CONSTRAINT DF_CredencialTransmissao_Id DEFAULT NEWSEQUENTIALID(),
-    UsuarioId        uniqueidentifier NOT NULL,
-    Identificador    uniqueidentifier NOT NULL,          -- o "usuário" do source client; Guid.NewGuid(), opaco
-    SegredoHash      binary(32)       NOT NULL,          -- SHA-256(salt || ASCII dos 43 caracteres)
-    Salt             binary(16)       NOT NULL,
-    CriadaEmUtc      datetime2(3)     NOT NULL CONSTRAINT DF_CredencialTransmissao_CriadaEmUtc DEFAULT SYSUTCDATETIME(),
-    RevogadaEmUtc    datetime2(3)     NULL,
-    UltimoUsoEmUtc   datetime2(3)     NULL,
-    CONSTRAINT PK_CredencialTransmissao PRIMARY KEY CLUSTERED (Id),
-    CONSTRAINT FK_CredencialTransmissao_Usuario FOREIGN KEY (UsuarioId) REFERENCES seg.Usuario (Id) ON DELETE CASCADE
-);
-CREATE UNIQUE INDEX UX_CredencialTransmissao_Identificador ON seg.CredencialTransmissao (Identificador);
--- Uma credencial ativa por locutor.
-CREATE UNIQUE INDEX UX_CredencialTransmissao_Ativa ON seg.CredencialTransmissao (UsuarioId) WHERE RevogadaEmUtc IS NULL;
-```
-
-Notas do Atlas para a migration: nomes explícitos no EF (`HasConstraintName` na FK, `HasDatabaseName` nos dois índices, filtro `[RevogadaEmUtc] IS NULL`); se a `ForeignKeyIndexConvention` do EF gerar um `IX_CredencialTransmissao_UsuarioId`, o `03` espelha exatamente o que `dotnet ef migrations script` gerar. **Não** acrescentar `CHECK (RevogadaEmUtc >= CriadaEmUtc)`: os dois relógios são diferentes (SQL e `IClock`) e a revogação falharia com erro 547.
+DDL: `docs/specs/03-schema-sqlserver.sql` §3.1 (`seg.CredencialTransmissao`), aplicado pela migration `CredencialTransmissao` no mesmo commit (aprovado pelo Atlas no PR #38, E2-A01). O `03` é a única fonte: o bloco que estava aqui saiu no B2. Sem `CHECK (RevogadaEmUtc >= CriadaEmUtc)`: os dois relógios são diferentes (SQL e `IClock`) e a revogação falharia com erro 547.
 
 ### Autorização do ao vivo: pela janela, não pelo `Status`
 
