@@ -5,6 +5,8 @@ using WebRadio.Application.Features.Harbor;
 
 namespace WebRadio.Api.Features.Harbor;
 
+public sealed record HarborEventoRequest(string? Tipo, string? Identificador, DateTime? OcorridoEmUtc);
+
 public sealed record HarborAuthRequest(string? Usuario, string? Senha, string? EnderecoIp)
 {
     public override string ToString() => nameof(HarborAuthRequest);
@@ -32,6 +34,12 @@ public sealed class HarborEndpoints : IEndpointModule
             await mediator.Send(new AutorizacaoDoHarborQuery(identificador), ct) is { } janela
                 ? Results.Ok(new { programaId = janela.ProgramaId, fimUtc = janela.FimUtc })
                 : SemCorpo(http, StatusCodes.Status403Forbidden));
+
+        harbor.MapPost("/eventos", async (HarborEventoRequest req, IMediator mediator, CancellationToken ct) =>
+        {
+            await mediator.Send(new RegistrarEventoDoHarborCommand(req.Tipo, req.Identificador, req.OcorridoEmUtc), ct);
+            return Results.Accepted();
+        });
     }
 
     /// <summary>Sem o ProblemDetails que o UseStatusCodePages acrescentaria: a recusa não descreve nada.</summary>

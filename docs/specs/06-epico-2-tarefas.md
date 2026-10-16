@@ -103,6 +103,8 @@ Estado: o cliente guarda o último `eventoId` aplicado e, ao reconectar, ressinc
 
 Título e artista que o locutor manda pelo source client são validados **no `radio.liq` e no servidor** (`POST /internal/harbor/eventos` e `TocandoAgora`): até 200 caracteres, rejeitando as categorias Unicode `Cc`, `Cf` (inclui os caracteres de controle de direção, como `U+202E`, e os invisíveis, como `U+200B`) e `Cs`. Aplicados por `metadata.map`/`insert_metadata`, nunca por `annotate:`.
 
+Exceção decidida no B2 (Nexus, 2026-10-16), para emoji composto não virar 400: o **ZWJ** (`U+200D`) é aceito, e as **tags** `U+E0020`–`U+E007E` só dentro de uma bandeira (logo depois de `U+1F3F4` e fechadas por `U+E007F`). Tag solta ou sequência sem o `U+E007F` no fim é recusada. Todo o resto de `Cc`, `Cf` e `Cs` continua recusado (por exemplo `U+200B`, `U+202E`, `U+2066`–`U+2069`, `U+FEFF`, `U+00AD` e surrogate solto), além dos separadores `U+2028`/`U+2029`. Um validador só (`MetadadoSeguro`) atende o harbor e o `TocandoAgora`, para as duas regras não se separarem.
+
 ## Tarefas — Forge (Backend, Worker, Liquidsoap e contêineres)
 
 | ID | Tarefa | Depende | Critério de aceite |

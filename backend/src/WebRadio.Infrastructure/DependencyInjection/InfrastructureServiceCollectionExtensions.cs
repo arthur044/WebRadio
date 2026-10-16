@@ -114,6 +114,8 @@ public static class InfrastructureServiceCollectionExtensions
         AddStorage(services, configuration);
         services.AddSingleton<ITocandoAgoraStore>(sp => new TocandoAgoraStore(
             sp.GetRequiredService<IClock>(), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TocandoAgoraStore>>(), sp.GetService<IConnectionMultiplexer>()));
+        services.AddSingleton<WebRadio.Application.Features.Harbor.IEstadoDoAoVivoStore>(sp => new EstadoDoAoVivoStore(
+            sp.GetRequiredService<IClock>(), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<EstadoDoAoVivoStore>>(), sp.GetService<IConnectionMultiplexer>()));
 
         services.AddScoped<IInicializadorDeDados, AdminSeeder>();
 

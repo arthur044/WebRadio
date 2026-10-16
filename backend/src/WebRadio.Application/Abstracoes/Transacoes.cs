@@ -60,6 +60,9 @@ public static class EventosDoOutbox
     /// horário, em SQL) e pelos comandos encerrar e cancelar (E2-F01); o <c>status</c> é o nome do enum.
     /// </summary>
     public const string ProgramaStatusAlterado = "ProgramaStatusAlterado";
+
+    /// <summary>Carga <c>{ noAr, programaId?, locutorNome? }</c> (06 "SignalR"): vai para todos. Gravado pelos eventos do harbor (E2-F06).</summary>
+    public const string TransmissaoAoVivoAlterada = "TransmissaoAoVivoAlterada";
 }
 
 /// <summary>

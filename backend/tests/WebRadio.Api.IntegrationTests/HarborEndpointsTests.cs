@@ -45,7 +45,7 @@ public class HarborEndpointsTests
         }
     }
 
-    private sealed record Cena(HttpClient C, Consultas Consultas, Captura Log, Guid Id, string Segredo, JanelaDoHarbor Janela);
+    private sealed record Cena(HttpClient C, Consultas Consultas, Captura Log, Guid Id, string Segredo, JanelaDoHarbor Janela, IServiceProvider Servicos);
 
     private static Cena NovaCena(bool atrasDoProxy = false)
     {
@@ -61,9 +61,11 @@ public class HarborEndpointsTests
         var id = SegredoDeTransmissao.NovoIdentificador();
         var g = SegredoDeTransmissao.Gerar();
         consultas.Credenciais[id] = new CredencialDoHarbor(Guid.NewGuid(), g.Salt, g.Hash);
-        var janela = new JanelaDoHarbor(Guid.NewGuid(), new DateTime(2026, 10, 16, 20, 0, 0, DateTimeKind.Utc));
+        // Fim relativo ao relógio real: o estado "no ar" vence 1 min depois do fim previsto.
+        var agora = DateTime.UtcNow;
+        var janela = new JanelaDoHarbor(Guid.NewGuid(), new DateTime(agora.Ticks - agora.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc).AddHours(1));
         consultas.Janelas[id] = janela;
-        return new Cena(host.CreateClient(new() { BaseAddress = new Uri("http://localhost") }), consultas, log, id, g.Segredo, janela);
+        return new Cena(host.CreateClient(new() { BaseAddress = new Uri("http://localhost") }), consultas, log, id, g.Segredo, janela, host.Services);
     }
 
     private static HttpRequestMessage Req(HttpMethod metodo, string url, object? corpo = null, int porta = 8081, string? token = null)
@@ -88,7 +90,7 @@ public class HarborEndpointsTests
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
         var corpo = await r.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(c.Janela.ProgramaId, corpo.GetProperty("programaId").GetGuid());
-        Assert.Equal("2026-10-16T20:00:00Z", corpo.GetProperty("fimUtc").GetString());
+        Assert.Equal(c.Janela.FimUtc.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture), corpo.GetProperty("fimUtc").GetString());
     }
 
     [Fact]
@@ -192,5 +194,93 @@ public class HarborEndpointsTests
 
         Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode);
         Assert.Equal("Bearer", r.Headers.WwwAuthenticate.ToString());
+    }
+
+    // ---- E2-F06: eventos do harbor e /stream/info ----
+
+    private static Task<HttpResponseMessage> EventoHarbor(Cena c, string tipo, Guid? id = null, DateTime? quando = null) =>
+        c.C.SendAsync(Req(HttpMethod.Post, "/api/v1/internal/harbor/eventos",
+            new { tipo, identificador = (id ?? c.Id).ToString(), ocorridoEmUtc = quando ?? DateTime.UtcNow }));
+
+    private static async Task<JsonElement> AoVivo(Cena c)
+    {
+        var r = await c.C.GetAsync("/api/v1/stream/info");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("aoVivo");
+    }
+
+    /// <summary>O programa da janela falsa existe de verdade no banco (o nome do locutor sai dele).</summary>
+    private static void ProgramaDaJanela(Cena c)
+    {
+        using var escopo = c.Servicos.CreateScope();
+        var db = escopo.ServiceProvider.GetRequiredService<IRadioDbContext>();
+        var agora = DateTime.UtcNow;
+        var locutor = new WebRadio.Domain.Usuarios.Usuario(Guid.NewGuid(), "Locutora Bia", "bia@example.com", "hash", WebRadio.Domain.Enums.Role.Locutor, false, agora);
+        var ini = new DateTime(agora.Ticks - agora.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc).AddMinutes(-5);
+        var programa = new WebRadio.Domain.Grade.Programa(c.Janela.ProgramaId, "Manhã", null, locutor.Id, ini, ini.AddHours(1), ini);
+        db.Usuarios.Add(locutor);
+        db.Programas.Add(programa);
+        db.SaveChangesAsync().GetAwaiter().GetResult();
+    }
+
+    [Fact]
+    public async Task Stream_info_e_publico_e_comeca_fora_do_ar()
+    {
+        var c = NovaCena();
+
+        var r = await c.C.GetAsync("/api/v1/stream/info");
+
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var corpo = await r.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("/stream/radio.mp3", corpo.GetProperty("url").GetString());
+        Assert.Equal("audio/mpeg", corpo.GetProperty("formato").GetString());
+        Assert.Equal(128, corpo.GetProperty("bitrateKbps").GetInt32());
+        Assert.Equal(JsonValueKind.Null, corpo.GetProperty("tocandoAgora").ValueKind);
+        Assert.False(corpo.GetProperty("aoVivo").GetProperty("noAr").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Conectar_e_desconectar_mudam_o_aoVivo_e_evento_repetido_nao_publica_de_novo()
+    {
+        var c = NovaCena();
+        ProgramaDaJanela(c);
+
+        Assert.Equal(HttpStatusCode.Accepted, (await EventoHarbor(c, "Conectado")).StatusCode);
+        var noAr = await AoVivo(c);
+        Assert.True(noAr.GetProperty("noAr").GetBoolean());
+        Assert.Equal(c.Janela.ProgramaId, noAr.GetProperty("programaId").GetGuid());
+        Assert.Equal("Locutora Bia", noAr.GetProperty("locutorNome").GetString());
+
+        Assert.Equal(HttpStatusCode.Accepted, (await EventoHarbor(c, "Conectado")).StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, (await EventoHarbor(c, "Desconectado")).StatusCode);
+        Assert.False((await AoVivo(c)).GetProperty("noAr").GetBoolean());
+        Assert.Equal(HttpStatusCode.Accepted, (await EventoHarbor(c, "Desconectado")).StatusCode);
+
+        using var escopo = c.Servicos.CreateScope();
+        var db = escopo.ServiceProvider.GetRequiredService<WebRadio.Infrastructure.Persistencia.RadioDbContext>();
+        Assert.Equal(2, db.EventosOutbox.Count(e => e.Tipo == EventosDoOutbox.TransmissaoAoVivoAlterada));
+    }
+
+    [Theory]
+    [InlineData("Ligado", "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d")]
+    [InlineData("Conectado", "nao-e-guid")]
+    public async Task Evento_invalido_e_400(string tipo, string identificador)
+    {
+        var c = NovaCena();
+
+        var r = await c.C.SendAsync(Req(HttpMethod.Post, "/api/v1/internal/harbor/eventos", new { tipo, identificador, ocorridoEmUtc = DateTime.UtcNow }));
+
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Eventos_pela_porta_publica_sao_404()
+    {
+        var c = NovaCena();
+
+        var r = await c.C.SendAsync(Req(HttpMethod.Post, "/api/v1/internal/harbor/eventos",
+            new { tipo = "Conectado", identificador = c.Id.ToString(), ocorridoEmUtc = DateTime.UtcNow }, porta: 8080));
+
+        Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 }
