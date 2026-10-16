@@ -31,14 +31,8 @@ export function SeletorDeSemana({
       <button type="button" onClick={onProxima} className={botao} aria-label="Próxima semana">
         →
       </button>
-      <button
-        type="button"
-        onClick={onAtual}
-        disabled={ehSemanaAtual}
-        className={`${botao} ml-2`}
-        aria-label="Semana atual"
-      >
-        Hoje
+      <button type="button" onClick={onAtual} disabled={ehSemanaAtual} className={`${botao} ml-2`}>
+        Semana atual
       </button>
     </div>
   )
