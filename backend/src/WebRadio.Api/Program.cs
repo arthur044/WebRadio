@@ -44,6 +44,8 @@ builder.Services.AddOptions<PlayoutOptions>().BindConfiguration(PlayoutOptions.S
 builder.Services.AddOptions<RedisOptions>().BindConfiguration(RedisOptions.Secao).ValidateOnStart();
 builder.Services.AddOptions<SeedOptions>().BindConfiguration(SeedOptions.Secao).ValidateOnStart();
 builder.Services.AddOptions<StorageOptions>().BindConfiguration(StorageOptions.Secao).ValidateOnStart();
+// Harbor__AtrasDoProxy: true só no docker-compose.live.yml, junto do harbor-borda (E2-F11).
+builder.Services.AddOptions<WebRadio.Application.Features.Harbor.HarborOptions>().BindConfiguration(WebRadio.Application.Features.Harbor.HarborOptions.Secao);
 builder.Services.AddSingleton<IValidateOptions<StorageOptions>, StorageOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<RedisOptions>, RedisOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<SeedOptions>, SeedOptionsValidator>();

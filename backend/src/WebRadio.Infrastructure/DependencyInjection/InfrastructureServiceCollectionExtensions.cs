@@ -6,6 +6,7 @@ using WebRadio.Application.Abstracoes;
 using Microsoft.Extensions.Hosting;
 using StackExchange.Redis;
 using WebRadio.Infrastructure.Armazenamento;
+using WebRadio.Infrastructure.Harbor;
 using WebRadio.Infrastructure.Triagem;
 using WebRadio.Infrastructure.Persistencia;
 using WebRadio.Infrastructure.Persistencia.Eventos;
@@ -80,6 +81,7 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddScoped<IRadioDbContext>(sp => sp.GetRequiredService<RadioDbContext>());
         services.AddScoped<ITransacaoComTrava, TransacaoComTrava>();
+        services.AddScoped<IConsultasDoHarbor, ConsultasDoHarbor>();
         services.AddScoped<ISondaDoBanco, SondaDoBanco>();
         services.AddScoped<IOutbox, OutboxEf>();
         services.AddMemoryCache();

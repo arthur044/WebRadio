@@ -14,16 +14,6 @@ using static WebRadio.Api.IntegrationTests.ApiFactoryExtensions;
 
 namespace WebRadio.Api.IntegrationTests;
 
-/// <summary>
-/// Os <c>ILogger&lt;T&gt;</c> da Api escrevem no <c>Log.Logger</c> estático do Serilog, que cada host de teste sobrescreve ao subir.
-/// Classes que varrem os logs rodam nesta coleção, sozinhas: o estático é o do host delas.
-/// </summary>
-[CollectionDefinition(Nome, DisableParallelization = true)]
-public sealed class ColecaoDeLogs
-{
-    public const string Nome = "logs-da-requisicao";
-}
-
 /// <summary>E2-F04 no nível HTTP (02 §4, credencial de transmissão). A corrida e a revogação por evento contra SQL Server de verdade estão em WebRadio.Infrastructure.Tests.</summary>
 [Collection(ColecaoDeLogs.Nome)]
 public class CredencialTransmissaoEndpointsTests
