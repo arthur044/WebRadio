@@ -40,7 +40,7 @@ export function AdminGradePage() {
   // (foco da janela, reconexão): remontar o formulário no meio da digitação perderia o que o Admin escreveu.
   const detalhe = useQuery({
     queryKey: ['programa-detalhe', idEmEdicao],
-    queryFn: () => apiFetchComEtag<ProgramaDto>(`/programas/${idEmEdicao}`),
+    queryFn: () => apiFetchComEtag<ProgramaDto>(`/programas/${encodeURIComponent(idEmEdicao!)}`),
     enabled: idEmEdicao !== null,
     gcTime: 0,
     staleTime: Infinity,
@@ -51,7 +51,7 @@ export function AdminGradePage() {
 
   const cancelar = useMutation({
     mutationFn: (id: string) =>
-      apiFetch<ProgramaDto>(`/programas/${id}/cancelar`, { method: 'POST' }),
+      apiFetch<ProgramaDto>(`/programas/${encodeURIComponent(id)}/cancelar`, { method: 'POST' }),
   })
 
   function recarregarGrade() {

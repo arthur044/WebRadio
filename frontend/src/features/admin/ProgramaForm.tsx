@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { apiFetchComEtag } from '../../shared/api/httpClient'
+import { ApiError, apiFetchComEtag } from '../../shared/api/httpClient'
 import { descreverErro, type ErroDescrito } from '../../shared/api/descreverErro'
 import type { ProgramaDto, ProgramaRequest } from '../../shared/api/types'
 import { campoLocalBrasiliaParaUtc, utcParaCampoLocalBrasilia } from '../../shared/lib/timezone'
@@ -75,7 +75,7 @@ export function ProgramaForm({
   onDescartar,
   onRecarregar,
 }: ProgramaFormProps) {
-  const padrao = programa ? null : proximaHoraCheia()
+  const [padrao] = useState(() => (programa ? null : proximaHoraCheia()))
   const [titulo, setTitulo] = useState(programa?.titulo ?? '')
   const [descricao, setDescricao] = useState(programa?.descricao ?? '')
   const [locutorId, setLocutorId] = useState(programa?.locutor.id ?? '')
@@ -115,7 +115,9 @@ export function ProgramaForm({
 
     if (programa && etag === null) {
       // Sem ETag não há como mandar o If-Match: não arrisca sobrescrever uma edição alheia.
-      onRecarregar(descreverErro({ status: 428 }))
+      onRecarregar(
+        descreverErro(new ApiError(428, { type: '/erros/pre-condicao', title: 'x', status: 428 })),
+      )
       return
     }
 
@@ -129,11 +131,14 @@ export function ProgramaForm({
 
     setEnviando(true)
     try {
-      await apiFetchComEtag<ProgramaDto>(programa ? `/programas/${programa.id}` : '/programas', {
-        method: programa ? 'PUT' : 'POST',
-        headers: programa ? { 'If-Match': etag! } : undefined,
-        body: corpo,
-      })
+      await apiFetchComEtag<ProgramaDto>(
+        programa ? `/programas/${encodeURIComponent(programa.id)}` : '/programas',
+        {
+          method: programa ? 'PUT' : 'POST',
+          headers: programa ? { 'If-Match': etag! } : undefined,
+          body: corpo,
+        },
+      )
       onSalvo(programa ? 'Programa atualizado.' : 'Programa criado.')
     } catch (err) {
       const descrito = descreverErro(err)

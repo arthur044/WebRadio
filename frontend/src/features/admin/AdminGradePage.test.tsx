@@ -402,6 +402,23 @@ describe('AdminGradePage', () => {
       })
     })
 
+    it('sem ETag no GET do programa, não envia o PUT (nunca arrisca sobrescrever uma edição alheia)', async () => {
+      const { chamadas } = montarApi([
+        (c) =>
+          c.metodo === 'GET' && c.caminho === '/programas/p1' ? json(200, programa()) : undefined,
+      ])
+      const user = userEvent.setup()
+      renderAdmin()
+
+      await user.click(await screen.findByRole('button', { name: 'Editar Café da Manhã' }))
+      const form = await screen.findByRole('form', { name: 'Editar programa' })
+      await within(form).findByRole('option', { name: 'Beto' })
+      await user.click(within(form).getByRole('button', { name: 'Salvar alterações' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/confirmar a versão/i)
+      expect(chamadas.some((c) => c.metodo === 'PUT')).toBe(false)
+    })
+
     it('mantém no seletor o locutor do programa mesmo que ele não esteja mais na lista', async () => {
       montarApi([
         (c) =>

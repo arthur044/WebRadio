@@ -11,7 +11,7 @@ import { formatarDataHoraBrasilia, formatarHoraBrasilia } from '../../shared/lib
 export function ConflitoDeGrade({ programaId }: { programaId: string }) {
   const { data } = useQuery({
     queryKey: ['programa-conflito', programaId],
-    queryFn: () => apiFetch<ProgramaDto>(`/programas/${programaId}`),
+    queryFn: () => apiFetch<ProgramaDto>(`/programas/${encodeURIComponent(programaId)}`),
     retry: false,
   })
 
