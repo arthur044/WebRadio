@@ -14,7 +14,7 @@ RUN npm run build
 
 # Fixado por digest (a tag é mutável): nginxinc/nginx-unprivileged:1.31.6-alpine3.24 (nginx mainline 1.31.6 sobre Alpine 3.24.2).
 # Era 1.27.5-alpine3.21 (jun/2025): sem imagem corrigida na linha 3.21 (B3, trivy).
-FROM nginxinc/nginx-unprivileged:1.31.6-alpine3.24@sha256:884e0b7f42f303641b0f4e78755aea647521dca0b89ca3be7992ad78b5c07434
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine3.24@sha256:378d0c32f6562f7fd9629170797f57d2b953aa09be983b3daaf4809bb039ca00
 # Hosts públicos válidos (server_name aceita lista espaço-separada) — o compose
 # sobrescreve em outros ambientes; ver comentário de Host header injection em
 # infra/nginx/default.conf.template.
