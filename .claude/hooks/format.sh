@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # PostToolUse (Edit|Write|MultiEdit): formata o arquivo que o agente acabou de mudar.
 # Nunca bloqueia o agente: falha de formatação só vira aviso no stderr.
+# ATENÇÃO: as roles do Maestri chamam uma cópia em ~/.local/bin/webradio-format-hook.
+# Mudou este arquivo? Rode em cada máquina: install -m755 .claude/hooks/format.sh ~/.local/bin/webradio-format-hook
 set -uo pipefail
 
 command -v jq >/dev/null || { echo "format-hook: jq ausente, formatação ignorada" >&2; exit 0; }
