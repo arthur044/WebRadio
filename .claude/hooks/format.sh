@@ -3,10 +3,14 @@
 # Nunca bloqueia o agente: falha de formatação só vira aviso no stderr.
 set -uo pipefail
 
+command -v jq >/dev/null || { echo "format-hook: jq ausente, formatação ignorada" >&2; exit 0; }
+
 file=$(jq -r '.tool_input.file_path // empty')
 [[ -n "$file" && -f "$file" ]] || exit 0
 
-root="${CLAUDE_PROJECT_DIR:-$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2>/dev/null)}"
+# A raiz vem do próprio arquivo: CLAUDE_PROJECT_DIR pode ser a pasta da role do Maestri, não o worktree.
+root=$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2>/dev/null || true)
+[[ -n "$root" ]] || root="${CLAUDE_PROJECT_DIR:-}"
 [[ -n "$root" ]] || exit 0
 rel="${file#"$root"/}"
 
