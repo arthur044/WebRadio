@@ -1,0 +1,30 @@
+{
+  "env": {
+    "GATEGUARD_BASH_ROUTINE_DISABLED": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(cd *)", "Bash(maestri *)", "Bash(\"$MAESTRI_CLI\" *)", "Bash($MAESTRI_CLI *)",
+      "Bash(dotnet restore*)", "Bash(dotnet build*)", "Bash(dotnet test*)", "Bash(dotnet format*)",
+      "Bash(npm run *)", "Bash(npm test*)", "Bash(npm ci)",
+      "Bash(npx tsc*)", "Bash(npx vitest*)", "Bash(npx playwright test*)", "Bash(npx prettier*)", "Bash(npx eslint*)",
+      "Bash(git status*)", "Bash(git fetch*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)", "Bash(git branch*)", "Bash(git worktree list*)",
+      "Bash(gh pr list*)", "Bash(gh pr view*)", "Bash(gh pr diff*)", "Bash(gh pr checks*)", "Bash(gh pr review * --comment*)",
+      "Bash(gh run list*)", "Bash(gh run view*)",
+      "Bash(sqlcmd *)"
+    ],
+    "deny": [
+      "Bash(git push --force*)", "Bash(git push -f*)", "Bash(git add -A*)", "Bash(git add .)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format.sh", "timeout": 60 }
+        ]
+      }
+    ]
+  }
+}
