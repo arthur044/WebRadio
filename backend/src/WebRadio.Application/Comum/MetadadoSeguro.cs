@@ -20,6 +20,13 @@ public static class MetadadoSeguro
     private const int FechoDeTag = 0xE007F;
     private const int Zwj = 0x200D;
 
+    /// <summary>
+    /// Até <see cref="TamanhoMaximo"/> CARACTERES (code points), como o <c>string.length</c> em UTF-8 do <c>radio.liq</c>. O
+    /// <c>MaximumLength</c> do FluentValidation conta unidades UTF-16 e um emoji vale 2: 150 emoji passariam no Liquidsoap e
+    /// levariam 400 aqui.
+    /// </summary>
+    public static bool TamanhoValido(string? texto) => texto is null || texto.EnumerateRunes().Count() <= TamanhoMaximo;
+
     public static bool Valido(string? texto)
     {
         if (texto is null) return true;

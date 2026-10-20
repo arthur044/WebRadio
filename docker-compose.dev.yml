@@ -38,6 +38,9 @@ services:
       # padrão; ligue com SEED_DEV_DATA=true no `up`. A senha dos locutores vem do arquivo de segredo, nunca do YAML.
       Seed__DevData: "${SEED_DEV_DATA:-false}"
       Harbor__AtrasDoProxy: "true"
+      # `conexao` da credencial de transmissão: o harbor-borda do dev está em 127.0.0.1:8005.
+      Harbor__HostPublico: "localhost"
+      Harbor__PortaPublica: "8005"
     secrets:
       - { source: seed_dev_senha, target: Seed__DevSenha }
 
@@ -50,6 +53,8 @@ services:
   harbor-borda:
     environment:
       HARBOR_PERMITIDOS: "${HARBOR_PERMITIDOS:-0.0.0.0/0}"
+      # Só o dev tem permissão para a lista aberta (o entrypoint do harbor-borda a recusa sem isto).
+      HARBOR_LIBERAR_TUDO: "1"
     ports:
       - "127.0.0.1:8005:8005"
 

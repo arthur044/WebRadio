@@ -22,12 +22,51 @@ public sealed record EstadoDoAoVivo(bool NoAr, Guid? ProgramaId, string? Locutor
     public EstadoDoAoVivo Vigente(DateTime agora) => NoAr && FimUtc is { } fim && agora >= fim + MargemDoFim ? ForaDoAr(DesdeUtc) : this;
 }
 
+/// <summary>O que <see cref="IEstadoDoAoVivoStore.ExpirarVencidoAsync"/> trocou: o estado vencido e o que o substituiu.</summary>
+public sealed record ExpiracaoDoAoVivo(EstadoDoAoVivo Antes, EstadoDoAoVivo Depois);
+
 /// <summary>Em memória e, quando há Redis, compartilhado entre as réplicas (como o "tocando agora").</summary>
 public interface IEstadoDoAoVivoStore
 {
     Task<EstadoDoAoVivo?> ObterAsync(CancellationToken ct);
 
     Task DefinirAsync(EstadoDoAoVivo estado, CancellationToken ct);
+
+    /// <summary>
+    /// Se o estado guardado é "no ar" e já passou do fim previsto + 1 min (<see cref="EstadoDoAoVivo.Vigente"/>), troca por "fora do
+    /// ar" e devolve a troca; senão <c>null</c>. Com Redis a troca é condicional ao valor lido: de N réplicas, só uma a faz.
+    /// </summary>
+    Task<ExpiracaoDoAoVivo?> ExpirarVencidoAsync(CancellationToken ct);
+}
+
+/// <summary>
+/// Um <c>Desconectado</c> perdido (o Liquidsoap caiu, a API estava fora) deixa o estado "no ar" até <c>fim + 1 min</c>, quando o
+/// <see cref="EstadoDoAoVivo.Vigente"/> passa a responder "fora do ar" ao <c>GET /stream/info</c>. Quem já está conectado ao hub
+/// não leria isso: aqui o vencimento também vira <c>TransmissaoAoVivoAlterada</c>. Se não der para gravar o evento, o estado vencido
+/// volta para o store e a próxima passada tenta de novo.
+/// </summary>
+public sealed class ReconciliadorDoAoVivo(IEstadoDoAoVivoStore estado, IOutbox outbox, IRadioDbContext db, ILogger<ReconciliadorDoAoVivo> logger)
+{
+    public async Task<bool> ExecutarAsync(CancellationToken ct)
+    {
+        if (await estado.ExpirarVencidoAsync(ct) is not { } troca) return false;
+
+        try
+        {
+            outbox.EnfileirarParaTodos(EventosDoOutbox.TransmissaoAoVivoAlterada, new { noAr = false, programaId = (Guid?)null, locutorNome = (string?)null });
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await estado.DefinirAsync(troca.Antes, CancellationToken.None);
+            logger.LogError(ex, "HARBOR_AO_VIVO_VENCIDO não publicou: o estado voltou e a próxima passada tenta de novo");
+            return false;
+        }
+
+        logger.LogWarning("HARBOR_AO_VIVO_VENCIDO programa {ProgramaId} fim previsto {FimUtc}: sem Desconectado, saiu do ar pelo fim + 1 min",
+            troca.Antes.ProgramaId, troca.Antes.FimUtc);
+        return true;
+    }
 }
 
 /// <summary>06 "Endpoints internos": <c>POST /internal/harbor/eventos</c>, do <c>on_connect</c>/<c>on_disconnect</c> do harbor.</summary>

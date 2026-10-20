@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using WebRadio.Domain.Autenticacao;
 using WebRadio.Domain.Enums;
 using WebRadio.Domain.Interacao;
+using WebRadio.Domain.Transmissao;
 using WebRadio.Domain.Usuarios;
 using WebRadio.Infrastructure.DependencyInjection;
 using WebRadio.Infrastructure.Persistencia.Outbox;
@@ -257,6 +258,37 @@ public class ManutencaoTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
     }
 
     [SqlFact]
+    public async Task Apaga_credencial_de_transmissao_revogada_ha_mais_de_90_dias_e_preserva_a_ativa_e_a_recente()
+    {
+        var u = await UsuarioAsync();
+        CredencialTransmissao Nova() => new(Guid.NewGuid(), u.Id, Guid.NewGuid(), Hash(), RandomNumberGenerator.GetBytes(16), DateTime.UtcNow.AddDays(-200));
+        var velhaA = Nova();
+        var velhaB = Nova();
+        var velhaC = Nova();
+        var recente = Nova();
+        var ativa = Nova();
+        // Só uma ativa por locutor (UX_CredencialTransmissao_Ativa): as outras já nascem revogadas.
+        velhaA.Revogar(DateTime.UtcNow.AddDays(-91));
+        velhaB.Revogar(DateTime.UtcNow.AddDays(-91));
+        velhaC.Revogar(DateTime.UtcNow.AddDays(-120));
+        recente.Revogar(DateTime.UtcNow.AddDays(-89));
+        await using (var db = banco.CriarContexto())
+        {
+            db.CredenciaisTransmissao.AddRange(velhaA, velhaB, velhaC, recente, ativa);
+            await db.SaveChangesAsync();
+        }
+
+        // Lote 2 com 3 candidatas: o laço roda de novo até o lote vir incompleto.
+        var r = await ExecutarAsync(lote: 2);
+
+        Assert.Equal(3, r.CredenciaisApagadas);
+        await using var leitura = banco.CriarContexto();
+        var restantes = await leitura.CredenciaisTransmissao.AsNoTracking().Where(c => c.UsuarioId == u.Id).Select(c => c.Id).ToListAsync();
+        Assert.Equal(new[] { recente.Id, ativa.Id }.Order(), restantes.Order());
+        Assert.Equal(0, (await ExecutarAsync()).CredenciaisApagadas); // idempotente
+    }
+
+    [SqlFact]
     public async Task Refresh_vencido_ainda_apontado_por_um_token_que_nao_venceu_fica_para_o_proximo_dia_sem_erro()
     {
         var u = await UsuarioAsync();
@@ -302,7 +334,7 @@ public class CicloDoWorkerTests : IDisposable
             Interlocked.Increment(ref _execucoes);
             if (Segurar is { } segurar) await segurar.Task.WaitAsync(ct);
             if (Falhar) throw new InvalidOperationException("banco fora do ar (simulado)");
-            return new ResultadoDaManutencao(0, 0, 0);
+            return new ResultadoDaManutencao(0, 0, 0, 0);
         }
     }
 

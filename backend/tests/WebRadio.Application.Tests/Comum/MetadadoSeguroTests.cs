@@ -30,8 +30,6 @@ public class MetadadoSeguroTests
         { "marca de direção U+200F", "a‏b" },
         { "BOM U+FEFF", "﻿titulo" },
         { "hífen suave U+00AD", "a­b" },
-        { "surrogate alto solto", "a\uD83Cb" },
-        { "surrogate baixo solto", "a\uDFB5b" },
         { "quebra de linha", "a\nb" },
         { "NUL", "a\0b" },
         { "C1 U+0085", "a\u0085b" },
@@ -46,6 +44,23 @@ public class MetadadoSeguroTests
     [Theory]
     [MemberData(nameof(Recusados))]
     public void Recusa(string caso, string texto) => Assert.False(MetadadoSeguro.Valido(texto), caso);
+
+    // Fora do MemberData: o serializador do xunit troca o surrogate solto por U+FFFD (que é aceito) antes do teste rodar.
+    [Fact]
+    public void Recusa_surrogate_alto_solto() => Assert.False(MetadadoSeguro.Valido("a\uD83Cb"));
+
+    [Fact]
+    public void Recusa_surrogate_baixo_solto() => Assert.False(MetadadoSeguro.Valido("a\uDFB5b"));
+
+    [Fact]
+    public void O_tamanho_conta_caracteres_e_nao_unidades_UTF16()
+    {
+        Assert.True(MetadadoSeguro.TamanhoValido(string.Concat(Enumerable.Repeat("😀", 200)))); // 400 unidades UTF-16, 200 caracteres
+        Assert.False(MetadadoSeguro.TamanhoValido(string.Concat(Enumerable.Repeat("😀", 201))));
+        Assert.True(MetadadoSeguro.TamanhoValido(new string('t', 200)));
+        Assert.False(MetadadoSeguro.TamanhoValido(new string('t', 201)));
+        Assert.True(MetadadoSeguro.TamanhoValido(null));
+    }
 
     [Fact]
     public void Nulo_e_aceito_o_campo_e_opcional()

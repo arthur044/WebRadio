@@ -285,7 +285,7 @@ services:
       API_INTERNA: "http://api:8081"
       # O radio.liq manda "ocorridoEmUtc" com sufixo Z: o relógio do contêiner precisa ser UTC de fato.
       TZ: UTC
-    secrets: [playout_token, icecast_source_password, liquidsoap_harbor_password]
+    secrets: [playout_token, icecast_source_password]
     volumes:
       - ./infra/liquidsoap/radio.liq:/etc/liquidsoap/radio.liq:ro
       - ./infra/liquidsoap/playlist-teste:/musica-teste:ro
@@ -307,7 +307,7 @@ services:
 
   # Borda do ao vivo (E2-F11): TCP do source client do locutor até o liquidsoap:8005. Nas redes borda e playout; o Liquidsoap
   # continua SÓ na playout. Sem porta publicada aqui: quem publica é o docker-compose.live.yml (em ${HARBOR_BIND_IP}, nunca
-  # 0.0.0.0). allow/deny por HARBOR_PERMITIDOS (vazio = ninguém entra), limit_conn por IP e timeouts no nginx.conf. É o único
+  # 0.0.0.0). allow/deny por HARBOR_PERMITIDOS (vazio = ninguém entra), limite de conexões simultâneas por IP (limit_conn) e timeouts no nginx.conf. É o único
   # serviço que vê o IP real do locutor: access log com IP anonimizado e entra no limpar-logs.sh.
   harbor-borda:
     image: nginxinc/nginx-unprivileged:1.31.6-alpine3.24@sha256:884e0b7f42f303641b0f4e78755aea647521dca0b89ca3be7992ad78b5c07434 # uid 101
@@ -403,7 +403,6 @@ secrets:
   icecast_admin_user: { file: ./secrets/icecast_admin_user }
   icecast_admin_password: { file: ./secrets/icecast_admin_password }
   icecast_relay_password: { file: ./secrets/icecast_relay_password }
-  liquidsoap_harbor_password: { file: ./secrets/liquidsoap_harbor_password }
   seed_admin_email: { file: ./secrets/seed_admin_email }
   seed_admin_senha: { file: ./secrets/seed_admin_senha }
   # Só o docker-compose.dev.yml o monta (Seed__DevSenha, DevDataSeeder); a base de produção não o usa.

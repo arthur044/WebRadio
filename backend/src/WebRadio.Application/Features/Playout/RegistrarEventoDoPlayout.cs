@@ -39,10 +39,10 @@ public sealed class RegistrarEventoDoPlayoutValidator : AbstractValidator<Regist
         // S-A09: no ao vivo, título e artista vêm do programa do locutor (harbor) e seguem para TODOS os clientes do hub.
         // A regra é a mesma do harbor (MetadadoSeguro), para as duas não se separarem.
         RuleFor(x => x.Titulo)
-            .MaximumLength(TamanhoMaximoDoMetadado).WithMessage($"titulo pode ter no máximo {TamanhoMaximoDoMetadado} caracteres.")
+            .Must(MetadadoSeguro.TamanhoValido).WithMessage($"titulo pode ter no máximo {TamanhoMaximoDoMetadado} caracteres.")
             .Must(MetadadoSeguro.Valido).WithMessage("titulo não pode ter caracteres de controle nem de formato.");
         RuleFor(x => x.Artista)
-            .MaximumLength(TamanhoMaximoDoMetadado).WithMessage($"artista pode ter no máximo {TamanhoMaximoDoMetadado} caracteres.")
+            .Must(MetadadoSeguro.TamanhoValido).WithMessage($"artista pode ter no máximo {TamanhoMaximoDoMetadado} caracteres.")
             .Must(MetadadoSeguro.Valido).WithMessage("artista não pode ter caracteres de controle nem de formato.");
     }
 

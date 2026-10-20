@@ -406,7 +406,10 @@ GO
             AND NOT EXISTS (SELECT 1 FROM seg.RefreshToken AS a WHERE a.SubstituidoPorId = t.Id);
      Um vencido ainda apontado por um token que não venceu fica para outra rodada.
      (Corrigido em 2026-10-13: é o que o Manutencao.cs do Worker executa desde o PR #29.)
-   Outbox e RefreshToken também rodam em lotes, como a rotina de LGPD.
+   - CredencialTransmissao (E2-F09; nenhuma tabela a referencia, então um DELETE simples basta, sem o passo duplo do RefreshToken):
+       DELETE TOP (4000) FROM seg.CredencialTransmissao WHERE RevogadaEmUtc < DATEADD(DAY, -90, SYSUTCDATETIME());
+       repetido até o lote vir incompleto. A credencial ativa (RevogadaEmUtc IS NULL) nunca sai.
+   Outbox, RefreshToken e CredencialTransmissao também rodam em lotes, como a rotina de LGPD.
    Executadas pelo Worker (job diário), não por SQL Agent: o SQL Server Linux em
    contêiner não é dependência de agendamento.
    --------------------------------------------------------------------------------------- */

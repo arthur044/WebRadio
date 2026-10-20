@@ -9,6 +9,10 @@
 # O stack no ar é o do DEV (docker-compose.dev.yml); por isso as seções "base de produção" conferem a topologia do
 # docker-compose.yml SOZINHO pelo `docker compose config --format json` (redes, portas, capabilities), sem subir nada.
 #
+# O ao vivo (DoD 1, 3, 4 e 7 do Épico 2) é conferido por infra/scripts/smoke-ao-vivo.sh, que roda DEPOIS deste (o primeiro login do
+# Admin semeado, com a troca de senha pendente, só existe antes dele) e antes do E2E; a porta do harbor só existir no live.yml e a
+# base de produção publicar só a 8080 ficam aqui, na seção "base de PRODUÇÃO".
+#
 #   infra/scripts/smoke-compose.sh
 # =============================================================================
 set -euo pipefail
@@ -171,6 +175,12 @@ publicadas_live = {n: [(p.get("published"), p.get("target"), p.get("host_ip")) f
 confere("live.yml: só web 8080 e harbor-borda 8005 em HARBOR_BIND_IP",
         publicadas_live == {"web": [("8080", 8080, None)], "harbor-borda": [("8005", 8005, "203.0.113.10")]}, str(publicadas_live))
 confere("live.yml: api com Harbor__AtrasDoProxy=true", live["services"]["api"]["environment"].get("Harbor__AtrasDoProxy") == "true")
+confere("live.yml: harbor-borda recebe HARBOR_BIND_IP (o entrypoint recusa 0.0.0.0 e ::)",
+        live["services"]["harbor-borda"]["environment"].get("HARBOR_BIND_IP") == "203.0.113.10")
+confere("só o dev define HARBOR_LIBERAR_TUDO (lista aberta no harbor-borda)",
+        dev["services"]["harbor-borda"]["environment"].get("HARBOR_LIBERAR_TUDO") == "1"
+        and not servicos["harbor-borda"]["environment"].get("HARBOR_LIBERAR_TUDO")
+        and not live["services"]["harbor-borda"]["environment"].get("HARBOR_LIBERAR_TUDO"))
 confere("base: api sem Harbor__AtrasDoProxy=true", servicos["api"]["environment"].get("Harbor__AtrasDoProxy") in (None, "false"))
 confere("dev: liquidsoap sem porta publicada (o ao vivo entra pelo harbor-borda)", not dev["services"]["liquidsoap"].get("ports"))
 confere("api em app, dados e playout", redes("api") == {"app", "dados", "playout"}, str(sorted(redes("api"))))
