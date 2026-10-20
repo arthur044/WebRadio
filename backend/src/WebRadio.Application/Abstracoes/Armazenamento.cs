@@ -17,7 +17,8 @@ public interface IObjectStorage
 
     /// <summary>
     /// Copia e apaga a origem. <paramref name="etagEsperado"/> é obrigatório: a cópia falha se o objeto mudou depois da
-    /// verificação (S-M02: a POST policy ainda aceita novo POST na mesma key).
+    /// verificação (S-M02: a POST policy ainda aceita novo POST na mesma key). Com ETag divergente lança
+    /// <see cref="EtagDivergenteException"/>, o destino não recebe o objeto e a origem continua intacta.
     /// </summary>
     Task MoverAsync(string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default);
 
@@ -28,6 +29,9 @@ public interface IObjectStorage
 public sealed record PostPolicyAssinada(string Url, IReadOnlyDictionary<string, string> Campos, DateTime ExpiraEmUtc);
 
 public sealed record InfoObjeto(long TamanhoBytes, string? ContentType, string? ETag);
+
+/// <summary>O objeto mudou entre a verificação e o <see cref="IObjectStorage.MoverAsync"/> (S-M02): trate como Rejeitado.</summary>
+public sealed class EtagDivergenteException(string message) : Exception(message);
 
 public static class Buckets
 {

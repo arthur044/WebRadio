@@ -88,10 +88,24 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
         string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(etagEsperado);
-        var origem = new CopySourceObjectArgs().WithBucket(bucketOrigem).WithObject(chaveOrigem).WithMatchETag(etagEsperado.Trim('"'));
+        var esperado = etagEsperado.Trim('"');
+        var origem = new CopySourceObjectArgs().WithBucket(bucketOrigem).WithObject(chaveOrigem).WithMatchETag(esperado);
 
-        await _interno.CopyObjectAsync(
-            new CopyObjectArgs().WithBucket(bucketDestino).WithObject(chaveDestino).WithCopyObjectSource(origem), ct);
+        // S-M02, duas armadilhas do SDK (Minio 6.0.4 e 7.0.0, confirmadas contra MinIO real):
+        // 1) WithMatchETag é descartado: o PUT da cópia sai só com x-amz-copy-source. O header vai explícito, para o servidor
+        //    recusar (412) a cópia de um objeto diferente do verificado, de forma atômica.
+        // 2) O CopyObjectAsync devolve normalmente mesmo com o 412. Por isso o destino é conferido ANTES de apagar a origem.
+        var copia = new CopyObjectArgs().WithBucket(bucketDestino).WithObject(chaveDestino).WithCopyObjectSource(origem)
+            .WithHeaders(new Dictionary<string, string> { ["x-amz-copy-source-if-match"] = esperado });
+        await _interno.CopyObjectAsync(copia, ct);
+
+        var destino = await HeadAsync(bucketDestino, chaveDestino, ct);
+        if (destino?.ETag is null || !string.Equals(destino.ETag.Trim('"'), esperado, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new EtagDivergenteException(
+                $"O objeto {bucketOrigem}/{chaveOrigem} mudou depois da verificação: a cópia para {bucketDestino}/{chaveDestino} não confere com o ETag esperado.");
+        }
+
         await _interno.RemoveObjectAsync(new RemoveObjectArgs().WithBucket(bucketOrigem).WithObject(chaveOrigem), ct);
     }
 
