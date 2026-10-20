@@ -48,11 +48,16 @@ public class CredencialTransmissaoEndpointsTests
         }
     }
 
-    private static Cena NovaCena()
+    private static Cena NovaCena(string? hostPublico = null, string? portaPublica = null)
     {
         var f = new ApiFactory { RemoteIp = IPAddress.Parse("203.0.113.30") };
         var log = new Captura();
-        var host = f.WithWebHostBuilder(b => b.ConfigureServices(s => s.AddSingleton<ILogEventSink>(log)));
+        var host = f.WithWebHostBuilder(b =>
+        {
+            if (hostPublico is not null) b.UseSetting("Harbor:HostPublico", hostPublico);
+            if (portaPublica is not null) b.UseSetting("Harbor:PortaPublica", portaPublica);
+            b.ConfigureServices(s => s.AddSingleton<ILogEventSink>(log));
+        });
         return new Cena(host, host.CreateClient(new() { BaseAddress = new Uri("http://localhost") }), log);
     }
 
@@ -71,9 +76,9 @@ public class CredencialTransmissaoEndpointsTests
         return c.SendAsync(req);
     }
 
-    private static async Task<(Cena Cena, string Token, Guid Id)> LocutorAsync(Role role = Role.Locutor)
+    private static async Task<(Cena Cena, string Token, Guid Id)> LocutorAsync(Role role = Role.Locutor, string? hostPublico = null, string? portaPublica = null)
     {
-        var cena = NovaCena();
+        var cena = NovaCena(hostPublico, portaPublica);
         var id = cena.CriarUsuario("locutor@example.com", role);
         return (cena, await TokenDe(cena.C, "locutor@example.com"), id);
     }
@@ -106,6 +111,40 @@ public class CredencialTransmissaoEndpointsTests
         Assert.Contains("CREDENCIAL_TRANSMISSAO_GERADA", logs);
         Assert.DoesNotContain(segredo, logs);
         Assert.DoesNotContain(Senha, logs);
+    }
+
+    [Fact]
+    public async Task Post_e_Get_trazem_a_conexao_sem_host_configurado_host_null_porta_8005_e_mount_live()
+    {
+        var (cena, token, _) = await LocutorAsync();
+
+        var post = await (await Enviar(cena.C, HttpMethod.Post, Minha, token, new { senhaAtual = Senha })).Content.ReadFromJsonAsync<JsonElement>();
+        var get = await (await Enviar(cena.C, HttpMethod.Get, Minha, token)).Content.ReadFromJsonAsync<JsonElement>();
+
+        foreach (var corpo in new[] { post, get })
+        {
+            var conexao = corpo.GetProperty("conexao");
+            Assert.Equal(JsonValueKind.Null, conexao.GetProperty("host").ValueKind);
+            Assert.Equal(8005, conexao.GetProperty("porta").GetInt32());
+            Assert.Equal("/live", conexao.GetProperty("mount").GetString());
+        }
+    }
+
+    [Fact]
+    public async Task Post_e_Get_trazem_o_host_e_a_porta_publicos_configurados()
+    {
+        var (cena, token, _) = await LocutorAsync(hostPublico: "radio.example.com", portaPublica: "18005");
+
+        var post = await (await Enviar(cena.C, HttpMethod.Post, Minha, token, new { senhaAtual = Senha })).Content.ReadFromJsonAsync<JsonElement>();
+        var get = await (await Enviar(cena.C, HttpMethod.Get, Minha, token)).Content.ReadFromJsonAsync<JsonElement>();
+
+        foreach (var corpo in new[] { post, get })
+        {
+            var conexao = corpo.GetProperty("conexao");
+            Assert.Equal("radio.example.com", conexao.GetProperty("host").GetString());
+            Assert.Equal(18005, conexao.GetProperty("porta").GetInt32());
+            Assert.Equal("/live", conexao.GetProperty("mount").GetString());
+        }
     }
 
     [Fact]

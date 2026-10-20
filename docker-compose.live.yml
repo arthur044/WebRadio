@@ -16,3 +16,7 @@ services:
   api:
     environment:
       Harbor__AtrasDoProxy: "true"
+      # O que o locutor digita no BUTT/Mixxx (campo `conexao` da credencial de transmissão, 06): o nome público do harbor, ou o
+      # próprio HARBOR_BIND_IP se HARBOR_HOST_PUBLICO não for definido, e a mesma porta publicada acima.
+      Harbor__HostPublico: "${HARBOR_HOST_PUBLICO:-${HARBOR_BIND_IP}}"
+      Harbor__PortaPublica: "${HARBOR_PORT:-8005}"
