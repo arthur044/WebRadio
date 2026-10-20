@@ -100,6 +100,16 @@ export function registrarEventos(
 }
 
 /**
+ * Eventos podem ter se perdido durante a queda (02-api-rest.md §10): ao reconectar o cliente
+ * ressincroniza por REST o que os eventos de estado mantêm em dia.
+ */
+export function invalidarEstadoDaRadio(queryClient: Pick<QueryClient, 'invalidateQueries'>) {
+  queryClient.invalidateQueries({ queryKey: ['programa-ao-vivo'] })
+  queryClient.invalidateQueries({ queryKey: ['grade-semana'] })
+  queryClient.invalidateQueries({ queryKey: ['stream-info'] })
+}
+
+/**
  * E1-P07: conecta no hub `/hubs/radio` (ainda sem backend — depende do E1-F10 do Forge; até
  * lá, `connection.start()` falha e fica em silêncio, sem tempo real, sem quebrar a REST) com
  * reconexão automática. `listenerId` vai na query da conexão (o padrão do SignalR não dá pra
@@ -130,10 +140,7 @@ export function useRealtimeHub(): void {
 
     // 02-api-rest.md §10 / E1-P07: eventos podem ter se perdido durante a queda, então ao
     // reconectar invalida explicitamente em vez de confiar só nos eventos que chegarem depois.
-    connection.onreconnected(() => {
-      queryClient.invalidateQueries({ queryKey: ['programa-ao-vivo'] })
-      queryClient.invalidateQueries({ queryKey: ['stream-info'] })
-    })
+    connection.onreconnected(() => invalidarEstadoDaRadio(queryClient))
 
     let cancelado = false
     // Rede de segurança: se mesmo assim a conexão fechar, volta a tentar com backoff.

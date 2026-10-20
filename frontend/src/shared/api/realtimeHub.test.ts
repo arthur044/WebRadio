@@ -1,6 +1,12 @@
 import { HubConnectionState } from '@microsoft/signalr'
 import { describe, expect, it, vi } from 'vitest'
-import { atrasoDeRetry, criarDedupe, iniciarComRetry, registrarEventos } from './realtimeHub'
+import {
+  atrasoDeRetry,
+  criarDedupe,
+  iniciarComRetry,
+  invalidarEstadoDaRadio,
+  registrarEventos,
+} from './realtimeHub'
 
 describe('atrasoDeRetry', () => {
   it('cresce exponencialmente, limita em 30s e nunca é null', () => {
@@ -89,5 +95,19 @@ describe('registrarEventos', () => {
     handlers.get('TocandoAgora')!({})
     handlers.get('TocandoAgora')!({})
     expect(invalidateQueries).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('invalidarEstadoDaRadio', () => {
+  it('ao reconectar ressincroniza por REST tudo que um evento perdido deixaria velho (a grade inclusa)', () => {
+    const invalidateQueries = vi.fn()
+
+    invalidarEstadoDaRadio({ invalidateQueries } as never)
+
+    expect(invalidateQueries.mock.calls.map(([a]) => a.queryKey[0]).sort()).toEqual([
+      'grade-semana',
+      'programa-ao-vivo',
+      'stream-info',
+    ])
   })
 })

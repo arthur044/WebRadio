@@ -135,7 +135,8 @@ async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, problem)
 }
 
-export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+/** Faz a chamada com o refresh+retry em 401 e devolve a resposta já validada (`ok`); senão lança `ApiError`. */
+async function fetchComSessao(path: string, options: RequestOptions): Promise<Response> {
   const tokenBeforeRequest = useAuthStore.getState().accessToken
   let response = await rawFetch(path, options)
 
@@ -156,9 +157,30 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     throw await toApiError(response)
   }
 
+  return response
+}
+
+async function lerCorpo<T>(response: Response): Promise<T> {
   if (response.status === 204 || response.status === 202) {
     return undefined as T
   }
 
   return (await response.json()) as T
+}
+
+export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  return lerCorpo<T>(await fetchComSessao(path, options))
+}
+
+/**
+ * Como `apiFetch`, mas devolve também o `ETag` da resposta (RowVersion em base64, entre aspas).
+ * `GET` de recurso editável é a única fonte dele (02-api-rest.md, cabeçalho): o JSON não o traz.
+ * O valor volta no `If-Match` do `PUT`/`PATCH`, exatamente como veio.
+ */
+export async function apiFetchComEtag<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<{ data: T; etag: string | null }> {
+  const response = await fetchComSessao(path, options)
+  return { data: await lerCorpo<T>(response), etag: response.headers.get('ETag') }
 }

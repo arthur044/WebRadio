@@ -110,6 +110,8 @@ services:
       DB_TRUST_SERVER_CERTIFICATE: "True" # o mesmo valor da Api e do Worker (B3-03); o smoke compara os três
       DB_MIGRATOR_PASSWORD_FILE: /run/secrets/db_migrator_password
     secrets: [db_migrator_password]
+    # O /tmp também recebe a extração do efbundle (DOTNET_BUNDLE_EXTRACT_BASE_DIR, Dockerfile.migrator): libmsalruntime.so, ~36 MB.
+    # tmpfs conta no mem_limit; medido com 512m, o pico do contêiner foi ~91 MB.
     tmpfs: [/tmp]
     networks: [dados]
     mem_limit: 512m

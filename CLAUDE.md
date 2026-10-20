@@ -6,6 +6,8 @@ Plataforma de webradio interativa. Backend .NET (Clean Architecture + CQRS/Media
 
 Fale com o time por `"$MAESTRI_CLI"` (o `maestri` do PATH é outro binário): `"$MAESTRI_CLI" list`, `"$MAESTRI_CLI" ask <Nome> "<msg>"`, `"$MAESTRI_CLI" note read <nota>`.
 
+Ao responder um `maestri ask`, faça da última linha da resposta, sozinha, o resumo `RESULTADO: <ok|bloqueado|pergunta> — <PR/commit ou "nada"> — <próximo passo>`. Quem perguntou lê essa linha, não a tela inteira. O texto em cinza no `❯` é sugestão do prompt, não comando executado.
+
 | Agente | Papel | Diretório |
 |---|---|---|
 | Nexus | planejador/arquiteto | `~/Projects/webradio-nexus` |

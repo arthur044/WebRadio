@@ -18,6 +18,13 @@
     </PackageReference>
   </ItemGroup>
 
+  <!-- Teste do backplane do SignalR (Redis): dois hosts Kestrel com o mesmo Redis; o StackExchange.Redis vem do pin central. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\WebRadio.Application\WebRadio.Application.csproj" />
     <ProjectReference Include="..\..\src\WebRadio.Infrastructure\WebRadio.Infrastructure.csproj" />

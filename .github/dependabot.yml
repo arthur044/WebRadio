@@ -2,6 +2,8 @@
 # ecossistema para não abrir um PR por pacote. Os FROM dos Dockerfiles são `imagem:tag@sha256:...` (a tag dá ao Dependabot o que
 # comparar; o digest fixa o conteúdo). As imagens do docker-compose.yml são só por digest e o Dependabot só acompanha Dockerfile:
 # a troca delas é manual, conferida no PR que a faz (e o job `vulnerabilidades` acusa o envelhecimento).
+# Os grupos só juntam minor e patch: cada major chega num PR próprio, para não travar o grupo inteiro (o #46 e o #37
+# quebraram por majors misturados a atualizações seguras) e para a triagem semanal separar o que pede análise manual.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -11,33 +13,64 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: "nuget"
     directory: "/backend"
     schedule:
       interval: "weekly"
+    # Cada major vem num PR próprio e conta no limite de PRs abertos (padrão 5).
+    open-pull-requests-limit: 10
     groups:
       nuget:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+    # MediatR fica no 12.x: a licença passa a RPL/comercial a partir da 13 (decisão do usuário em 19/10/2026).
+    # Ver o aviso em backend/Directory.Packages.props.
+    ignore:
+      - dependency-name: "MediatR"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
       interval: "weekly"
+    # Cada major vem num PR próprio e conta no limite de PRs abertos (padrão 5).
+    open-pull-requests-limit: 10
     groups:
       npm:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # typescript-eslint ainda não declara o TypeScript 7 no peer (`npm ci` falha com ERESOLVE no #46): fica no 6.x até ele suportar.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # @types/node acompanha o major do Node do runtime (22, LTS), não o do Dependabot: o 26 não casa com a imagem nem com o CI
+      # (Guardian B1 do #49). Sobe junto com a troca manual do Node (bloco docker /frontend, abaixo).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # Um bloco por pasta com Dockerfile.
   - package-ecosystem: "docker"
     directory: "/backend"
     schedule:
       interval: "weekly"
+    ignore:
+      # Troca de major da imagem .NET é manual, e só em linha LTS (hoje o 10): o Dependabot proporia o 11 (STS), que também exige
+      # mudar o TargetFramework e o global.json. Atualizações de minor e patch continuam automáticas. O Dependabot tira o registry
+      # do nome da dependência, então mcr.microsoft.com/dotnet/{sdk,aspnet,runtime} aparece como dotnet/{sdk,aspnet,runtime}.
+      - dependency-name: "dotnet/*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "docker"
     directory: "/frontend"
     schedule:
       interval: "weekly"
+    ignore:
+      # Troca de major do Node é manual, e só em linha LTS (hoje o 22; o 26 do #45 não é LTS): o runtime, o @types/node do
+      # package.json e o CI precisam andar juntos (Guardian B2 do #45).
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "docker"
     directory: "/infra/icecast"
