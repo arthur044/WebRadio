@@ -473,8 +473,12 @@ jobs:
         run: infra/scripts/smoke-compose.sh
 
       # DoD 2: o player toca o /stream/radio.mp3 real (Liquidsoap -> Icecast -> nginx) sem pausar ao navegar entre Mural, Grade e
-      # Pedir Música. O browser é o Chrome do runner (E2E_CHANNEL=chrome): nada é baixado, então não há binário sem checksum (05 §9).
-      - name: E2E do player contra o stack (DoD 2)
+      # Pedir Música. E2-P01/P02 (DoD 1 do Épico 2): com o Worker de verdade, o selo Ao Vivo aparece e some na grade sem recarregar,
+      # e o Admin cria, edita (If-Match), vê o 409 e cancela um programa pela tela. O browser é o Chrome do runner
+      # (E2E_CHANNEL=chrome): nada é baixado, então não há binário sem checksum (05 §9).
+      # O Admin semeado nasce com a troca de senha pendente: o E2E a troca (só neste stack descartável) e por isso roda DEPOIS do
+      # smoke, que confere o primeiro login. A senha nova nasce aqui, mascarada, e não é gravada em lugar nenhum.
+      - name: E2E contra o stack (player, grade ao vivo e administração da grade)
         working-directory: frontend
         env:
           CI: "true"
@@ -484,6 +488,12 @@ jobs:
           set -euo pipefail
           node --version
           npm ci --no-audit --no-fund --ignore-scripts
+          E2E_ADMIN_EMAIL="$(cat ../secrets/seed_admin_email)"
+          E2E_ADMIN_SENHA="$(cat ../secrets/seed_admin_senha)"
+          E2E_ADMIN_SENHA_NOVA="$(openssl rand -base64 24 | tr '+/' '-_')"
+          echo "::add-mask::${E2E_ADMIN_SENHA}"
+          echo "::add-mask::${E2E_ADMIN_SENHA_NOVA}"
+          export E2E_ADMIN_EMAIL E2E_ADMIN_SENHA E2E_ADMIN_SENHA_NOVA
           npx playwright test --reporter=list
 
       # S-M10 (refresh entre abas): usa a fixture refresh-probe e mocks de rota, que só existem no build e2e (a imagem de produção

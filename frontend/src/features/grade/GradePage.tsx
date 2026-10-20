@@ -1,35 +1,13 @@
-import { useQuery } from '@tanstack/react-query'
-import { apiFetch } from '../../shared/api/httpClient'
 import type { ProgramaDto } from '../../shared/api/types'
 import {
   chaveDataBrasilia,
   formatarDiaBrasilia,
   formatarHoraBrasilia,
-  semanaAtualBrasiliaParaUtc,
 } from '../../shared/lib/timezone'
-
-function useGradeDaSemana() {
-  const { deUtc, ateUtc } = semanaAtualBrasiliaParaUtc()
-  return useQuery({
-    queryKey: ['grade-semana', deUtc, ateUtc],
-    queryFn: () =>
-      apiFetch<ProgramaDto[]>(
-        `/programas?deUtc=${encodeURIComponent(deUtc)}&ateUtc=${encodeURIComponent(ateUtc)}`,
-      ),
-  })
-}
-
-/** Agrupa por dia em Brasília, preservando a ordem cronológica que a API já devolve. */
-function agruparPorDia(programas: ProgramaDto[]): Array<[string, ProgramaDto[]]> {
-  const porDia = new Map<string, ProgramaDto[]>()
-  for (const programa of programas) {
-    const chave = chaveDataBrasilia(programa.inicioUtc)
-    const grupo = porDia.get(chave)
-    if (grupo) grupo.push(programa)
-    else porDia.set(chave, [programa])
-  }
-  return [...porDia.entries()].sort(([a], [b]) => a.localeCompare(b))
-}
+import { agruparPorDia } from './agruparPorDia'
+import { SeletorDeSemana } from './SeletorDeSemana'
+import { useGradeDaSemana } from './useGradeDaSemana'
+import { useSemanaSelecionada } from './useSemanaSelecionada'
 
 function LinhaPrograma({ programa }: { programa: ProgramaDto }) {
   const aoVivo = programa.status === 'AoVivo'
@@ -52,7 +30,7 @@ function LinhaPrograma({ programa }: { programa: ProgramaDto }) {
         <p className="text-text-muted truncate text-xs">{programa.locutor.nome}</p>
       </div>
       {aoVivo && (
-        <span className="flex shrink-0 items-center gap-1.5">
+        <span data-testid="selo-ao-vivo" className="flex shrink-0 items-center gap-1.5">
           <span aria-hidden="true" className="bg-on-air h-2 w-2 animate-pulse rounded-full" />
           <span className="font-display text-on-air text-xs font-bold tracking-wide uppercase">
             Ao vivo
@@ -64,11 +42,21 @@ function LinhaPrograma({ programa }: { programa: ProgramaDto }) {
 }
 
 export function GradePage() {
-  const { data, isPending, isError } = useGradeDaSemana()
+  const semana = useSemanaSelecionada()
+  const { data, isPending, isError } = useGradeDaSemana(semana.segunda)
+  const hoje = chaveDataBrasilia(new Date().toISOString())
 
   return (
     <section>
       <h1 className="font-display text-2xl font-bold">Grade</h1>
+
+      <SeletorDeSemana
+        segunda={semana.segunda}
+        ehSemanaAtual={semana.ehSemanaAtual}
+        onAnterior={semana.anterior}
+        onProxima={semana.proxima}
+        onAtual={semana.voltarParaAtual}
+      />
 
       {isPending && <p className="text-text-muted mt-4 text-sm">Carregando a programação…</p>}
 
@@ -79,7 +67,11 @@ export function GradePage() {
       )}
 
       {data && data.length === 0 && (
-        <p className="text-text-muted mt-4 text-sm">Nenhum programa agendado esta semana.</p>
+        <p className="text-text-muted mt-4 text-sm">
+          {semana.ehSemanaAtual
+            ? 'Nenhum programa agendado esta semana.'
+            : 'Nenhum programa nesta semana.'}
+        </p>
       )}
 
       {data && data.length > 0 && (
@@ -88,6 +80,7 @@ export function GradePage() {
             <div key={chaveDia}>
               <h2 className="font-display text-text-muted text-xs font-bold tracking-wide uppercase">
                 {formatarDiaBrasilia(chaveDia)}
+                {chaveDia === hoje && <span className="text-accent ml-2">hoje</span>}
               </h2>
               <ul className="border-border bg-surface-raised mt-2 rounded-lg border px-3">
                 {programasDoDia.map((programa) => (
