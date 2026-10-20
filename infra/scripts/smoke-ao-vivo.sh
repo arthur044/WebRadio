@@ -2,7 +2,7 @@
 # =============================================================================
 # WebRadio — infra/scripts/smoke-ao-vivo.sh (E2-F10, Definição de Pronto do Épico 2: itens 1, 3, 4 e 7)
 #
-# Roda contra o stack de DEV já no ar, com o seed ligado (SEED_DEV_DATA=true: os locutores locutor1/locutor2 existem), depois do
+# Roda contra o stack de DEV já no ar, com o seed ligado (SEED_DEV_DATA=true: o locutor1 existe), depois do
 # smoke-compose.sh (que confere o primeiro login do Admin semeado, ainda com a troca de senha pendente):
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait   (com SEED_DEV_DATA=true)
 #   E2E_ADMIN_SENHA_NOVA=<senha> infra/scripts/smoke-ao-vivo.sh
@@ -101,7 +101,7 @@ fonte() { # $1 nome, $2 identificador (usuário), $3 arquivo com o segredo, $4 r
 sem_fonte() { docker rm -f "$@" >/dev/null 2>&1 || true; }
 
 # --- quem é quem ------------------------------------------------------------------------------------------------------
-echo "== Admin (senha nova), locutor1 e locutor2 do seed"
+echo "== Admin (senha nova) e locutor1 do seed"
 EMAIL_ADMIN="$(cat secrets/seed_admin_email)"
 SENHA_SEMEADA="$(cat secrets/seed_admin_senha)"
 SENHA_DEV="$(cat secrets/seed_dev_senha)"
@@ -123,14 +123,14 @@ ok "Admin autenticado"
 resp="$(login locutor1@example.com "$SENHA_DEV")"
 [[ -n "$resp" ]] || { falha "login do locutor1 (o stack subiu com SEED_DEV_DATA=true?)"; exit 1; }
 LOC1="$(json 'd["accessToken"]' <<<"$resp")"; LOC1_ID="$(json 'd["usuario"]["id"]' <<<"$resp")"
-resp="$(login locutor2@example.com "$SENHA_DEV")"
-[[ -n "$resp" ]] || { falha "login do locutor2"; exit 1; }
-LOC2="$(json 'd["accessToken"]' <<<"$resp")"
-[[ "${GITHUB_ACTIONS:-}" == "true" ]] && { echo "::add-mask::$LOC1"; echo "::add-mask::$LOC2"; }
-ok "locutor1 e locutor2 autenticados"
+ULTIMO_LOGIN=$SECONDS
+[[ "${GITHUB_ACTIONS:-}" == "true" ]] && echo "::add-mask::$LOC1"
+# O "outro locutor" é o próprio Admin (tem papel de transmissão e nenhum programa na janela): um login a menos, porque /auth/login tem
+# 5 por minuto por IP (janela fixa) e o smoke-compose.sh e o E2E logam no mesmo stack.
+ok "locutor1 autenticado"
 
-credencial() { # $1 token; grava $TMP/cred-$2.{id,segredo}; $2 = rótulo
-  python3 -I -c 'import json,sys; print(json.dumps({"senhaAtual": sys.argv[1]}))' "$SENHA_DEV" > "$TMP/gerar.json"
+credencial() { # $1 token, $2 rótulo, $3 senha atual da conta; grava $TMP/cred-$2.{id,segredo}
+  python3 -I -c 'import json,sys; print(json.dumps({"senhaAtual": sys.argv[1]}))' "$3" > "$TMP/gerar.json"
   local r; r="$(api POST /api/v1/locutores/me/credencial-transmissao "$1" "$TMP/gerar.json")"
   [[ "$(status_de "$r")" == 201 ]] || return 1
   json 'd["identificador"]' <<<"$(corpo_de "$r")" > "$TMP/cred-$2.id"
@@ -165,10 +165,10 @@ confere "o Worker o põe AoVivo em até 20 s" espera_ate 20 programa_ao_vivo_e "
 echo "        (levou $((SECONDS - T0)) s)"
 
 echo "== DoD 3: recusas"
-credencial "$LOC1" l1a || { falha "gerar a credencial do locutor1"; exit 1; }
-credencial "$LOC2" l2 || { falha "gerar a credencial do locutor2"; exit 1; }
+credencial "$LOC1" l1a "$SENHA_DEV" || { falha "gerar a credencial do locutor1"; exit 1; }
+credencial "$ADMIN" l2 "$E2E_ADMIN_SENHA_NOVA" || { falha "gerar a credencial do Admin"; exit 1; }
 ID1="$(cat "$TMP/cred-l1a.id")"; ID2="$(cat "$TMP/cred-l2.id")"
-ok "credenciais geradas (locutor1 e locutor2)"
+ok "credenciais geradas (locutor1 e Admin)"
 printf '%s' "$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n')" > "$TMP/segredo-errado"; chmod 0644 "$TMP/segredo-errado"
 
 tenta_recusada() { # $1 descrição, $2 identificador, $3 arquivo do segredo
@@ -203,7 +203,7 @@ echo "== DoD 3: fora da janela e credencial revogada"
 CON0="$(conta_liq 'Source client conectado')"
 tenta_recusada "credencial certa depois do encerramento (fora da janela) é recusada" "$ID1" "$TMP/cred-l1a.segredo"
 PROG2="$(programa_agora "$LOC1_ID" "[smoke] ao vivo 2")" || { falha "criar o segundo programa de agora"; exit 1; }
-credencial "$LOC1" l1b || { falha "gerar a segunda credencial do locutor1"; exit 1; }
+credencial "$LOC1" l1b "$SENHA_DEV" || { falha "gerar a segunda credencial do locutor1"; exit 1; }
 ok "segunda credencial gerada (a primeira foi revogada na mesma transação)"
 tenta_recusada "a credencial revogada é recusada mesmo dentro da janela" "$ID1" "$TMP/cred-l1a.segredo"
 confere "nenhuma dessas conexões entrou no ar" test "$(conta_liq 'Source client conectado')" = "$CON0"
@@ -240,6 +240,11 @@ echo "== o ouvinte contínuo nunca caiu"
 confere "o curl do stream segue conectado depois de todos os casos" kill -0 "$CONTINUO"
 T1="$(stat -c %s "$TMP/continuo.mp3")"; sleep 5; T2="$(stat -c %s "$TMP/continuo.mp3")"
 confere "e recebendo áudio" test "$T2" -gt "$T1"
+
+# O E2E (próximo passo do CI) loga no mesmo IP e a janela de 5 logins por minuto é fixa: espera 62 s depois do último login deste
+# script para o E2E começar numa janela nova (o script costuma já ter passado disso).
+RESTANTE=$((62 - (SECONDS - ULTIMO_LOGIN)))
+if ((RESTANTE > 0)); then echo "(aguardando ${RESTANTE} s para a janela de logins renovar)"; sleep "$RESTANTE"; fi
 
 echo
 if [[ $falhas -gt 0 ]]; then echo "smoke-ao-vivo: $falhas falha(s)."; exit 1; fi
