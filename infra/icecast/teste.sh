@@ -103,8 +103,18 @@ codigo() { curl -s -o /dev/null -m 10 -w '%{http_code}' "$@"; }
 confere "/admin sem credencial → 401" test "$(codigo "$BASE/admin/stats")" = "401"
 confere "/admin com admin:hackme → 401" test "$(codigo -u admin:hackme "$BASE/admin/stats")" = "401"
 confere "/admin com o usuário e a senha gerados → 200" test "$(codigo -u "operador-radio:$(cat "$TMP/bom/icecast_admin_password")" "$BASE/admin/stats")" = "200"
-confere "PUT /radio.mp3 sem credencial → 401" test "$(codigo -X PUT --data-binary x "$BASE/radio.mp3")" = "401"
-confere "PUT /radio.mp3 com source:hackme → 401" test "$(codigo -u source:hackme -X PUT --data-binary x "$BASE/radio.mp3")" = "401"
+# Sonda de stream (corpo por stdin, sem Content-Length), como o Liquidsoap conecta. No Icecast 2.5 (Alpine 3.24) um PUT
+# curto com --data-binary dá "000" (conexão fechada) com QUALQUER senha, até a certa: não prova nada sobre a autenticação.
+# Aqui a recusa é 401 estrito (resposta imediata) e há um controle positivo com a senha certa: o source aceito segura a
+# conexão, então o curl vê o "100 Continue" e estoura o -m (código 100, exit 28) ou, se o source cair antes, recebe 200.
+# "000" (timeout sem resposta, recusa, reset) nunca vale como recusa nem como aceite.
+fonte() { printf x | curl -s -o /dev/null -m 3 -w '%{http_code}' -H 'Content-Type: audio/mpeg' -T - "$@" "$BASE/radio.mp3"; }
+aceito() { [[ "$1" == "100" || "$1" == "200" ]]; }
+confere "PUT /radio.mp3 sem credencial → 401" test "$(fonte)" = "401"
+confere "PUT /radio.mp3 com source:hackme → 401" test "$(fonte -u source:hackme)" = "401"
+confere "PUT /radio.mp3 com a senha de source gerada → aceito (100 ou 200)" aceito "$(fonte -u "source:$(cat "$TMP/bom/icecast_source_password")")"
+# O source de teste cai ao fechar a conexão do curl; espera o Icecast soltar o mount antes de conferir que está vazio.
+for _ in $(seq 1 20); do [[ "$(codigo "$BASE/radio.mp3")" == "404" ]] && break; sleep 0.5; done
 confere "mount sem fonte → 404" test "$(codigo "$BASE/radio.mp3")" = "404"
 
 echo
