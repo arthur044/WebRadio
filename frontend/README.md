@@ -4,19 +4,19 @@ Frontend da plataforma WebRadio: SPA em **React 19** + **Vite** + **TypeScript**
 
 ## Stack
 
-| Tecnologia | Versão | Propósito |
-|---|---|---|
-| React | 19.2.8 | UI e state management |
-| Vite | 8.3.0 | Bundler e dev server |
-| TypeScript | ~6.0.2 | Type safety |
-| Tailwind CSS | 4.3.3 | Design tokens e utility-first CSS |
-| React Router | 7.18.4 | Roteamento SPA |
+| Tecnologia     | Versão  | Propósito                          |
+| -------------- | ------- | ---------------------------------- |
+| React          | 19.2.8  | UI e state management              |
+| Vite           | 8.3.0   | Bundler e dev server               |
+| TypeScript     | ~6.0.2  | Type safety                        |
+| Tailwind CSS   | 4.3.3   | Design tokens e utility-first CSS  |
+| React Router   | 7.18.4  | Roteamento SPA                     |
 | TanStack Query | 5.104.0 | Fetch e cache de dados do servidor |
-| Zustand | 5.0.15 | State local (player, UI) |
-| ESLint | 10.11.0 | Linting JS/TS |
-| Prettier | 3.9.9 | Formatação de código |
-| Vitest | 5.0.2 | Unit tests |
-| Playwright | 1.63.0 | E2E tests |
+| Zustand        | 5.0.15  | State local (player, UI)           |
+| ESLint         | 10.11.0 | Linting JS/TS                      |
+| Prettier       | 3.9.9   | Formatação de código               |
+| Vitest         | 5.0.2   | Unit tests                         |
+| Playwright     | 1.63.0  | E2E tests                          |
 
 ## Scripts npm
 
@@ -89,16 +89,17 @@ npm run preview          # Testa build localmente
 
 ## Troubleshooting
 
-| Problema | Solução |
-|----------|---------|
-| Alias TypeScript `@/` não funciona | Verifique `tsconfig.json` paths |
-| Player reinicia ao navegar | `<PlayerBar />` deve estar fora de `<Outlet />` |
-| CORS error em dev | Configure `vite.config.ts` proxy para `/api` |
-| E2E com Playwright falhando | Rode `npm run build:e2e` antes de `npm run test:e2e` |
+| Problema                           | Solução                                              |
+| ---------------------------------- | ---------------------------------------------------- |
+| Alias TypeScript `@/` não funciona | Verifique `tsconfig.json` paths                      |
+| Player reinicia ao navegar         | `<PlayerBar />` deve estar fora de `<Outlet />`      |
+| CORS error em dev                  | Configure `vite.config.ts` proxy para `/api`         |
+| E2E com Playwright falhando        | Rode `npm run build:e2e` antes de `npm run test:e2e` |
 
 ## Contribuição
 
 Siga [`../docs/processo-de-desenvolvimento.md`](../docs/processo-de-desenvolvimento.md):
+
 - Branch: `prism/<tarefa-id>`
 - Commits só de seus arquivos
 - PR contra `main` com testes verdes
