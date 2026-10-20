@@ -42,11 +42,24 @@ updates:
     directory: "/backend"
     schedule:
       interval: "weekly"
+    ignore:
+      # Troca de major da imagem .NET é manual, e só em linha LTS (hoje o 10): o Dependabot proporia o 11 (STS), que também exige
+      # mudar o TargetFramework e o global.json. Atualizações de minor e patch continuam automáticas. O nome da dependência
+      # varia com o registry; os dois padrões cobrem mcr.microsoft.com/dotnet/{sdk,aspnet,runtime}.
+      - dependency-name: "mcr.microsoft.com/dotnet/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "dotnet/*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "docker"
     directory: "/frontend"
     schedule:
       interval: "weekly"
+    ignore:
+      # Troca de major do Node é manual, e só em linha LTS (hoje o 22; o 26 do #45 não é LTS): o runtime, o @types/node do
+      # package.json e o CI precisam andar juntos (Guardian B2 do #45).
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "docker"
     directory: "/infra/icecast"
