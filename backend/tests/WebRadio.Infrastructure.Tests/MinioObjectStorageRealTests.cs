@@ -1,5 +1,6 @@
 using Minio;
 using Minio.DataModel.Args;
+using Minio.Exceptions;
 using WebRadio.Application.Abstracoes;
 using WebRadio.Infrastructure.Armazenamento;
 using WebRadio.Infrastructure.Tests.Suporte;
@@ -85,8 +86,11 @@ public sealed class MinioObjectStorageRealTests : IAsyncLifetime
     {
         await EnviarAsync("faixa", 1);
 
-        await Assert.ThrowsAsync<EtagDivergenteException>(
+        var e = await Assert.ThrowsAsync<EtagDivergenteException>(
             () => _storage!.MoverAsync(_origem, "faixa", _destino, "faixa-final", new string('0', 32)));
+
+        // Só o servidor recusando a cópia (header enviado) produz o 412; a limpeza do destino, que também deixa o bucket vazio, não.
+        Assert.IsType<PreconditionFailedException>(e.InnerException);
 
         Assert.NotNull(await _storage!.HeadAsync(_origem, "faixa"));
         Assert.Null(await _storage.HeadAsync(_destino, "faixa-final"));
@@ -101,7 +105,9 @@ public sealed class MinioObjectStorageRealTests : IAsyncLifetime
         // A POST policy aceita outro POST na mesma key depois do concluir: o conteúdo muda e o ETag verificado não vale mais.
         await EnviarAsync("faixa", 2, tamanho: 200);
 
-        await Assert.ThrowsAsync<EtagDivergenteException>(() => _storage.MoverAsync(_origem, "faixa", _destino, "faixa-final", verificado));
+        var e = await Assert.ThrowsAsync<EtagDivergenteException>(
+            () => _storage.MoverAsync(_origem, "faixa", _destino, "faixa-final", verificado));
+        Assert.IsType<PreconditionFailedException>(e.InnerException);
 
         Assert.Null(await _storage.HeadAsync(_destino, "faixa-final"));
         var restante = await _storage.HeadAsync(_origem, "faixa");

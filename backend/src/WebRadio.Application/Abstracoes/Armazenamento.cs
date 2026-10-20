@@ -28,6 +28,9 @@ public interface IObjectStorage
     /// <para>
     /// TODO(S-M02): quando o Worker passar a mover mídia, tratar <see cref="EtagDivergenteException"/> como
     /// <c>Rejeitado</c> e cobrir isso com teste do Worker. Hoje nenhum caller de <c>MoverAsync</c> existe em <c>src</c>.
+    /// Antes de mover para o bucket <c>publico</c>: a limpeza do destino apaga o objeto, e o <c>svc-worker</c> não tem
+    /// <c>s3:DeleteObject</c> em <c>publico/*</c> (só em <c>quarentena/*</c> e <c>midia/*</c>). Ou a policy ganha essa permissão,
+    /// ou o move para lá usa outro desenho; sem isso o objeto não verificado ficaria num bucket de leitura anônima.
     /// </para>
     /// </summary>
     Task MoverAsync(string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default);

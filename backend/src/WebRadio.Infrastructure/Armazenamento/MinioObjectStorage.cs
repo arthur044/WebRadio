@@ -106,6 +106,8 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
             .WithHeaders(new Dictionary<string, string> { ["x-amz-copy-source-if-match"] = esperado });
         var mensagem =
             $"O objeto {bucketOrigem}/{chaveOrigem} mudou depois da verificação: a cópia para {bucketDestino}/{chaveDestino} não confere com o ETag esperado.";
+        // O que já estava no destino antes da cópia: a limpeza só apaga o que ESTA cópia escreveu (Sentinel B1 do #52).
+        var antes = await HeadAsync(bucketDestino, chaveDestino, ct);
         try
         {
             await _interno.CopyObjectAsync(copia, ct);
@@ -119,16 +121,21 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
         var destino = await HeadAsync(bucketDestino, chaveDestino, ct);
         if (destino?.ETag is null || !string.Equals(destino.ETag.Trim('"'), esperado, StringComparison.OrdinalIgnoreCase))
         {
-
             // Se algo no caminho descartou o header e a cópia foi feita, o objeto trocado não pode ficar no bucket final.
-            // Premissa da interface: a chave de destino é exclusiva deste upload, então apagar o que está nela é seguro.
-            if (destino is not null)
+            // Só é apagado o que a cópia escreveu: o destino não existia antes ou o ETag mudou depois dela. Um objeto que já estava
+            // lá e continua igual (cópia que voltou sem escrever) não é tocado, mesmo que a chave devesse ser exclusiva.
+            var escritoPelaCopia = destino is not null
+                && (antes?.ETag is null || !string.Equals(antes.ETag.Trim('"'), destino.ETag?.Trim('"'), StringComparison.OrdinalIgnoreCase));
+            if (escritoPelaCopia)
             {
+                // Limpeza não cancelável pelo chamador (um shutdown no meio deixaria o objeto não verificado no bucket final),
+                // com prazo próprio.
+                using var prazo = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 try
                 {
-                    await _interno.RemoveObjectAsync(new RemoveObjectArgs().WithBucket(bucketDestino).WithObject(chaveDestino), ct);
+                    await _interno.RemoveObjectAsync(new RemoveObjectArgs().WithBucket(bucketDestino).WithObject(chaveDestino), prazo.Token);
                 }
-                catch (Exception e) when (e is not OperationCanceledException)
+                catch (Exception e)
                 {
                     throw new EtagDivergenteException(mensagem + " A limpeza do destino também falhou: o objeto não verificado continua lá.", e);
                 }

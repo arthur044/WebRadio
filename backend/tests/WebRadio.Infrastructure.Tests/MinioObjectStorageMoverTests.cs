@@ -45,6 +45,27 @@ public class MinioObjectStorageMoverTests
     }
 
     [Fact]
+    public async Task Objeto_que_ja_estava_no_destino_e_a_copia_voltou_sem_escrever_nao_e_apagado()
+    {
+        // 412 engolido por uma camada antiga: o destino continua com o objeto legítimo de antes, que não é nosso para apagar.
+        var cliente = new ClienteFalso { EtagDoDestinoAntes = Trocado, EtagDoDestino = Trocado };
+
+        await Assert.ThrowsAsync<EtagDivergenteException>(() => Novo(cliente).MoverAsync("quarentena", "a", "midia", "b", Esperado));
+
+        Assert.Empty(cliente.Removidos);
+    }
+
+    [Fact]
+    public async Task Objeto_que_ja_estava_no_destino_e_a_copia_o_sobrescreveu_com_outro_etag_e_apagado()
+    {
+        var cliente = new ClienteFalso { EtagDoDestinoAntes = "33333333333333333333333333333333", EtagDoDestino = Trocado };
+
+        await Assert.ThrowsAsync<EtagDivergenteException>(() => Novo(cliente).MoverAsync("quarentena", "a", "midia", "b", Esperado));
+
+        Assert.Equal(["midia/b"], cliente.Removidos);
+    }
+
+    [Fact]
     public async Task Minio_7_lanca_o_412_e_ele_vira_EtagDivergente_sem_apagar_nada()
     {
         var cliente = new ClienteFalso { EtagDoDestino = Esperado, CopiaLancaPrecondicao = true };
@@ -86,6 +107,11 @@ public class MinioObjectStorageMoverTests
 
         public bool CopiaLancaPrecondicao { get; init; }
 
+        /// <summary>ETag que o destino já tinha ANTES da cópia (null = não existia).</summary>
+        public string? EtagDoDestinoAntes { get; init; }
+
+        private bool _copiou;
+
         public List<string> Removidos { get; } = [];
 
         public string? HeaderIfMatch { get; private set; }
@@ -117,6 +143,7 @@ public class MinioObjectStorageMoverTests
             switch (metodo)
             {
                 case nameof(IMinioClient.CopyObjectAsync):
+                    _copiou = true;
                     HeaderIfMatch = Ler<Dictionary<string, string>>(args[0]!, "Headers")?.GetValueOrDefault("x-amz-copy-source-if-match");
                     return CopiaLancaPrecondicao
                         ? Task.FromException(new PreconditionFailedException("condição não atendida"))
@@ -124,10 +151,11 @@ public class MinioObjectStorageMoverTests
 
                 case nameof(IMinioClient.StatObjectAsync):
                     // Só o destino é conferido; a origem não é consultada pelo MoverAsync.
-                    if (EtagDoDestino is null) return Task.FromException<ObjectStat>(new ObjectNotFoundException("destino ausente"));
+                    var etagAgora = _copiou ? EtagDoDestino : EtagDoDestinoAntes;
+                    if (etagAgora is null) return Task.FromException<ObjectStat>(new ObjectNotFoundException("destino ausente"));
                     return Task.FromResult(ObjectStat.FromResponseHeaders("b", new Dictionary<string, string>
                     {
-                        ["etag"] = "\"" + EtagDoDestino + "\"",
+                        ["etag"] = "\"" + etagAgora + "\"",
                         ["content-length"] = "100",
                         ["content-type"] = "audio/mpeg",
                     }));
