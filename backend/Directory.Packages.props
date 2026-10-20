@@ -6,9 +6,10 @@
   </PropertyGroup>
 
   <!--
-    ATENCAO LICENCA (aviso do Nexus, 2026-09-27): MediatR passou a licenca comercial
-    a partir da v13. Fixado em 12.4.1 (Apache-2.0) deliberadamente. NAO atualizar
-    para 13.x sem decisao explicita do Planejador sobre custo de licenca.
+    ATENCAO LICENCA (aviso do Nexus, 2026-09-27): MediatR passou a licenca RPL/comercial
+    a partir da v13. Fica no 12.x (Apache-2.0) deliberadamente, por decisao do usuario em
+    19/10/2026; o Dependabot ignora o major (.github/dependabot.yml). NAO atualizar para
+    13.x sem nova decisao do usuario sobre a licenca.
   -->
   <ItemGroup>
     <PackageVersion Include="MediatR" Version="12.5.0" />
