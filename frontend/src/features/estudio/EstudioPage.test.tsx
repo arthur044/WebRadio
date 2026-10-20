@@ -10,6 +10,7 @@ import { EstudioPage } from './EstudioPage'
 // 43 caracteres de [A-Za-z0-9_-], como o servidor gera (06 §Credencial de transmissão).
 const SEGREDO = 'Zk3_aB9-xQ7mP2vN8cL5tR1wY6uH4jE0sD3fG7hK2pM'
 const IDENTIFICADOR = '3f2a9c1e-7b64-4d85-9a10-5c8e2d7b6f41'
+const CONEXAO = { host: 'radio.exemplo.org', porta: 8005, mount: '/live' }
 
 interface Chamada {
   metodo: string
@@ -29,7 +30,13 @@ function problema(status: number, type: string, extras: object = {}) {
 }
 
 interface Cenario {
-  credencial?: { identificador: string; criadaEmUtc: string; ultimoUsoEmUtc: string | null } | null
+  credencial?: {
+    identificador: string
+    criadaEmUtc: string
+    ultimoUsoEmUtc: string | null
+    conexao?: object | null
+  } | null
+  conexao?: object | null
   aoVivo?: { noAr: boolean; programaId?: string; locutorNome?: string }
   programaEmCurso?: object | null
   ativas?: object[]
@@ -77,6 +84,7 @@ function montarApi(cenario: Cenario = {}) {
               identificador: IDENTIFICADOR,
               segredo: SEGREDO,
               criadaEmUtc: new Date().toISOString(),
+              conexao: cenario.conexao === undefined ? CONEXAO : cenario.conexao,
             },
             { 'Cache-Control': 'no-store' },
           )
@@ -85,6 +93,7 @@ function montarApi(cenario: Cenario = {}) {
             identificador: IDENTIFICADOR,
             criadaEmUtc: new Date().toISOString(),
             ultimoUsoEmUtc: null,
+            conexao: cenario.conexao === undefined ? CONEXAO : cenario.conexao,
           }
         }
         return resposta
@@ -274,6 +283,7 @@ describe('Credencial de transmissão: painel do locutor', () => {
         identificador: IDENTIFICADOR,
         criadaEmUtc: new Date(Date.now() - 3 * 24 * 3600_000).toISOString(),
         ultimoUsoEmUtc: null,
+        conexao: CONEXAO,
       },
     })
     renderEstudio()
@@ -281,8 +291,37 @@ describe('Credencial de transmissão: painel do locutor', () => {
     expect(await screen.findByText(/Criada há 3 dias/)).toBeInTheDocument()
     expect(screen.getByText(/Ainda não foi usada/)).toBeInTheDocument()
     expect(screen.getByText(IDENTIFICADOR)).toBeInTheDocument()
-    expect(screen.getByText('/live')).toBeInTheDocument()
+    expect(screen.getByText('radio.exemplo.org')).toBeInTheDocument()
     expect(screen.getByText('8005')).toBeInTheDocument()
+    expect(screen.getByText('/live')).toBeInTheDocument()
+  })
+
+  it('sem host configurado (conexao nula), manda pedir o endereço à administração', async () => {
+    entrarComo('Locutor')
+    montarApi({
+      credencial: {
+        identificador: IDENTIFICADOR,
+        criadaEmUtc: new Date().toISOString(),
+        ultimoUsoEmUtc: null,
+        conexao: null,
+      },
+    })
+    renderEstudio()
+
+    expect(await screen.findByText('peça o endereço à administração')).toBeInTheDocument()
+    expect(screen.queryByText('Porta')).not.toBeInTheDocument()
+  })
+
+  it('o diálogo de geração mostra a conexão que veio na resposta do POST', async () => {
+    entrarComo('Locutor')
+    montarApi()
+    const user = userEvent.setup()
+    renderEstudio()
+
+    const dialogo = await gerarCredencial(user)
+
+    expect(await within(dialogo).findByText('radio.exemplo.org')).toBeInTheDocument()
+    expect(within(dialogo).getByText('/live')).toBeInTheDocument()
   })
 
   it('revoga com confirmação', async () => {

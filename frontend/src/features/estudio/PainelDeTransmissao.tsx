@@ -84,7 +84,7 @@ export function PainelDeTransmissao() {
               ? `Último uso ${formatarIdade(ativa.ultimoUsoEmUtc)}.`
               : 'Ainda não foi usada.'}
           </p>
-          <InstrucoesDeTransmissao identificador={ativa.identificador} />
+          <InstrucoesDeTransmissao identificador={ativa.identificador} conexao={ativa.conexao} />
         </div>
       )}
 

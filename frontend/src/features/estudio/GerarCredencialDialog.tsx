@@ -157,6 +157,7 @@ export function GerarCredencialDialog({ onFechar }: Props) {
             </div>
             <InstrucoesDeTransmissao
               identificador={gerada.identificador}
+              conexao={gerada.conexao}
               segredo={gerada.segredo}
             />
             <div className="flex justify-end">

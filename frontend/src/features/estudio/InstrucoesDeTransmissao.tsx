@@ -1,7 +1,9 @@
-import { HARBOR } from '../../shared/config/harbor'
+import type { ConexaoDeTransmissaoDto } from '../../shared/api/types'
 
 interface Props {
   identificador: string
+  /** Vem da API (só o dono vê). Sem host configurado, a tela manda pedir o endereço à administração. */
+  conexao?: ConexaoDeTransmissaoDto | null
   /** Só o diálogo de geração tem o segredo; fora dele a linha da senha explica onde ele está. */
   segredo?: string
 }
@@ -16,16 +18,16 @@ function Linha({ rotulo, valor }: { rotulo: string; valor: string }) {
 }
 
 /** Os campos que o BUTT e o Mixxx pedem. O "usuário" do source client é o identificador, não o e-mail. */
-export function InstrucoesDeTransmissao({ identificador, segredo }: Props) {
+export function InstrucoesDeTransmissao({ identificador, conexao, segredo }: Props) {
   return (
     <div>
       <h3 className="font-display text-text-muted text-xs font-bold tracking-wide uppercase">
         Configurar o BUTT ou o Mixxx
       </h3>
       <dl className="mt-2 flex flex-col gap-1 text-sm">
-        <Linha rotulo="Servidor" valor={HARBOR.host ?? 'peça o endereço à administração'} />
-        <Linha rotulo="Porta" valor={HARBOR.porta} />
-        <Linha rotulo="Mount" valor={HARBOR.mount} />
+        <Linha rotulo="Servidor" valor={conexao?.host ?? 'peça o endereço à administração'} />
+        {conexao?.porta != null && <Linha rotulo="Porta" valor={String(conexao.porta)} />}
+        {conexao?.mount && <Linha rotulo="Mount" valor={conexao.mount} />}
         <Linha rotulo="Usuário" valor={identificador} />
         <Linha rotulo="Senha" valor={segredo ?? 'o segredo mostrado ao gerar'} />
       </dl>

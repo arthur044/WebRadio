@@ -112,11 +112,22 @@ export interface StreamInfoDto {
   aoVivo: AoVivoDto
 }
 
+/**
+ * Onde o source client conecta (Harbor__HostPublico/PortaPublica no servidor; mount fixo `/live`). Só o dono
+ * autenticado a recebe, nas respostas da credencial. Sem host configurado vem `null` (o objeto ou o `host`).
+ */
+export interface ConexaoDeTransmissaoDto {
+  host: string | null
+  porta: number | string | null
+  mount: string | null
+}
+
 /** `GET /locutores/me/credencial-transmissao` (06 §REST pública): nunca traz o segredo. */
 export interface CredencialDto {
   identificador: string
   criadaEmUtc: string
   ultimoUsoEmUtc: string | null
+  conexao?: ConexaoDeTransmissaoDto | null
 }
 
 /** `POST /locutores/me/credencial-transmissao`: a ÚNICA resposta com o segredo. Não vai para o cache de queries. */
@@ -124,10 +135,11 @@ export interface CredencialGeradaDto {
   identificador: string
   segredo: string
   criadaEmUtc: string
+  conexao?: ConexaoDeTransmissaoDto | null
 }
 
 /** `GET /credenciais-transmissao` (Admin). */
-export interface CredencialAtivaDto extends CredencialDto {
+export interface CredencialAtivaDto extends Omit<CredencialDto, 'conexao'> {
   usuarioId: string
   usuarioNome: string
 }
