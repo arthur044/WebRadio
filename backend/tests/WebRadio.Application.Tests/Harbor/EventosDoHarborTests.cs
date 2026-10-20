@@ -16,6 +16,15 @@ public sealed class EstadoEmMemoria : IEstadoDoAoVivoStore
     public EstadoDoAoVivo? Atual { get; set; }
     public Task<EstadoDoAoVivo?> ObterAsync(CancellationToken ct) => Task.FromResult(Atual);
     public Task DefinirAsync(EstadoDoAoVivo estado, CancellationToken ct) { Atual = estado; return Task.CompletedTask; }
+
+    public DateTime Agora { get; set; } = DateTime.UtcNow;
+
+    public Task<ExpiracaoDoAoVivo?> ExpirarVencidoAsync(CancellationToken ct)
+    {
+        if (Atual is not { } antes || antes.Vigente(Agora) == antes) return Task.FromResult<ExpiracaoDoAoVivo?>(null);
+        Atual = EstadoDoAoVivo.ForaDoAr(antes.DesdeUtc);
+        return Task.FromResult<ExpiracaoDoAoVivo?>(new ExpiracaoDoAoVivo(antes, Atual));
+    }
 }
 
 /// <summary>E2-F06: POST /internal/harbor/eventos → estado do ao vivo + TransmissaoAoVivoAlterada pelo outbox.</summary>

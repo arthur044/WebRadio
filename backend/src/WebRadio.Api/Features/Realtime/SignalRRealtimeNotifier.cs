@@ -88,8 +88,12 @@ public sealed class RealtimeEndpoints : IEndpointModule
         services.AddSingleton<IRealtimeNotifier, SignalRRealtimeNotifier>();
         services.AddScoped<OutboxProcessor>();
         // Desligável só para os testes controlarem o passe à mão (Outbox:Dispatcher=false).
+        services.AddScoped<WebRadio.Application.Features.Harbor.ReconciliadorDoAoVivo>();
         if (!bool.TryParse(configuration["Outbox:Dispatcher"], out var ligado) || ligado)
+        {
             services.AddHostedService<OutboxDispatcher>();
+            services.AddHostedService<WebRadio.Infrastructure.Harbor.ReconciliadorDoAoVivoJob>();
+        }
 
         if (string.IsNullOrWhiteSpace(configuration["Redis:Host"])) return services;
 
