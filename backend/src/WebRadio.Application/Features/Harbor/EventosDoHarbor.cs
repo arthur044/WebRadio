@@ -37,6 +37,12 @@ public interface IEstadoDoAoVivoStore
     /// ar" e devolve a troca; senão <c>null</c>. Com Redis a troca é condicional ao valor lido: de N réplicas, só uma a faz.
     /// </summary>
     Task<ExpiracaoDoAoVivo?> ExpirarVencidoAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Desfaz uma <see cref="ExpirarVencidoAsync"/> cujo evento não gravou, mas só se o estado guardado ainda for o "fora do ar"
+    /// que ela escreveu: um <c>Conectado</c> que entrou nesse intervalo não pode ser sobrescrito pelo estado vencido.
+    /// </summary>
+    Task DesfazerExpiracaoAsync(ExpiracaoDoAoVivo troca, CancellationToken ct);
 }
 
 /// <summary>
@@ -58,7 +64,7 @@ public sealed class ReconciliadorDoAoVivo(IEstadoDoAoVivoStore estado, IOutbox o
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            await estado.DefinirAsync(troca.Antes, CancellationToken.None);
+            await estado.DesfazerExpiracaoAsync(troca, CancellationToken.None);
             logger.LogError(ex, "HARBOR_AO_VIVO_VENCIDO não publicou: o estado voltou e a próxima passada tenta de novo");
             return false;
         }

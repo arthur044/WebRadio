@@ -19,6 +19,12 @@ public sealed class EstadoEmMemoria : IEstadoDoAoVivoStore
 
     public DateTime Agora { get; set; } = DateTime.UtcNow;
 
+    public Task DesfazerExpiracaoAsync(ExpiracaoDoAoVivo troca, CancellationToken ct)
+    {
+        if (Atual == troca.Depois) Atual = troca.Antes;
+        return Task.CompletedTask;
+    }
+
     public Task<ExpiracaoDoAoVivo?> ExpirarVencidoAsync(CancellationToken ct)
     {
         if (Atual is not { } antes || antes.Vigente(Agora) == antes) return Task.FromResult<ExpiracaoDoAoVivo?>(null);
