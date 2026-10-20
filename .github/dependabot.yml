@@ -19,6 +19,11 @@ updates:
     groups:
       nuget:
         patterns: ["*"]
+    # MediatR fica no 12.x: a licença passa a RPL/comercial a partir da 13 (decisão do usuário em 19/10/2026).
+    # Ver o aviso em backend/Directory.Packages.props.
+    ignore:
+      - dependency-name: "MediatR"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/frontend"

@@ -11,7 +11,7 @@
     para 13.x sem decisao explicita do Planejador sobre custo de licenca.
   -->
   <ItemGroup>
-    <PackageVersion Include="MediatR" Version="14.2.0" />
+    <PackageVersion Include="MediatR" Version="12.4.1" />
     <PackageVersion Include="FluentValidation" Version="12.2.0" />
     <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.2.0" />
   </ItemGroup>
