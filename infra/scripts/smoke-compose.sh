@@ -9,6 +9,10 @@
 # O stack no ar é o do DEV (docker-compose.dev.yml); por isso as seções "base de produção" conferem a topologia do
 # docker-compose.yml SOZINHO pelo `docker compose config --format json` (redes, portas, capabilities), sem subir nada.
 #
+# O ao vivo (DoD 1, 3, 4 e 7 do Épico 2) é conferido por infra/scripts/smoke-ao-vivo.sh, que roda DEPOIS deste (o primeiro login do
+# Admin semeado, com a troca de senha pendente, só existe antes dele) e antes do E2E; a porta do harbor só existir no live.yml e a
+# base de produção publicar só a 8080 ficam aqui, na seção "base de PRODUÇÃO".
+#
 #   infra/scripts/smoke-compose.sh
 # =============================================================================
 set -euo pipefail
