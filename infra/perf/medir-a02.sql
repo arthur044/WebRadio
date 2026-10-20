@@ -12,7 +12,8 @@
          Criação = sem o predicado do Id (o EF o elimina com ignorarId nulo); edição = com "p.Id <> @ignorarId".
      Q2  TransicoesDaGrade.Sql (main), com os valores do enum já interpolados. Os cenários de escrita rodam dentro de uma
          transação que termina em ROLLBACK: o dataset não muda. (A Q3 e a Q4 gravam o preparo do AoVivo, sem rollback.)
-     Q3  ConsultasDoHarbor.JanelaAsync (origin/forge/e2-b2-ao-vivo), parâmetro @p0 como o SqlQuery do EF.
+     Q3  ConsultasDoHarbor.JanelaAsync (origin/forge/e2-b2-ao-vivo, @daae154 em diante): @p0 = identificador e @p1 = Programa.DuracaoMaxima
+         em minutos (720), como o SqlQuery do EF.
 
    Ordem: Q1, Q3 e Q4 (leituras) antes da Q2 (escritas). O ROLLBACK dos cenários do Worker deixa registros fantasma e
    páginas divididas justamente na faixa de "agora" até a limpeza em segundo plano, e isso inflaria as leituras da janela.
@@ -119,7 +120,7 @@ DECLARE @sql3 nvarchar(max) = N'SELECT TOP (1) p.Id AS ProgramaId, p.FimUtc
               AND u.Ativo = 1
               AND u.Role IN (1, 2)
               AND p.InicioUtc <= SYSUTCDATETIME()
-              AND p.InicioUtc > DATEADD(HOUR, -12, SYSUTCDATETIME())
+              AND p.InicioUtc > DATEADD(MINUTE, -@p1, SYSUTCDATETIME())
               AND p.FimUtc > SYSUTCDATETIME()
               AND p.Status NOT IN (3, 4)
             ORDER BY p.InicioUtc DESC';
@@ -133,24 +134,24 @@ DECLARE @inexistente uniqueidentifier = NEWID();
 SET STATISTICS IO ON; SET STATISTICS XML ON;
 PRINT '### 3a credencial do locutor no ar (dentro da janela)';
 CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
-EXEC sp_executesql @sql3, N'@p0 uniqueidentifier', @p0 = @dentro;
+EXEC sp_executesql @sql3, N'@p0 uniqueidentifier, @p1 int', @p1 = 720, @p0 = @dentro;
 PRINT '### 3b credencial ativa de locutor sem programa na janela (fora da janela)';
 CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
-EXEC sp_executesql @sql3, N'@p0 uniqueidentifier', @p0 = @fora;
+EXEC sp_executesql @sql3, N'@p0 uniqueidentifier, @p1 int', @p1 = 720, @p0 = @fora;
 PRINT '### 3c credencial revogada';
 CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
-EXEC sp_executesql @sql3, N'@p0 uniqueidentifier', @p0 = @revogada;
+EXEC sp_executesql @sql3, N'@p0 uniqueidentifier, @p1 int', @p1 = 720, @p0 = @revogada;
 PRINT '### 3d identificador inexistente';
 CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
-EXEC sp_executesql @sql3, N'@p0 uniqueidentifier', @p0 = @inexistente;
+EXEC sp_executesql @sql3, N'@p0 uniqueidentifier, @p1 int', @p1 = 720, @p0 = @inexistente;
 PRINT '### 3e reuso do plano de 3d (compilado com a credencial inexistente) para o locutor no ar e o fora da janela';
-EXEC sp_executesql @sql3, N'@p0 uniqueidentifier', @p0 = @dentro;
-EXEC sp_executesql @sql3, N'@p0 uniqueidentifier', @p0 = @fora;
+EXEC sp_executesql @sql3, N'@p0 uniqueidentifier, @p1 int', @p1 = 720, @p0 = @dentro;
+EXEC sp_executesql @sql3, N'@p0 uniqueidentifier, @p1 int', @p1 = 720, @p0 = @fora;
 -- Controle negativo: a janela SEM o limite de 12 h. Não é o código da aplicação.
-DECLARE @sql3sem nvarchar(max) = REPLACE(@sql3, N'AND p.InicioUtc > DATEADD(HOUR, -12, SYSUTCDATETIME())', N'');
+DECLARE @sql3sem nvarchar(max) = REPLACE(@sql3, N'AND p.InicioUtc > DATEADD(MINUTE, -@p1, SYSUTCDATETIME())', N'');
 PRINT '### 3f controle: locutor fora da janela, SEM o limite de 12 h';
 CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
-EXEC sp_executesql @sql3sem, N'@p0 uniqueidentifier', @p0 = @fora;
+EXEC sp_executesql @sql3sem, N'@p0 uniqueidentifier, @p1 int', @p1 = 720, @p0 = @fora;
 SET STATISTICS XML OFF; SET STATISTICS IO OFF;
 GO
 
