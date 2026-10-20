@@ -296,20 +296,20 @@ describe('Credencial de transmissão: painel do locutor', () => {
     expect(screen.getByText('/live')).toBeInTheDocument()
   })
 
-  it('sem host configurado (conexao nula), manda pedir o endereço à administração', async () => {
+  it('sem host configurado (host nulo), manda pedir o endereço à administração', async () => {
     entrarComo('Locutor')
     montarApi({
       credencial: {
         identificador: IDENTIFICADOR,
         criadaEmUtc: new Date().toISOString(),
         ultimoUsoEmUtc: null,
-        conexao: null,
+        conexao: { host: null, porta: 8005, mount: '/live' },
       },
     })
     renderEstudio()
 
     expect(await screen.findByText('peça o endereço à administração')).toBeInTheDocument()
-    expect(screen.queryByText('Porta')).not.toBeInTheDocument()
+    expect(screen.getByText('8005')).toBeInTheDocument()
   })
 
   it('o diálogo de geração mostra a conexão que veio na resposta do POST', async () => {
@@ -331,6 +331,7 @@ describe('Credencial de transmissão: painel do locutor', () => {
         identificador: IDENTIFICADOR,
         criadaEmUtc: new Date().toISOString(),
         ultimoUsoEmUtc: null,
+        conexao: CONEXAO,
       },
     })
     const user = userEvent.setup()
@@ -352,6 +353,7 @@ describe('Credencial de transmissão: painel do locutor', () => {
         identificador: IDENTIFICADOR,
         criadaEmUtc: new Date().toISOString(),
         ultimoUsoEmUtc: null,
+        conexao: CONEXAO,
       },
     })
     const { queryClient } = renderEstudio()

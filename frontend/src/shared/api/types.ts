@@ -113,21 +113,21 @@ export interface StreamInfoDto {
 }
 
 /**
- * Onde o source client conecta (Harbor__HostPublico/PortaPublica no servidor; mount fixo `/live`). Só o dono
- * autenticado a recebe, nas respostas da credencial. Sem host configurado vem `null` (o objeto ou o `host`).
+ * Onde o source client conecta (06 §Conexão): `host` vem de `Harbor__HostPublico` e é `null` sem ele; `porta` de
+ * `Harbor__PortaPublica` (padrão 8005); `mount` é fixo, `/live`. Não é segredo; só o dono a recebe.
  */
 export interface ConexaoDeTransmissaoDto {
   host: string | null
-  porta: number | string | null
-  mount: string | null
+  porta: number
+  mount: string
 }
 
-/** `GET /locutores/me/credencial-transmissao` (06 §REST pública): nunca traz o segredo. */
+/** `GET /locutores/me/credencial-transmissao` (200; o 204 não tem corpo): nunca traz o segredo. */
 export interface CredencialDto {
   identificador: string
   criadaEmUtc: string
   ultimoUsoEmUtc: string | null
-  conexao?: ConexaoDeTransmissaoDto | null
+  conexao: ConexaoDeTransmissaoDto
 }
 
 /** `POST /locutores/me/credencial-transmissao`: a ÚNICA resposta com o segredo. Não vai para o cache de queries. */
@@ -135,7 +135,7 @@ export interface CredencialGeradaDto {
   identificador: string
   segredo: string
   criadaEmUtc: string
-  conexao?: ConexaoDeTransmissaoDto | null
+  conexao: ConexaoDeTransmissaoDto
 }
 
 /** `GET /credenciais-transmissao` (Admin). */

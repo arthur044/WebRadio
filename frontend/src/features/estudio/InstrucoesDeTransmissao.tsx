@@ -3,7 +3,7 @@ import type { ConexaoDeTransmissaoDto } from '../../shared/api/types'
 interface Props {
   identificador: string
   /** Vem da API (só o dono vê). Sem host configurado, a tela manda pedir o endereço à administração. */
-  conexao?: ConexaoDeTransmissaoDto | null
+  conexao: ConexaoDeTransmissaoDto
   /** Só o diálogo de geração tem o segredo; fora dele a linha da senha explica onde ele está. */
   segredo?: string
 }
@@ -25,9 +25,9 @@ export function InstrucoesDeTransmissao({ identificador, conexao, segredo }: Pro
         Configurar o BUTT ou o Mixxx
       </h3>
       <dl className="mt-2 flex flex-col gap-1 text-sm">
-        <Linha rotulo="Servidor" valor={conexao?.host ?? 'peça o endereço à administração'} />
-        {conexao?.porta != null && <Linha rotulo="Porta" valor={String(conexao.porta)} />}
-        {conexao?.mount && <Linha rotulo="Mount" valor={conexao.mount} />}
+        <Linha rotulo="Servidor" valor={conexao.host ?? 'peça o endereço à administração'} />
+        <Linha rotulo="Porta" valor={String(conexao.porta)} />
+        <Linha rotulo="Mount" valor={conexao.mount} />
         <Linha rotulo="Usuário" valor={identificador} />
         <Linha rotulo="Senha" valor={segredo ?? 'o segredo mostrado ao gerar'} />
       </dl>
