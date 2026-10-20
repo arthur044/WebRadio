@@ -297,6 +297,22 @@ confere "a segunda não entrou" test "$(conta_log "$P-radio" 'Source client cone
 confere "o stream segue" toca
 docker rm -f "$P-fonte2" >/dev/null
 
+echo "-- duas credenciais diferentes: o auth da segunda não troca quem está no ar (Sentinel 1)"
+USR2="$(cat /proc/sys/kernel/random/uuid)"; SEC2="$(segredo_novo)"
+printf '%s' "$SEC2" > "$TMP/senha-b"; chmod 0644 "$TMP/senha-b"
+controle credencial "$USR $SEC"$'\n'"$USR2 $SEC2"
+DESC="$(conta_log "$P-radio" 'Source client desconectado')"
+CON="$(conta_log "$P-radio" 'Source client conectado')"
+fonte_ao_vivo fonte2 "$USR2" "$TMP/senha-b"
+confere "a API autorizou a segunda credencial (o auth dela é válido)" espera_log "$P-radio" "Autorizado identificador $USR2" 30
+sleep 12 # pelo menos uma reconferência de 10 s depois do auth da segunda
+confere "a primeira segue conectada" test "$(conta_log "$P-radio" 'Source client desconectado')" = "$DESC"
+confere "a segunda não entrou" test "$(conta_log "$P-radio" 'Source client conectado')" = "$CON"
+if docker logs "$P-api" 2>&1 | grep -F HARBOR_AUTORIZACAO | grep -q -F "$USR2"; then falha "a reconferência consultou a segunda credencial"; else ok "a reconferência segue consultando só a primeira"; fi
+if docker logs "$P-api" 2>&1 | grep -F HARBOR_EVENTO | grep -q -F "$USR2"; then falha "um evento do harbor saiu com a segunda credencial"; else ok "nenhum evento saiu com a segunda credencial"; fi
+docker rm -f "$P-fonte2" >/dev/null
+controle credencial "$USR $SEC"
+
 echo "-- falha de transporte da consulta mantém o locutor (falha aberta)"
 controle modo_autorizacao 503
 confere "log.severe a cada consulta que falha" espera_log "$P-radio" "Consulta de autorização falhou (status 503)" 30

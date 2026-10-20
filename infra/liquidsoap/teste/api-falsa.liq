@@ -5,7 +5,7 @@
 # Registra no log o que o radio.liq mandou; o token nunca é impresso, só "auth=ok|ERRADO".
 #
 # Harbor (E2-F08): as rotas /internal/harbor/* respondem ao que o teste.sh escreve em /controle (um arquivo por assunto, lido a cada
-# requisição): credencial ("usuario senha" aceitos), janela (aberta|fechada), fim (ISO-8601 em UTC), modo_auth e modo_autorizacao
+# requisição): credencial (uma linha "usuario senha" por credencial aceita), janela (aberta|fechada), fim (ISO-8601 em UTC), modo_auth e modo_autorizacao
 # (vazio | 401 | 503 | lento: o "lento" demora 7 s, mais que o timeout de 5 s do radio.liq) e modo_eventos (vazio | 503).
 # =============================================================================
 settings.log.stdout := true
@@ -90,7 +90,8 @@ def harbor_auth(req, res) =
   # O corpo nunca é impresso (traz a senha): só o que a conferência concluiu.
   let json.parse (corpo : {usuario: string, senha: string, enderecoIp: string}) = req.body()
   credencial = controle("credencial", "x y")
-  certa = credencial == "#{corpo.usuario} #{corpo.senha}"
+  # Uma credencial por linha ("usuario senha").
+  certa = list.exists(fun (linha) -> linha == "#{corpo.usuario} #{corpo.senha}", string.split(separator="\n", credencial))
   janela = controle("janela", "aberta")
   modo = controle("modo_auth", "")
   rotulo = if certa then "certa" else "errada" end
