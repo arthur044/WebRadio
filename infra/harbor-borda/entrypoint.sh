@@ -23,9 +23,8 @@ aberto() {
 }
 
 if [ "${HARBOR_LIBERAR_TUDO:-}" != "1" ]; then
-  case "$(printf '%s' "${HARBOR_BIND_IP:-}" | tr -d ' []')" in
-    0.0.0.0|::|0:0:0:0:0:0:0:0) aberto "HARBOR_BIND_IP" ;;
-  esac
+  # Qualquer grafia do endereço "todos": 0.0.0.0, 00.0.0.0, ::, ::0, 0::, 0::0, 0:0:0:0:0:0:0:0, com ou sem colchetes.
+  if printf '%s' "${HARBOR_BIND_IP:-}" | tr -d ' []' | grep -Eq '^(0+(\.0+){3}|[0:]*:[0:]*)$'; then aberto "HARBOR_BIND_IP"; fi
   for item in $(printf '%s' "${HARBOR_PERMITIDOS:-}" | tr ',' ' '); do
     case "$item" in
       */0) aberto "HARBOR_PERMITIDOS com prefixo /0" ;;
