@@ -6,7 +6,7 @@
 #
 # Harbor (E2-F08): as rotas /internal/harbor/* respondem ao que o teste.sh escreve em /controle (um arquivo por assunto, lido a cada
 # requisição): credencial ("usuario senha" aceitos), janela (aberta|fechada), fim (ISO-8601 em UTC), modo_auth e modo_autorizacao
-# (vazio | 401 | 503 | lento: o "lento" demora 7 s, mais que o timeout de 5 s do radio.liq).
+# (vazio | 401 | 503 | lento: o "lento" demora 7 s, mais que o timeout de 5 s do radio.liq) e modo_eventos (vazio | 503).
 # =============================================================================
 settings.log.stdout := true
 settings.log.file := false
@@ -111,8 +111,10 @@ def harbor_autorizacao(req, res) =
 end
 
 def harbor_eventos(req, res) =
-  log.important(label="mock", "HARBOR_EVENTO auth=#{autorizado(req)} corpo=#{req.body()}")
-  res.status_code(202)
+  # modo_eventos=503: a API "perdeu" o evento (deploy, timeout). O log diz o que foi respondido (resp=).
+  status = if controle("modo_eventos", "") == "503" then 503 else 202 end
+  log.important(label="mock", "HARBOR_EVENTO auth=#{autorizado(req)} resp=#{status} corpo=#{req.body()}")
+  res.status_code(status)
 end
 
 harbor.http.register(port=8081, method="POST", "/api/v1/internal/harbor/auth", harbor_auth)

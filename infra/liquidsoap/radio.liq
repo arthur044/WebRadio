@@ -183,27 +183,46 @@ def metadado_seguro(texto) =
 end
 # <<< metadado_seguro
 
-# Quem está no ar: o identificador entra em ident_pendente quando a API autoriza e passa para ident_ao_vivo quando o harbor aceita a
-# conexão. fim_utc e ultimo_200 alimentam o teto da falha aberta.
-ident_pendente = ref("")
+# Quem está no ar: o identificador sai do Authorization da PRÓPRIA conexão no on_connect (só a parte do usuário; a senha nunca é
+# decodificada para variável nenhuma). Não passa do auth para o on_connect por uma variável global: com duas credenciais válidas
+# ao mesmo tempo o auth de B sobrescreveria o de A e a conexão de A seria conferida (e avisada à API) como B. O que o auth deixa
+# para o on_connect é só o fim do programa de CADA usuário autorizado (janelas_autorizadas), indexado pelo próprio usuário.
+# fim_utc e ultimo_200 alimentam o teto da falha aberta.
+janelas_autorizadas = ref([])
 ident_ao_vivo = ref("")
 ao_vivo_conectado = ref(false)
 fim_utc = ref(0.)
 ultimo_200 = ref(0.)
+conectado_avisado = ref(false)
+# Teto "último 200 + N s" da falha aberta: 900 s (15 min) em produção. A variável existe só para o teste.sh exercitar esse ramo.
+teto_sem_resposta = float_of_string(environment.get(default="900", "HARBOR_TETO_SEM_RESPOSTA_S"))
 
+# Instante em ISO-8601 UTC com milissegundos: a reconexão rápida do mesmo locutor manda o Desconectado da conexão antiga e o
+# Conectado da nova no mesmo segundo, e o servidor ordena os eventos por este valor.
+def agora_iso() =
+  t = time()
+  ms = int_of_float((t - floor(t)) * 1000.)
+  base = time.string(time=t, "%Y-%m-%dT%H:%M:%S")
+  "#{base}.#{string.of_int(digits=3, ms)}Z"
+end
+
+# true = a API aceitou (202). O Conectado perdido é reenviado pela consulta periódica (conectado_avisado), senão o /stream/info
+# diria noAr:false com o locutor no ar até o fim do programa.
 def eventos_harbor(tipo, identificador) =
   corpo = json()
   corpo.add("tipo", tipo)
   corpo.add("identificador", identificador)
-  corpo.add("ocorridoEmUtc", time.string("%Y-%m-%dT%H:%M:%SZ"))
+  corpo.add("ocorridoEmUtc", agora_iso())
   try
     resp = http.post(headers=[("Content-Type", "application/json"), ...autorizacao], timeout=5.,
                      data=json.stringify(compact=true, corpo), "#{api}/api/v1/internal/harbor/eventos")
     if resp.status_code != 202 then
       log.important(label="harbor", "API respondeu #{resp.status_code} ao evento #{tipo}.")
     end
+    resp.status_code == 202
   catch err do
     log.important(label="harbor", "Evento #{tipo} não entregue: #{err.kind}.")
+    false
   end
 end
 
@@ -227,12 +246,9 @@ def autenticar_harbor(login) =
                        data=json.stringify(compact=true, corpo), "#{api}/api/v1/internal/harbor/auth")
       if resp.status_code == 200 then
         let json.parse (janela : {programaId: string, fimUtc: string}) = resp
-        # Com alguém no ar o estado não se mexe: se o harbor aceitar esta conexão, ela não leva o identificador do outro.
-        if not ao_vivo_conectado() then
-          ident_pendente := usuario
-          fim_utc := epoch_de(janela.fimUtc)
-          ultimo_200 := time()
-        end
+        # Uma entrada por usuário (as chamadas repetidas do mesmo source client, de metadado, só a renovam).
+        resto = list.filter(fun (par) -> fst(par) != usuario, janelas_autorizadas())
+        janelas_autorizadas := [(usuario, epoch_de(janela.fimUtc)), ...resto]
         log.important(label="harbor", "Autorizado identificador #{usuario} ip #{ip}.")
         true
       else
@@ -254,17 +270,33 @@ def derrubar_ao_vivo(motivo) =
   entrada_ao_vivo.stop()
 end
 
-entrada_ao_vivo.on_connect(synchronous=false, fun (_) -> begin
-  ident_ao_vivo := ident_pendente()
-  ident_pendente := ""
+# "Basic <base64(usuario:senha)>" do source client. Devolve só o usuário e só se tiver o formato do identificador; senão "".
+def usuario_do_authorization(headers) =
+  par = list.find(default=("", ""), fun (h) -> string.case(lower=true, fst(h)) == "authorization", headers)
+  partes = string.extract(pattern="^Basic ([A-Za-z0-9+/=]+)$", snd(par))
+  usuario = if partes == [] then "" else
+    try
+      list.hd(default="", string.split(separator=":", string.base64.decode(list.assoc(default="", 1, partes))))
+    catch _ do
+      ""
+    end
+  end
+  if formato_valido(re_usuario, usuario) then usuario else "" end
+end
+
+entrada_ao_vivo.on_connect(synchronous=false, fun (headers) -> begin
+  ident_ao_vivo := usuario_do_authorization(headers)
   ao_vivo_conectado := true
+  fim_utc := list.assoc(default=0., ident_ao_vivo(), janelas_autorizadas())
+  janelas_autorizadas := list.filter(fun (par) -> fst(par) != ident_ao_vivo(), janelas_autorizadas())
+  ultimo_200 := time()
   if ident_ao_vivo() == "" then
     # Sem identificador autorizado a consulta periódica não teria o que conferir: ninguém fica no ar assim.
     log.severe(label="harbor", "Conexão aceita sem identificador autorizado.")
     derrubar_ao_vivo("sem identificador autorizado")
   else
     log.important(label="harbor", "Source client conectado (identificador #{ident_ao_vivo()}).")
-    eventos_harbor("Conectado", ident_ao_vivo())
+    conectado_avisado := eventos_harbor("Conectado", ident_ao_vivo())
   end
 end)
 
@@ -272,8 +304,9 @@ entrada_ao_vivo.on_disconnect(synchronous=false, fun () -> begin
   identificador = ident_ao_vivo()
   ident_ao_vivo := ""
   ao_vivo_conectado := false
+  conectado_avisado := false
   log.important(label="harbor", "Source client desconectado.")
-  if identificador != "" then eventos_harbor("Desconectado", identificador) end
+  if identificador != "" then ignore(eventos_harbor("Desconectado", identificador)) end
 end)
 
 # A cada 10 s: o locutor no ar ainda está autorizado? (06 "Autorização do ao vivo": a janela é calculada no SQL.)
@@ -283,22 +316,31 @@ def consultar_autorizacao() =
     status = ref(0)
     try
       resp = http.get(headers=autorizacao, timeout=5., "#{api}/api/v1/internal/harbor/autorizacao/#{ident_ao_vivo()}")
-      status := resp.status_code
       if resp.status_code == 200 then
         let json.parse (janela : {programaId: string, fimUtc: string}) = resp
         fim_utc := epoch_de(janela.fimUtc)
       end
+      # Só depois do parse: um 200 com corpo ilegível não renova o último 200 (cai no ramo de falha, com o log.severe abaixo).
+      status := resp.status_code
     catch err do
       log.severe(label="harbor", "Consulta de autorização sem resposta útil (#{err.kind}).")
     end
-    teto = min(fim_utc() + 60., ultimo_200() + 900.)
+    teto_fim = fim_utc() + 60.
+    teto_resposta = ultimo_200() + teto_sem_resposta
+    teto = min(teto_fim, teto_resposta)
     if status() == 200 then
       ultimo_200 := agora
-    elsif status() >= 400 and status() < 500 then
+      # O Conectado que a API não recebeu na hora (5xx, timeout, deploy): reenvia, o servidor trata o evento repetido.
+      if not conectado_avisado() then conectado_avisado := eventos_harbor("Conectado", ident_ao_vivo()) end
+    elsif status() >= 300 and status() < 500 then
+      # Só timeout, conexão recusada e 5xx são falha de transporte (06, F07 c): qualquer outro status que não seja o 200 derruba.
       derrubar_ao_vivo("autorização negada (HTTP #{status()})")
     else
       log.severe(label="harbor", "Consulta de autorização falhou (status #{status()}). Mantendo o locutor por mais #{max(0., teto - agora)} s, no máximo.")
-      if agora >= teto then derrubar_ao_vivo("teto da falha aberta") end
+      if agora >= teto then
+        motivo = if teto_fim <= teto_resposta then "fim do programa + 1 min" else "último 200 + #{int_of_float(teto_sem_resposta)} s" end
+        derrubar_ao_vivo("teto da falha aberta (#{motivo})")
+      end
     end
   end
 end

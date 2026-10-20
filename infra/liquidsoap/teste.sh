@@ -120,7 +120,8 @@ docker run -d --name "$P-icecast" --network "$P" --network-alias icecast --read-
   --security-opt no-new-privileges:true --tmpfs /tmp:uid=100,gid=101,mode=0700 \
   -v "$TMP/segredos:/run/secrets:ro" -p 127.0.0.1::8000 "$ICECAST" >/dev/null
 BASE="http://$(docker port "$P-icecast" 8000/tcp | head -n1)"
-docker run -d --name "$P-radio" --network "$P" --network-alias liquidsoap "${ENDURECIDO[@]}" \
+# HARBOR_TETO_SEM_RESPOSTA_S=45: o "último 200 + 15 min" (900 s) em escala de teste.
+docker run -d --name "$P-radio" --network "$P" --network-alias liquidsoap "${ENDURECIDO[@]}" -e HARBOR_TETO_SEM_RESPOSTA_S=45 \
   -v "$PWD/infra/liquidsoap/radio.liq:/etc/liquidsoap/radio.liq:ro" \
   -v "$PWD/infra/liquidsoap/playlist-teste:/musica-teste:ro" -v "$TMP/segredos:/run/secrets:ro" \
   "$LIQUIDSOAP" /etc/liquidsoap/radio.liq >/dev/null
@@ -191,6 +192,7 @@ if grep '^CASO FALHA' <<<"$SAIDA_META"; then falha "metadado_seguro diverge do c
 echo "== ao vivo pelo harbor (E2-F08, S-A08, S-A09)"
 controle() { printf '%s' "$2" > "$TMP/controle/$1"; chmod 0644 "$TMP/controle/$1"; }
 conta_log() { docker logs "$1" 2>&1 | grep -c -F -e "$2" || true; }
+conta_liq_api() { conta_log "$P-api" "$1"; }
 espera_mais() {
   # $1 = contêiner, $2 = texto fixo, $3 = quantas ocorrências já havia, $4 = segundos
   for _ in $(seq 1 "$4"); do
@@ -202,7 +204,7 @@ espera_mais() {
 espera_evento() {
   # $1 = tipo, $2 = segundos: linha HARBOR_EVENTO com o Bearer certo, o tipo e o identificador do locutor.
   for _ in $(seq 1 "$2"); do
-    docker logs "$P-api" 2>&1 | grep -F 'HARBOR_EVENTO auth=ok' | grep -F "\"$1\"" | grep -q -F "$USR" && return 0
+    docker logs "$P-api" 2>&1 | grep -F 'HARBOR_EVENTO auth=ok resp=202' | grep -F "\"$1\"" | grep -q -F "$USR" && return 0
     sleep 1
   done
   return 1
@@ -216,7 +218,7 @@ espera_titulo_exato() {
   for _ in $(seq 1 "$2"); do estatisticas | grep -q -F "<title>$1</title>" && return 0; sleep 1; done
   return 1
 }
-iso_em() { date -u -d "+$1 seconds" +%Y-%m-%dT%H:%M:%SZ; }
+iso_em() { date -u -d "now + $1 seconds" +%Y-%m-%dT%H:%M:%SZ; }
 segredo_novo() { head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n'; }
 
 USR="$(cat /proc/sys/kernel/random/uuid)"
@@ -262,11 +264,16 @@ confere "o auth entrega à API o IP do source client, sem porta ($IP_VISTO)" gre
 
 echo "-- credencial certa dentro da janela"
 fonte_ao_vivo fonte "$USR" "$TMP/senha-ok" "$TITULO_BOM"
+controle modo_eventos 503 # a API perde o Conectado
 controle modo_auth ""
 CON=0
 confere "conecta" espera_mais "$P-radio" "Source client conectado (identificador $USR)" "$CON" 60
 confere "o ao vivo sobrepõe a programação" espera_log "$P-radio" "Switch to metadata_map" 30
-confere "evento Conectado chega à API com o token e o identificador" espera_evento Conectado 30
+# Guardian M1: o Conectado que a API não aceitou (503) é reenviado na reconferência de 10 s, senão o aoVivo ficaria noAr:false.
+sleep 4
+if espera_evento Conectado 1; then falha "o Conectado foi aceito com a API em 503"; else ok "o Conectado ficou sem aceite (a API respondeu 503)"; fi
+controle modo_eventos ""
+confere "o radio.liq reenvia o Conectado e a API o aceita, com o token e o identificador" espera_evento Conectado 30
 # O Icecast mostra o título em entidades XML e o output.icecast do radio.liq manda o metadado em ISO-8859-1: o emoji vira "*",
 # mas o título só chega se o ZWJ passou pela validação (senão o metadado inteiro some e fica só o artista).
 confere "título com acento e emoji composto (ZWJ) passa" espera_titulo 'A&#xE7;&#xE3;o ao vivo' 40
@@ -328,18 +335,35 @@ confere "e o stream segue" toca
 controle modo_autorizacao ""
 confere "reconecta depois" espera_mais "$P-radio" "Source client conectado" "$CON" 60
 
-echo "-- API fora: o locutor segue até o teto, conexão nova é recusada"
-controle fim "$(iso_em 5)"
-AUT="$(conta_log "$P-api" HARBOR_AUTORIZACAO)"
+echo "-- API fora, teto 1: fim do programa + 1 min"
+# O stub devolve um fim 30 s no passado (com a janela "aberta"): o radio.liq aprende o fim na consulta seguinte e o teto vira
+# fim + 60 s = 30 s dali, bem antes do "último 200 + HARBOR_TETO_SEM_RESPOSTA_S".
+controle fim "$(iso_em -30)"
+AUT="$(conta_liq_api HARBOR_AUTORIZACAO)"
 confere "o radio.liq aprende o novo fim na consulta seguinte" espera_mais "$P-api" HARBOR_AUTORIZACAO "$AUT" 15
 DESC="$(conta_log "$P-radio" 'Source client desconectado')"
 docker rm -f "$P-api" >/dev/null
-T0=$SECONDS
 confere "API parada: log.severe da consulta" espera_log "$P-radio" "Consulta de autorização falhou" 30
-sleep 15
+sleep 12
 confere "o locutor já autorizado segue no ar" test "$(conta_log "$P-radio" 'Source client desconectado')" = "$DESC"
 confere "o stream segue" toca
-confere "o teto (fim + 1 min) derruba mesmo sem resposta" espera_log "$P-radio" "Derrubando o ao vivo: teto da falha aberta" 90
+confere "o teto do fim do programa derruba mesmo sem resposta" espera_log "$P-radio" "Derrubando o ao vivo: teto da falha aberta (fim do programa + 1 min)" 60
+
+echo "-- API fora, teto 2: último 200 + HARBOR_TETO_SEM_RESPOSTA_S (a janela é longa, só o 200 antigo vale)"
+api vazia
+controle fim "$(iso_em 3600)"
+CON="$(conta_log "$P-radio" 'Source client conectado')"
+fonte_ao_vivo fonte2 "$USR" "$TMP/senha-ok"
+confere "um source client novo entra" espera_mais "$P-radio" "Source client conectado" "$CON" 90
+sleep 12 # alguns 200 de reconferência
+DESC="$(conta_log "$P-radio" 'Source client desconectado')"
+docker rm -f "$P-api" >/dev/null
+sleep 20
+confere "20 s sem resposta: segue no ar (o teto é de 45 s)" test "$(conta_log "$P-radio" 'Source client desconectado')" = "$DESC"
+confere "o teto do último 200 derruba, com o fim do programa a 1 h" espera_log "$P-radio" "Derrubando o ao vivo: teto da falha aberta (último 200 + 45 s)" 60
+docker rm -f "$P-fonte2" >/dev/null
+
+echo "-- API fora: conexão nova é recusada"
 CON="$(conta_log "$P-radio" 'Source client conectado')"
 REC="$(conta_log "$P-radio" 'Recusado: API respondeu 52')"
 # O source client antigo demora a tentar de novo depois do stop(); um novo mostra a recusa na hora.

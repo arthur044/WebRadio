@@ -162,7 +162,7 @@ echo "== DoD 1: programa criado para agora vira AoVivo em até 20 s"
 PROG1="$(programa_agora "$LOC1_ID" "[smoke] ao vivo 1")" || { falha "criar o programa de agora"; exit 1; }
 T0=$SECONDS
 confere "o Worker o põe AoVivo em até 20 s" espera_ate 20 programa_ao_vivo_e "$PROG1"
-ok "virou AoVivo em $((SECONDS - T0)) s"
+echo "        (levou $((SECONDS - T0)) s)"
 
 echo "== DoD 3: recusas"
 credencial "$LOC1" l1a || { falha "gerar a credencial do locutor1"; exit 1; }
@@ -227,11 +227,11 @@ docker run -d --name smoke-borda-restrita --network "$REDE_PLAYOUT" --read-only 
   -v "$RAIZ/infra/harbor-borda/entrypoint.sh:/usr/local/bin/harbor-borda.sh:ro" \
   --entrypoint /usr/local/bin/harbor-borda.sh "$BORDA_IMG" >/dev/null
 sleep 3
-ANTES="$(conta_liq 'Recusado:')$(conta_liq 'Autorizado')"
+ANTES="$(conta_liq 'Recusado:'):$(conta_liq 'Autorizado')"
 fonte smoke-fonte-restrita "$ID1" "$TMP/cred-l1b.segredo" "$REDE_PLAYOUT" smoke-borda-restrita 8005
 espera_ate 30 bash -c "docker logs smoke-borda-restrita 2>&1 | grep -q ' 403 '" || true
 confere "o proxy encerra a sessão com 403 (fora da lista)" bash -c "docker logs smoke-borda-restrita 2>&1 | grep -q ' 403 '"
-DEPOIS="$(conta_liq 'Recusado:')$(conta_liq 'Autorizado')"
+DEPOIS="$(conta_liq 'Recusado:'):$(conta_liq 'Autorizado')"
 confere "o Liquidsoap nem chegou a ver a tentativa" test "$ANTES" = "$DEPOIS"
 sem_fonte smoke-fonte-restrita
 docker rm -f smoke-borda-restrita >/dev/null 2>&1 || true
