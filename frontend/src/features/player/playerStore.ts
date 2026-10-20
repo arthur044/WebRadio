@@ -26,6 +26,8 @@ interface PlayerActions {
   play: () => void
   pause: () => void
   toggle: () => void
+  /** Tenta voltar já, sem esperar o backoff: usada quando o servidor mostra que o stream está de pé. */
+  reconectarAgora: () => void
   setVolume: (volume: number) => void
   toggleMute: () => void
   setNowPlaying: (title: string | null) => void
@@ -144,6 +146,15 @@ export const usePlayerStore = create<PlayerState & PlayerActions>((set, get) => 
     const { status, play, pause } = get()
     if (status === 'playing' || status === 'connecting') pause()
     else play()
+  },
+
+  reconectarAgora: () => {
+    const { status, userPaused } = get()
+    if (!audioEl || userPaused || status !== 'error') return
+    clearReconnectTimer()
+    set({ status: 'connecting' })
+    audioEl.load()
+    audioEl.play().catch(() => set({ status: 'error' }))
   },
 
   setVolume: (volume) => {

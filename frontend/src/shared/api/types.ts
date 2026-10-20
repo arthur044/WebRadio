@@ -97,11 +97,39 @@ export interface DivulgacaoDto {
   ativo: boolean
 }
 
+/** Transmissão ao vivo de um locutor (06-epico-2-tarefas.md §SignalR); sem `programaId`/`locutorNome` quando `noAr` é false. */
+export interface AoVivoDto {
+  noAr: boolean
+  programaId?: string | null
+  locutorNome?: string | null
+}
+
 export interface StreamInfoDto {
   url: string
   formato: string
   bitrateKbps: number
-  tocandoAgora: { titulo: string; artista: string | null; tipo: TipoMidia } | null
+  tocandoAgora: { titulo: string | null; artista: string | null; tipo: TipoMidia | null } | null
+  aoVivo: AoVivoDto
+}
+
+/** `GET /locutores/me/credencial-transmissao` (06 §REST pública): nunca traz o segredo. */
+export interface CredencialDto {
+  identificador: string
+  criadaEmUtc: string
+  ultimoUsoEmUtc: string | null
+}
+
+/** `POST /locutores/me/credencial-transmissao`: a ÚNICA resposta com o segredo. Não vai para o cache de queries. */
+export interface CredencialGeradaDto {
+  identificador: string
+  segredo: string
+  criadaEmUtc: string
+}
+
+/** `GET /credenciais-transmissao` (Admin). */
+export interface CredencialAtivaDto extends CredencialDto {
+  usuarioId: string
+  usuarioNome: string
 }
 
 export interface PaginaResposta<T> {
