@@ -40,19 +40,17 @@ function programa(extras: Partial<Record<string, unknown>> = {}) {
   }
 }
 
-const usuarios = (role: string) => ({
-  itens:
+const usuarios = (role: string) => {
+  const itens =
     role === 'Locutor'
       ? [
           { id: 'l1', nome: 'Ana', email: 'a@a', role: 'Locutor', ativo: true },
           { id: 'l2', nome: 'Beto', email: 'b@b', role: 'Locutor', ativo: true },
           { id: 'l3', nome: 'Inativo', email: 'i@i', role: 'Locutor', ativo: false },
         ]
-      : [{ id: 'a1', nome: 'Dona Admin', email: 'd@d', role: 'Admin', ativo: true }],
-  total: 3,
-  pagina: 1,
-  tamanho: 100,
-})
+      : [{ id: 'a1', nome: 'Dona Admin', email: 'd@d', role: 'Admin', ativo: true }]
+  return { itens, total: itens.length, pagina: 1, tamanho: 100 }
+}
 
 type Handler = (c: Chamada) => Response | Promise<Response> | undefined
 
@@ -181,6 +179,38 @@ describe('AdminGradePage', () => {
       const linha = (await screen.findByText('Café da Manhã')).closest('li')!
       expect(linha).toHaveTextContent('09:00')
       expect(linha).toHaveTextContent('11:00')
+    })
+  })
+
+  describe('locutores', () => {
+    it('lê todas as páginas: o 101º locutor também aparece na lista', async () => {
+      const locutor = (n: number) => ({
+        id: `m${n}`,
+        nome: `Locutor ${String(n).padStart(3, '0')}`,
+        email: `m${n}@x`,
+        role: 'Locutor',
+        ativo: true,
+      })
+      const { chamadas } = montarApi([
+        (c) => {
+          if (!c.caminho.startsWith('/usuarios?role=Locutor')) return undefined
+          const pagina = Number(new URL(c.caminho, 'http://x').searchParams.get('pagina'))
+          const itens =
+            pagina === 1 ? Array.from({ length: 100 }, (_, i) => locutor(i + 1)) : [locutor(101)]
+          return json(200, { itens, total: 101, pagina, tamanho: 100 })
+        },
+      ])
+      const user = userEvent.setup()
+      renderAdmin()
+
+      await user.click(await screen.findByRole('button', { name: 'Novo programa' }))
+      const form = await screen.findByRole('form', { name: 'Novo programa' })
+
+      expect(await within(form).findByRole('option', { name: 'Locutor 101' })).toBeInTheDocument()
+      const paginas = chamadas
+        .filter((c) => c.caminho.startsWith('/usuarios?role=Locutor'))
+        .map((c) => new URL(c.caminho, 'http://x').searchParams.get('pagina'))
+      expect(paginas).toEqual(['1', '2'])
     })
   })
 
