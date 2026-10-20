@@ -248,6 +248,138 @@ describe('Credencial de transmissão: o segredo', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('o Esc e o Cancelar não fecham o diálogo com a geração em andamento (o POST revoga a anterior)', async () => {
+    entrarComo('Locutor')
+    let liberar!: () => void
+    const trava = new Promise<void>((r) => (liberar = r))
+    const { fetchMock } = montarApi()
+    const original = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url: string, init: RequestInit = {}) => {
+      if ((init.method ?? 'GET') === 'POST' && url.endsWith('/credencial-transmissao')) await trava
+      return original(url, init)
+    })
+    const user = userEvent.setup()
+    renderEstudio()
+
+    await user.click(await screen.findByRole('button', { name: 'Gerar credencial' }))
+    const dialogo = await screen.findByRole('dialog')
+    await user.type(within(dialogo).getByLabelText('Senha da conta'), 'minha-senha')
+    await user.click(within(dialogo).getByRole('button', { name: 'Gerar' }))
+
+    expect(await within(dialogo).findByRole('button', { name: 'Gerando…' })).toBeDisabled()
+    expect(within(dialogo).getByRole('button', { name: 'Cancelar' })).toBeDisabled()
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    liberar()
+    expect(await within(dialogo).findByTestId('segredo-gerado')).toHaveTextContent(SEGREDO)
+  })
+
+  it('um POST que saiu sempre faz o painel reler a credencial, mesmo se a resposta se perdeu (rede)', async () => {
+    entrarComo('Locutor')
+    const { chamadas, fetchMock } = montarApi()
+    const original = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url: string, init: RequestInit = {}) => {
+      if ((init.method ?? 'GET') === 'POST' && url.endsWith('/credencial-transmissao')) {
+        throw new TypeError('Failed to fetch')
+      }
+      return original(url, init)
+    })
+    const user = userEvent.setup()
+    renderEstudio()
+    await screen.findByText(/ainda não tem credencial/i)
+    const leiturasAntes = chamadas.filter(
+      (c) => c.metodo === 'GET' && c.caminho.endsWith('/credencial-transmissao'),
+    ).length
+
+    const dialogo = await gerarCredencial(user)
+    expect(await within(dialogo).findByRole('alert')).toHaveTextContent(/sem conexão/i)
+
+    await waitFor(() =>
+      expect(
+        chamadas.filter((c) => c.metodo === 'GET' && c.caminho.endsWith('/credencial-transmissao'))
+          .length,
+      ).toBe(leiturasAntes + 1),
+    )
+  })
+
+  it('o foco entra no campo da senha, passa para "Copiar" ao gerar, fica preso no diálogo e volta ao botão ao fechar', async () => {
+    entrarComo('Locutor')
+    montarApi()
+    const user = userEvent.setup()
+    renderEstudio()
+
+    const abrir = await screen.findByRole('button', { name: 'Gerar credencial' })
+    await user.click(abrir)
+    const dialogo = await screen.findByRole('dialog')
+    expect(within(dialogo).getByLabelText('Senha da conta')).toHaveFocus()
+
+    await user.type(within(dialogo).getByLabelText('Senha da conta'), 'minha-senha')
+    await user.click(within(dialogo).getByRole('button', { name: 'Gerar' }))
+    await within(dialogo).findByTestId('segredo-gerado')
+    expect(within(dialogo).getByRole('button', { name: 'Copiar' })).toHaveFocus()
+
+    // Tab a partir do último elemento volta ao primeiro, sem sair do diálogo.
+    within(dialogo).getByRole('button', { name: 'Já copiei, fechar' }).focus()
+    await user.tab()
+    expect(dialogo).toContainElement(document.activeElement as HTMLElement)
+    expect(within(dialogo).getByRole('button', { name: 'Copiar' })).toHaveFocus()
+
+    await user.click(within(dialogo).getByRole('button', { name: 'Já copiei, fechar' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /^Gerar (nova )?credencial$/ })).toHaveFocus()
+  })
+
+  it('token vencido: o 401 sem type renova a sessão e gera com uma única tentativa aceita', async () => {
+    entrarComo('Locutor')
+    const { chamadas, fetchMock } = montarApi()
+    const original = fetchMock.getMockImplementation()!
+    let primeira = true
+    fetchMock.mockImplementation(async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith('/auth/refresh')) {
+        useAuthStore.setState({ accessToken: 'token-renovado' })
+        return json(200, {
+          accessToken: 'token-renovado',
+          expiraEmUtc: new Date().toISOString(),
+          deveTrocarSenha: false,
+          usuario: {
+            id: 'u1',
+            nome: 'Ana',
+            email: 'ana@x',
+            role: 'Locutor',
+            deveTrocarSenha: false,
+          },
+        })
+      }
+      if (
+        (init.method ?? 'GET') === 'POST' &&
+        url.endsWith('/credencial-transmissao') &&
+        primeira
+      ) {
+        primeira = false
+        return new Response(null, { status: 401 }) // o JWT vencido não chega ao handler: sem corpo
+      }
+      return original(url, init)
+    })
+    const user = userEvent.setup()
+    renderEstudio()
+
+    const dialogo = await gerarCredencial(user)
+
+    expect(await within(dialogo).findByTestId('segredo-gerado')).toHaveTextContent(SEGREDO)
+    const posts = fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        (init?.method ?? 'GET') === 'POST' && String(url).endsWith('/credencial-transmissao'),
+    )
+    expect(posts).toHaveLength(2) // 1ª recusada pelo JWT vencido (não conta no limite), 2ª após o refresh
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/auth/refresh')),
+    ).toHaveLength(1)
+    expect(
+      chamadas.filter((c) => c.metodo === 'POST' && c.caminho.endsWith('/credencial-transmissao')),
+    ).toHaveLength(1)
+  })
+
   it('senha errada mostra o erro, limpa o campo e faz uma única chamada (sem repetir após refresh)', async () => {
     entrarComo('Locutor')
     const { chamadas } = montarApi({ gerar: () => problema(401, '/erros/credenciais') })

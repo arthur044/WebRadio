@@ -215,14 +215,15 @@ describe('apiFetch — 403 renova a sessão (Sentinel L2 do #42)', () => {
     vi.restoreAllMocks()
   })
 
-  function stub(refresh: Response) {
+  function stub(refresh: Response, corpo403?: Response) {
     const urls: string[] = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
         urls.push(url)
         if (url.endsWith('/auth/refresh')) return refresh
-        return jsonResponse(403, { type: '/erros/acesso-negado', title: 'x', status: 403 })
+        // A política de papel do ASP.NET responde 403 sem corpo; só a recusa de domínio traz o type.
+        return corpo403 ?? new Response(null, { status: 403 })
       }),
     )
     return urls
@@ -246,6 +247,43 @@ describe('apiFetch — 403 renova a sessão (Sentinel L2 do #42)', () => {
     expect(urls.filter((u) => u.endsWith('/auth/refresh'))).toHaveLength(1)
   })
 
+  it('403 de domínio (/erros/acesso-negado, ex.: não é o dono) não gasta um refresh', async () => {
+    const urls = stub(
+      jsonResponse(500, {}),
+      jsonResponse(403, { type: '/erros/acesso-negado', title: 'x', status: 403 }),
+    )
+
+    await expect(apiFetch('/programas/p1/encerrar', { method: 'POST' })).rejects.toMatchObject({
+      status: 403,
+    })
+
+    expect(urls.some((u) => u.endsWith('/auth/refresh'))).toBe(false)
+  })
+
+  it('N 403 em paralelo (ex.: várias queries depois de um rebaixamento) fazem um único /auth/refresh', async () => {
+    const urls = stub(
+      jsonResponse(200, {
+        accessToken: 'token-locutor',
+        expiraEmUtc: new Date().toISOString(),
+        deveTrocarSenha: false,
+        usuario: sessao('Locutor'),
+      }),
+    )
+
+    await Promise.allSettled([apiFetch('/a'), apiFetch('/b'), apiFetch('/c'), apiFetch('/d')])
+
+    expect(urls.filter((u) => u.endsWith('/auth/refresh'))).toHaveLength(1)
+  })
+
+  it.each([429, 503])('refresh que responde %i não derruba a sessão', async (status) => {
+    stub(new Response(null, { status }))
+
+    await expect(apiFetch('/programas')).rejects.toMatchObject({ status: 403 })
+
+    expect(useAuthStore.getState().usuario?.role).toBe('Admin')
+    expect(useAuthStore.getState().accessToken).toBe('token-admin')
+  })
+
   it('conta desativada: o refresh falha e a sessão cai', async () => {
     stub(jsonResponse(401, { type: '/erros/credenciais', title: 'morta', status: 401 }))
 
@@ -261,5 +299,87 @@ describe('apiFetch — 403 renova a sessão (Sentinel L2 do #42)', () => {
     await expect(apiFetch('/programas')).rejects.toMatchObject({ status: 403 })
 
     expect(urls.some((u) => u.endsWith('/auth/refresh'))).toBe(false)
+  })
+})
+
+describe('apiFetch — semRefreshSeCredenciais (geração da credencial de transmissão)', () => {
+  beforeEach(() => {
+    useAuthStore.getState().setSession('token-vencido', {
+      id: '1',
+      nome: 'Ana',
+      email: 'a@a.com',
+      role: 'Locutor',
+      deveTrocarSenha: false,
+    })
+  })
+
+  afterEach(() => {
+    useAuthStore.getState().clearSession()
+    vi.restoreAllMocks()
+  })
+
+  function stub(respostaDoPost: (token: string | null) => Response) {
+    const posts: Array<string | null> = []
+    let refreshes = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit = {}) => {
+        if (url.endsWith('/auth/refresh')) {
+          refreshes += 1
+          return jsonResponse(200, {
+            accessToken: 'token-novo',
+            expiraEmUtc: new Date().toISOString(),
+            deveTrocarSenha: false,
+            usuario: {
+              id: '1',
+              nome: 'Ana',
+              email: 'a@a.com',
+              role: 'Locutor',
+              deveTrocarSenha: false,
+            },
+          })
+        }
+        const token = new Headers(init.headers).get('Authorization')
+        posts.push(token)
+        return respostaDoPost(token)
+      }),
+    )
+    return { posts, refreshes: () => refreshes }
+  }
+
+  it('401 do token vencido (sem type): renova e repete uma vez', async () => {
+    const { posts, refreshes } = stub((token) =>
+      token === 'Bearer token-vencido'
+        ? new Response(null, { status: 401 })
+        : jsonResponse(201, { ok: true }),
+    )
+
+    await expect(
+      apiFetch('/locutores/me/credencial-transmissao', {
+        method: 'POST',
+        body: { senhaAtual: 'x' },
+        semRefreshSeCredenciais: true,
+      }),
+    ).resolves.toEqual({ ok: true })
+
+    expect(refreshes()).toBe(1)
+    expect(posts).toEqual(['Bearer token-vencido', 'Bearer token-novo'])
+  })
+
+  it('401 /erros/credenciais (senha errada): não renova e não repete', async () => {
+    const { posts, refreshes } = stub(() =>
+      jsonResponse(401, { type: '/erros/credenciais', title: 'x', status: 401 }),
+    )
+
+    await expect(
+      apiFetch('/locutores/me/credencial-transmissao', {
+        method: 'POST',
+        body: { senhaAtual: 'errada' },
+        semRefreshSeCredenciais: true,
+      }),
+    ).rejects.toMatchObject({ status: 401 })
+
+    expect(refreshes()).toBe(0)
+    expect(posts).toHaveLength(1)
   })
 })

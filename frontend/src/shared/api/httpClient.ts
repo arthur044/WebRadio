@@ -35,6 +35,11 @@ interface RequestOptions extends Omit<RequestInit, 'body'> {
   /** Pula o retry automático em 401 além do que SEM_RETRY já cobre. */
   skipRefreshRetry?: boolean
   /**
+   * Não renova nem repete quando o 401 é `/erros/credenciais` (senha errada que a própria rota conta como tentativa),
+   * mas renova e repete no 401 do token vencido, que o handler nunca vê.
+   */
+  semRefreshSeCredenciais?: boolean
+  /**
    * X-Listener-Id só onde o contrato pede (/pedidos, /pedidos/meus, hub) — não em
    * toda chamada (Guardian L1): liga o dispositivo à conta sem necessidade em rotas
    * autenticadas, o que a LGPD não pede.
@@ -96,7 +101,9 @@ export async function refreshSession(tokenAtFailureTime: string | null): Promise
       }
 
       if (!response.ok) {
-        useAuthStore.getState().clearSession()
+        // Só um 401 diz que a sessão morreu. 429 (balde do IP compartilhado), 5xx e rede não: derrubar a sessão por
+        // isso deslogaria quem não mudou nada; a próxima chamada tenta de novo.
+        if (response.status === 401) useAuthStore.getState().clearSession()
         return false
       }
 
@@ -104,9 +111,8 @@ export async function refreshSession(tokenAtFailureTime: string | null): Promise
       useAuthStore.getState().setSession(data.accessToken, data.usuario)
       return true
     } catch {
-      // Falha de rede (não uma resposta HTTP de erro) — sem sessão pra restaurar,
-      // segue anônimo em vez de estourar uma rejeição sem dono pra quem chamou.
-      useAuthStore.getState().clearSession()
+      // Falha de rede (não uma resposta HTTP de erro): a sessão pode estar viva, então fica como está e não estoura
+      // uma rejeição sem dono pra quem chamou. No boot não havia usuário, e segue anônimo do mesmo jeito.
       return false
     }
   })
@@ -116,13 +122,19 @@ function postRefresh(): Promise<Response> {
   return rawFetch('/auth/refresh', { method: 'POST', skipAuth: true, skipRefreshRetry: true })
 }
 
-async function isRefreshConcorrente(response: Response): Promise<boolean> {
+/** O `type` do ProblemDetails da resposta (sem consumir o corpo), ou null se não houver corpo JSON. */
+async function tipoDoProblema(response: Response): Promise<string | null> {
+  if (response.ok) return null
   try {
     const problem: ProblemDetails = await response.clone().json()
-    return problem.type === '/erros/refresh-concorrente'
+    return problem.type ?? null
   } catch {
-    return false
+    return null
   }
+}
+
+async function isRefreshConcorrente(response: Response): Promise<boolean> {
+  return (await tipoDoProblema(response)) === '/erros/refresh-concorrente'
 }
 
 async function toApiError(response: Response): Promise<ApiError> {
@@ -146,7 +158,9 @@ async function fetchComSessao(path: string, options: RequestOptions): Promise<Re
   // com SEM_RETRY (Guardian N2), que cobre /auth/login|registrar|refresh|logout sem
   // depender do call site lembrar da flag.
   const semRetry = options.skipRefreshRetry || SEM_RETRY.has(path)
-  if (response.status === 401 && !semRetry && tokenBeforeRequest !== null) {
+  const poupar =
+    options.semRefreshSeCredenciais && (await tipoDoProblema(response)) === '/erros/credenciais'
+  if (response.status === 401 && !semRetry && !poupar && tokenBeforeRequest !== null) {
     const refreshed = await refreshSession(tokenBeforeRequest)
     if (refreshed) {
       response = await rawFetch(path, options)
@@ -155,11 +169,19 @@ async function fetchComSessao(path: string, options: RequestOptions): Promise<Re
 
   // Sentinel L2 do #42: o papel viaja no access token. Depois de rebaixar ou desativar a conta, o token velho segue
   // dando 403 e a tela montada continuaria à mostra. Renovar traz o papel de agora (ou derruba a sessão, se a conta
-  // saiu), e o RequireRole reavalia. Aguarda para a store já estar certa quando o chamador tratar o erro. Não repete
-  // a chamada: o 403 continua valendo. `refreshSession` não passa por aqui, então não há laço.
-  const tokenAtual = useAuthStore.getState().accessToken
-  if (response.status === 403 && tokenAtual !== null && !SEM_RETRY.has(path)) {
-    await refreshSession(tokenAtual)
+  // saiu), e o RequireRole reavalia. Só o 403 SEM `/erros/acesso-negado` entra (L2 do #57): esse tipo é a recusa de
+  // domínio ("você não é o dono"), que um token novo não muda; a política de papel responde 403 sem corpo.
+  // Aguarda, para a store já estar certa quando o chamador tratar o erro. Não repete a chamada: o 403 continua
+  // valendo. `refreshSession` não passa por aqui, então não há laço.
+  // O token é o de ANTES da chamada: com N 403 em paralelo, o lock deixa passar à rede só a primeira renovação; as
+  // outras veem o token já trocado e pulam o `/auth/refresh` (Sentinel #3 do #57).
+  if (
+    response.status === 403 &&
+    tokenBeforeRequest !== null &&
+    !SEM_RETRY.has(path) &&
+    (await tipoDoProblema(response)) !== '/erros/acesso-negado'
+  ) {
+    await refreshSession(tokenBeforeRequest)
   }
 
   if (!response.ok) {
