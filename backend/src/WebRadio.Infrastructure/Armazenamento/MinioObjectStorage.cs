@@ -100,16 +100,25 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
         // S-M02, duas armadilhas do SDK (Minio 6.0.4 e 7.0.0, confirmadas contra MinIO real):
         // 1) WithMatchETag é descartado: o PUT da cópia sai só com x-amz-copy-source. O header vai explícito, para o servidor
         //    recusar (412) a cópia de um objeto diferente do verificado, de forma atômica.
-        // 2) O CopyObjectAsync devolve normalmente mesmo com o 412. Por isso o destino é conferido ANTES de apagar a origem.
+        // 2) No Minio 6.x o CopyObjectAsync devolvia normalmente mesmo com o 412 (o 7.x lança PreconditionFailedException, tratada
+        //    abaixo). Por isso o destino é conferido ANTES de apagar a origem, seja qual for a versão.
         var copia = new CopyObjectArgs().WithBucket(bucketDestino).WithObject(chaveDestino).WithCopyObjectSource(origem)
             .WithHeaders(new Dictionary<string, string> { ["x-amz-copy-source-if-match"] = esperado });
-        await _interno.CopyObjectAsync(copia, ct);
+        var mensagem =
+            $"O objeto {bucketOrigem}/{chaveOrigem} mudou depois da verificação: a cópia para {bucketDestino}/{chaveDestino} não confere com o ETag esperado.";
+        try
+        {
+            await _interno.CopyObjectAsync(copia, ct);
+        }
+        catch (PreconditionFailedException e)
+        {
+            // Minio 7 passou a lançar o 412 (o 6.x o engolia); em qualquer dos dois o servidor recusou e nada foi copiado.
+            throw new EtagDivergenteException(mensagem, e);
+        }
 
         var destino = await HeadAsync(bucketDestino, chaveDestino, ct);
         if (destino?.ETag is null || !string.Equals(destino.ETag.Trim('"'), esperado, StringComparison.OrdinalIgnoreCase))
         {
-            var mensagem =
-                $"O objeto {bucketOrigem}/{chaveOrigem} mudou depois da verificação: a cópia para {bucketDestino}/{chaveDestino} não confere com o ETag esperado.";
 
             // Se algo no caminho descartou o header e a cópia foi feita, o objeto trocado não pode ficar no bucket final.
             // Premissa da interface: a chave de destino é exclusiva deste upload, então apagar o que está nela é seguro.

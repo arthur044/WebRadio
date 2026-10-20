@@ -45,6 +45,17 @@ public class MinioObjectStorageMoverTests
     }
 
     [Fact]
+    public async Task Minio_7_lanca_o_412_e_ele_vira_EtagDivergente_sem_apagar_nada()
+    {
+        var cliente = new ClienteFalso { EtagDoDestino = Esperado, CopiaLancaPrecondicao = true };
+
+        var e = await Assert.ThrowsAsync<EtagDivergenteException>(() => Novo(cliente).MoverAsync("quarentena", "a", "midia", "b", Esperado));
+
+        Assert.IsType<PreconditionFailedException>(e.InnerException);
+        Assert.Empty(cliente.Removidos);
+    }
+
+    [Fact]
     public async Task Falha_na_limpeza_do_destino_e_sinalizada_na_excecao()
     {
         var cliente = new ClienteFalso { EtagDoDestino = Trocado, FalharAoRemover = true };
@@ -72,6 +83,8 @@ public class MinioObjectStorageMoverTests
         public string? EtagDoDestino { get; init; }
 
         public bool FalharAoRemover { get; init; }
+
+        public bool CopiaLancaPrecondicao { get; init; }
 
         public List<string> Removidos { get; } = [];
 
@@ -105,7 +118,9 @@ public class MinioObjectStorageMoverTests
             {
                 case nameof(IMinioClient.CopyObjectAsync):
                     HeaderIfMatch = Ler<Dictionary<string, string>>(args[0]!, "Headers")?.GetValueOrDefault("x-amz-copy-source-if-match");
-                    return Task.CompletedTask;
+                    return CopiaLancaPrecondicao
+                        ? Task.FromException(new PreconditionFailedException("condição não atendida"))
+                        : Task.CompletedTask;
 
                 case nameof(IMinioClient.StatObjectAsync):
                     // Só o destino é conferido; a origem não é consultada pelo MoverAsync.
