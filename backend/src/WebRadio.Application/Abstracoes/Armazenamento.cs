@@ -19,6 +19,16 @@ public interface IObjectStorage
     /// Copia e apaga a origem. <paramref name="etagEsperado"/> é obrigatório: a cópia falha se o objeto mudou depois da
     /// verificação (S-M02: a POST policy ainda aceita novo POST na mesma key). Com ETag divergente lança
     /// <see cref="EtagDivergenteException"/>, o destino não recebe o objeto e a origem continua intacta.
+    /// <para>
+    /// Premissas: (1) <paramref name="chaveDestino"/> é exclusiva deste upload (nenhum objeto legítimo preexiste nela): se a
+    /// cópia errada chegar ao destino mesmo assim, ela é apagada antes da exceção. (2) O objeto tem menos de 5 GiB e a cópia
+    /// sai numa única requisição; acima disso o SDK passa a copiar em partes (multipart), o ETag do destino vira
+    /// <c>&lt;md5&gt;-N</c> e todo move legítimo falha (de forma segura, mas falha).
+    /// </para>
+    /// <para>
+    /// TODO(S-M02): quando o Worker passar a mover mídia, tratar <see cref="EtagDivergenteException"/> como
+    /// <c>Rejeitado</c> e cobrir isso com teste do Worker. Hoje nenhum caller de <c>MoverAsync</c> existe em <c>src</c>.
+    /// </para>
     /// </summary>
     Task MoverAsync(string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default);
 
@@ -31,7 +41,7 @@ public sealed record PostPolicyAssinada(string Url, IReadOnlyDictionary<string, 
 public sealed record InfoObjeto(long TamanhoBytes, string? ContentType, string? ETag);
 
 /// <summary>O objeto mudou entre a verificação e o <see cref="IObjectStorage.MoverAsync"/> (S-M02): trate como Rejeitado.</summary>
-public sealed class EtagDivergenteException(string message) : Exception(message);
+public sealed class EtagDivergenteException(string message, Exception? inner = null) : Exception(message, inner);
 
 public static class Buckets
 {

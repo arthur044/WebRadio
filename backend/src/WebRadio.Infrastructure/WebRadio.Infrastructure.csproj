@@ -26,4 +26,9 @@
     <EmbeddedResource Include="Seguranca\senhas-vazadas.txt" LogicalName="senhas-vazadas.txt" />
   </ItemGroup>
 
+  <!-- Costura internal do MinioObjectStorage (cliente falso nos testes de unidade). -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="WebRadio.Infrastructure.Tests" />
+  </ItemGroup>
+
 </Project>

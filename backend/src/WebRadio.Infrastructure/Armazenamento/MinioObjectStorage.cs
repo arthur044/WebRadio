@@ -27,11 +27,17 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(3) };
 
     public MinioObjectStorage(StorageOptions o, IClock clock)
+        : this(Criar(o.Endpoint, o.UsarSsl, o), CriarPublico(o), o, clock)
+    {
+    }
+
+    /// <summary>Costura para teste de unidade com cliente falso (o comportamento do servidor é coberto contra MinIO real).</summary>
+    internal MinioObjectStorage(IMinioClient interno, IMinioClient publico, StorageOptions o, IClock clock)
     {
         _clock = clock;
         _publicEndpoint = new Uri(o.PublicEndpoint.TrimEnd('/') + "/");
-        _interno = Criar(o.Endpoint, o.UsarSsl, o);
-        _publico = Criar(_publicEndpoint.Authority, _publicEndpoint.Scheme == Uri.UriSchemeHttps, o);
+        _interno = interno;
+        _publico = publico;
         _urlSaudeInterna = $"{(o.UsarSsl ? "https" : "http")}://{o.Endpoint}/minio/health/live";
     }
 
@@ -102,8 +108,24 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
         var destino = await HeadAsync(bucketDestino, chaveDestino, ct);
         if (destino?.ETag is null || !string.Equals(destino.ETag.Trim('"'), esperado, StringComparison.OrdinalIgnoreCase))
         {
-            throw new EtagDivergenteException(
-                $"O objeto {bucketOrigem}/{chaveOrigem} mudou depois da verificação: a cópia para {bucketDestino}/{chaveDestino} não confere com o ETag esperado.");
+            var mensagem =
+                $"O objeto {bucketOrigem}/{chaveOrigem} mudou depois da verificação: a cópia para {bucketDestino}/{chaveDestino} não confere com o ETag esperado.";
+
+            // Se algo no caminho descartou o header e a cópia foi feita, o objeto trocado não pode ficar no bucket final.
+            // Premissa da interface: a chave de destino é exclusiva deste upload, então apagar o que está nela é seguro.
+            if (destino is not null)
+            {
+                try
+                {
+                    await _interno.RemoveObjectAsync(new RemoveObjectArgs().WithBucket(bucketDestino).WithObject(chaveDestino), ct);
+                }
+                catch (Exception e) when (e is not OperationCanceledException)
+                {
+                    throw new EtagDivergenteException(mensagem + " A limpeza do destino também falhou: o objeto não verificado continua lá.", e);
+                }
+            }
+
+            throw new EtagDivergenteException(mensagem);
         }
 
         await _interno.RemoveObjectAsync(new RemoveObjectArgs().WithBucket(bucketOrigem).WithObject(chaveOrigem), ct);
@@ -131,6 +153,12 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
         _http.Dispose();
         _interno.Dispose();
         _publico.Dispose();
+    }
+
+    private static IMinioClient CriarPublico(StorageOptions o)
+    {
+        var publico = new Uri(o.PublicEndpoint.TrimEnd('/') + "/");
+        return Criar(publico.Authority, publico.Scheme == Uri.UriSchemeHttps, o);
     }
 
     private static IMinioClient Criar(string endpoint, bool ssl, StorageOptions o) =>
