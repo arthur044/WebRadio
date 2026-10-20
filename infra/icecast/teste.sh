@@ -100,15 +100,17 @@ else
 fi
 
 codigo() { curl -s -o /dev/null -m 10 -w '%{http_code}' "$@"; }
+# Código HTTP e exit do curl juntos ("401 0", "000 52"): o "000" sozinho também é timeout (28), conexão recusada (7) e reset (56).
+put() { curl -s -o /dev/null -m 10 -w '%{http_code} %{exitcode}' "$@"; }
 confere "/admin sem credencial → 401" test "$(codigo "$BASE/admin/stats")" = "401"
 confere "/admin com admin:hackme → 401" test "$(codigo -u admin:hackme "$BASE/admin/stats")" = "401"
 confere "/admin com o usuário e a senha gerados → 200" test "$(codigo -u "operador-radio:$(cat "$TMP/bom/icecast_admin_password")" "$BASE/admin/stats")" = "200"
 # O Icecast 2.5 (Alpine 3.24) recusa o PUT de source sem credencial válida fechando a conexão, sem resposta
-# (curl: 000, "Empty reply"); o 2.4 respondia 401. Os dois valem como recusa; o que prova que nenhum source entrou
-# é o "mount sem fonte → 404" logo abaixo.
-recusado() { [[ "$1" == "401" || "$1" == "000" ]]; }
-confere "PUT /radio.mp3 sem credencial → recusado (401 ou conexão fechada)" recusado "$(codigo -X PUT --data-binary x "$BASE/radio.mp3")"
-confere "PUT /radio.mp3 com source:hackme → recusado (401 ou conexão fechada)" recusado "$(codigo -u source:hackme -X PUT --data-binary x "$BASE/radio.mp3")"
+# (curl exit 52, "Empty reply"); o 2.4 respondia 401. Só esses dois valem como recusa: timeout, conexão recusada
+# ou reset não provam nada. A prova é a própria resposta do PUT (o "mount sem fonte → 404" abaixo só confere o estado final).
+recusado() { [[ "$1" == "401 0" || "$1" == "000 52" ]]; }
+confere "PUT /radio.mp3 sem credencial → recusado (401 ou conexão fechada sem resposta)" recusado "$(put -X PUT --data-binary x "$BASE/radio.mp3")"
+confere "PUT /radio.mp3 com source:hackme → recusado (401 ou conexão fechada sem resposta)" recusado "$(put -u source:hackme -X PUT --data-binary x "$BASE/radio.mp3")"
 confere "mount sem fonte → 404" test "$(codigo "$BASE/radio.mp3")" = "404"
 
 echo

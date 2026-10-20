@@ -17,7 +17,6 @@
         <header-timeout>15</header-timeout>
         <!-- Fonte muda por 10 s é derrubada (libera o mount para o Liquidsoap reconectar). -->
         <source-timeout>10</source-timeout>
-        <burst-on-connect>1</burst-on-connect>
         <burst-size>65535</burst-size>
     </limits>
 
