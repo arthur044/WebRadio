@@ -3,7 +3,7 @@
 # comparar; o digest fixa o conteúdo). As imagens do docker-compose.yml são só por digest e o Dependabot só acompanha Dockerfile:
 # a troca delas é manual, conferida no PR que a faz (e o job `vulnerabilidades` acusa o envelhecimento).
 # Os grupos só juntam minor e patch: cada major chega num PR próprio, para não travar o grupo inteiro (o #46 e o #37
-# quebraram por um major misturado a 15 atualizações seguras) e para a triagem semanal separar o que pede análise manual.
+# quebraram por majors misturados a atualizações seguras) e para a triagem semanal separar o que pede análise manual.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -19,6 +19,8 @@ updates:
     directory: "/backend"
     schedule:
       interval: "weekly"
+    # Cada major vem num PR próprio e conta no limite de PRs abertos (padrão 5).
+    open-pull-requests-limit: 10
     groups:
       nuget:
         patterns: ["*"]
@@ -33,6 +35,8 @@ updates:
     directory: "/frontend"
     schedule:
       interval: "weekly"
+    # Cada major vem num PR próprio e conta no limite de PRs abertos (padrão 5).
+    open-pull-requests-limit: 10
     groups:
       npm:
         patterns: ["*"]
