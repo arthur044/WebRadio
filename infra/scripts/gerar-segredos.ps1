@@ -74,7 +74,6 @@ $Receitas = [ordered]@{
     'icecast_admin_user'         = { "locutor-$(New-HexSecret -Bytes 3)" }
     'icecast_admin_password'     = { New-StrongSecret -Bytes 24 }
     'icecast_relay_password'     = { New-StrongSecret -Bytes 24 }
-    'liquidsoap_harbor_password' = { New-StrongSecret -Bytes 24 }
     'mssql_sa_password'          = { New-StrongSecret -Bytes 32 }
     'db_migrator_password'       = { New-StrongSecret -Bytes 24 }
     'db_app_password'            = { New-StrongSecret -Bytes 24 }

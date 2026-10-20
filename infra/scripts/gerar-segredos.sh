@@ -100,7 +100,6 @@ icecast_source_password=B64:24
 icecast_admin_user=HEXUSER:3
 icecast_admin_password=B64:24
 icecast_relay_password=B64:24
-liquidsoap_harbor_password=B64:24
 mssql_sa_password=B64:32
 db_migrator_password=B64:24
 db_app_password=B64:24

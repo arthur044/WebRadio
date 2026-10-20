@@ -39,7 +39,7 @@ Cada serviço recebe apenas seus segredos. Nunca compartilhe um segredo entre se
 | `REDIS_PASSWORD` | Redis + API + Worker | senha Redis | 24 bytes | **anual ou se exposto** |
 | `ICECAST_SOURCE_PASSWORD` | Icecast + Liquidsoap | senha mount | 24 bytes | **anual** |
 | `ICECAST_ADMIN_PASSWORD` | Icecast | senha admin | 24 bytes | **trimestral** |
-| `LIQUIDSOAP_HARBOR_PASSWORD` | Liquidsoap | senha harbor | 24 bytes | **anual** |
+| Credencial de transmissão (por locutor) | API (hash) + locutor | segredo de 256 bits gerado pela API | 43 caracteres | sem calendário: o locutor gera outra (revoga a anterior) ou o Admin revoga; não há segredo do harbor em arquivo |
 | `Seguranca__Pepper` | API | HMAC salt | 32 bytes | **nunca** (quebra todos os HMACs registrados) |
 
 ## Geração de novo segredo

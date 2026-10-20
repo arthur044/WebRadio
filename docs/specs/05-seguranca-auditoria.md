@@ -263,7 +263,7 @@ O Liquidsoap interpreta URIs com protocolos como `annotate:`, `process:` (que **
 | `ICECAST_SOURCE_PASSWORD` | icecast, liquidsoap | `openssl rand -base64 24` | 24 caracteres | 180 dias ou quando houver incidente |
 | `ICECAST_ADMIN_PASSWORD` (+ `ICECAST_ADMIN_USER` ≠ `admin`) | icecast | `openssl rand -base64 24` | 24 caracteres | 180 dias |
 | `ICECAST_RELAY_PASSWORD` | icecast | `openssl rand -base64 24` | 24 caracteres | junto com a anterior |
-| `LIQUIDSOAP_HARBOR_PASSWORD` | liquidsoap (até o Épico 2; depois, login por locutor, S-A08) | `openssl rand -base64 24` | 24 caracteres | a cada saída de locutor da equipe, e a cada 90 dias |
+| Credencial de transmissão (identificador + segredo, por locutor) | api (guarda só `SHA-256(salt ‖ segredo)`); o locutor guarda o segredo no source client. **Não é segredo de infraestrutura**: não há arquivo em `/run/secrets` nem entrada no `gerar-segredos` | a API: UUID v4 + 32 bytes do `RandomNumberGenerator` em base64url (43 caracteres) | 256 bits | sem calendário: gerar outra revoga a anterior; o locutor ou o Admin revoga na hora; desativar a conta, trocar a senha ou virar `Ouvinte` revoga sozinho (E2-F04). A senha única `LIQUIDSOAP_HARBOR_PASSWORD` saiu no E2-F08 |
 | `MSSQL_SA_PASSWORD` | sqlserver, **db-init** | base64url de 32 bytes (ver a nota abaixo da tabela), **gerando de novo** até ter ao menos uma maiúscula, uma minúscula e um dígito (a política do SQL exige 3 classes) | 24 caracteres | anual; nunca nas aplicações |
 | `DB_MIGRATOR_PASSWORD` | db-init (cria), migrator | idem | 24 caracteres | anual |
 | `DB_APP_PASSWORD` | db-init (cria), api, worker | idem | 24 caracteres | 180 dias (`ALTER LOGIN`, e depois recriar os contêineres) |
@@ -293,7 +293,7 @@ Como fica cada serviço:
 - **MinIO:** suporta `MINIO_ROOT_USER_FILE`/`MINIO_ROOT_PASSWORD_FILE` nativamente.
 - **SQL Server:** a imagem não lê `_FILE` (confirmar na tag fixada). Usar um entrypoint wrapper que exporta `MSSQL_SA_PASSWORD` a partir de `/run/secrets` e então chama o entrypoint original.
 - **Icecast:** o entrypoint renderiza o `icecast.xml` a partir dos arquivos de segredo (E1-F14) num `tmpfs`, nunca numa camada da imagem.
-- **Liquidsoap:** `file.contents("/run/secrets/harbor_password")` no `radio.liq`.
+- **Liquidsoap:** `playout_token` e `icecast_source_password` por `file.contents("/run/secrets/...")` no `radio.liq`. O harbor não tem senha própria: confere a credencial de transmissão do locutor na API (E2-F05, E2-F08).
 - **Redis:** `redis.conf` com `requirepass`, gerado do segredo no entrypoint.
 - **Connection strings:** montar em runtime (`Server=...;User Id=webradio_app;Password=<arquivo>`), sem gravar a string inteira num único segredo copiado entre serviços.
 

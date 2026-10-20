@@ -6,9 +6,11 @@
 #
 # Segurança (S-A08, S-A09):
 #   - senhas e token SÓ de /run/secrets (file.contents), nunca de variável de ambiente nem do script;
+#   - o ao vivo não tem senha própria: cada locutor entra com a credencial de transmissão dele, conferida pela API a cada
+#     conexão (POST /internal/harbor/auth) e a cada 10 s (GET /internal/harbor/autorizacao/{identificador});
 #   - a URL vinda da API só é aceita com o prefixo http://minio:9000/midia/ (nada de file://, annotate:, etc.);
 #   - metadados aplicados com metadata.map, NUNCA concatenados num "annotate:" (injeção de URI);
-#   - o log do harbor registra conexão/desconexão, nunca a senha.
+#   - o log do harbor registra conexão/desconexão, nunca a senha; o identificador só aparece depois de passar na regex.
 # A API é chamada no listener interno: http://api:8081 (rede playout). Se a API cair, o stream continua
 # (a fila só fica vazia e o fallback toca a playlist local).
 # =============================================================================
@@ -36,7 +38,6 @@ end
 
 token_playout = segredo("playout_token", 32)
 senha_icecast = segredo("icecast_source_password", 24)
-senha_harbor = segredo("liquidsoap_harbor_password", 24)
 
 api = environment.get(default="http://api:8081", "API_INTERNA")
 prefixo_midia = "http://minio:9000/midia/"
@@ -120,14 +121,201 @@ end
 
 fila_api = metadata.map(update=true, meta_da_api, fila_api)
 
-# --------------------------------------------------------------- ao vivo
-ao_vivo = input.harbor(
-  "live",
-  port=8005,
-  password=senha_harbor,
-  on_connect=fun (_) -> log.important(label="harbor", "Source client conectado."),
-  on_disconnect=fun () -> log.important(label="harbor", "Source client desconectado.")
-)
+# Contrato em docs/specs/06-epico-2-tarefas.md ("Credencial de transmissão", "Endpoints internos"):
+#   - formato estrito de usuário (UUID minúsculo) e senha (43 caracteres de base64url) ANTES de qualquer uso: fora disso a conexão é
+#     recusada sem chamar a API e sem o valor no log (o locutor pode trocar os campos e mandar o segredo no lugar do usuário);
+#   - qualquer falha do auth (API fora, timeout de 5 s, resposta ilegível, 5xx) recusa: conexão nova com a API fora nunca entra;
+#   - a cada 10 s o locutor no ar é reconferido. Qualquer 4xx derruba na hora. Só erro de TRANSPORTE (timeout, conexão recusada, 5xx)
+#     mantém o locutor (falha aberta), até o teto min(fimUtc + 1 min, último 200 + 15 min); depois disso derruba mesmo sem resposta.
+re_usuario = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+re_senha = "^[A-Za-z0-9_-]{43}$"
+
+def formato_valido(padrao, texto) =
+  # O Re trata ^ e $ por linha: o \n explícito fecha "valor-valido\nlixo".
+  string.match(pattern=padrao, texto) and not string.contains(substring="\n", texto)
+end
+
+# Tamanho só para o log; bytes inválidos em UTF-8 não podem derrubar o auth.
+def tamanho_para_log(texto) =
+  try string.length(texto) catch _ do -1 end
+end
+
+# IP anonimizado como no nginx: /24 para IPv4, /64 para IPv6. O que não for IP não vai para o log.
+def ip_anonimo(ip) =
+  v4 = string.extract(pattern="^([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})\\.[0-9]{1,3}$", ip)
+  if v4 != [] then
+    rede = list.assoc(default="", 1, v4)
+    "#{rede}.0/24"
+  elsif string.match(pattern="^[0-9a-fA-F:.]+$", ip) and string.contains(substring=":", ip) then
+    cabeca = list.hd(default="", string.split(separator="::", ip))
+    grupos = list.filter(fun (g) -> g != "", string.split(separator=":", cabeca))
+    rede = string.concat(separator=":", list.prefix(4, grupos))
+    "#{rede}::/64"
+  else
+    "ip_invalido"
+  end
+end
+
+# "2026-10-20T18:30:15Z" (o formato da API) para segundos desde 1970. O contêiner roda em UTC (TZ=UTC no compose).
+def epoch_de(iso) =
+  g = string.extract(pattern="^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})", iso)
+  if list.length(g) < 7 then
+    error.raise(error.invalid, "data inválida")
+  end
+  n = fun (i) -> int_of_string(list.assoc(default="0", i, g))
+  time.make({year=n(1), month=n(2), day=n(3), hour=n(4), min=n(5), sec=n(6), dst=null})
+end
+
+# Metadado do source client (S-A09): até 200 caracteres e nenhum caractere de Cc, Cf, Cs, U+2028 ou U+2029. O regex do Liquidsoap
+# não tem \p{..}, então as categorias entram como sequências de bytes UTF-8 (Unicode 16). Exceções, iguais às do MetadadoSeguro do
+# servidor: o ZWJ (U+200D, fora da lista) e as tags U+E0020–E007E só numa bandeira (U+1F3F4, tags, U+E007F), que sai antes da conferência.
+# >>> metadado_seguro (o teste.sh extrai este trecho e o confere contra uma tabela de casos)
+re_bandeira = "\xF0\x9F\x8F\xB4(\xF3\xA0\x80[\xA0-\xBF]|\xF3\xA0\x81[\x80-\xBE])+\xF3\xA0\x81\xBF"
+re_proibido = "[\x00-\x1F]|\x7F|\xC2[\x80-\x9F]|\xE2\x80[\xA8-\xA9]|\xC2\xAD|\xD8[\x80-\x85]|\xD8\x9C|\xDB\x9D|\xDC\x8F|\xE0\xA2[\x90-\x91]|\xE0\xA3\xA2|\xE1\xA0\x8E|\xE2\x80[\x8B-\x8C]|\xE2\x80[\x8E-\x8F]|\xE2\x80[\xAA-\xAE]|\xE2\x81[\xA0-\xA4]|\xE2\x81[\xA6-\xAF]|\xEF\xBB\xBF|\xEF\xBF[\xB9-\xBB]|\xF0\x91\x82\xBD|\xF0\x91\x83\x8D|\xF0\x93\x90[\xB0-\xBF]|\xF0\x9B\xB2[\xA0-\xA3]|\xF0\x9D\x85[\xB3-\xBA]|\xF3\xA0\x80\x81|\xF3\xA0\x80[\xA0-\xBF]|\xF3\xA0\x81[\x80-\xBF]|\xED[\xA0-\xBF][\x80-\xBF]"
+
+def metadado_seguro(texto) =
+  # string.length em UTF-8 lança para bytes inválidos: o que não é UTF-8 também é recusado.
+  try
+    string.length(texto) <= 200 and not string.match(pattern=re_proibido, string.replace(pattern=re_bandeira, fun (_) -> "", texto))
+  catch _ do
+    false
+  end
+end
+# <<< metadado_seguro
+
+# Quem está no ar: o identificador entra em ident_pendente quando a API autoriza e passa para ident_ao_vivo quando o harbor aceita a
+# conexão. fim_utc e ultimo_200 alimentam o teto da falha aberta.
+ident_pendente = ref("")
+ident_ao_vivo = ref("")
+ao_vivo_conectado = ref(false)
+fim_utc = ref(0.)
+ultimo_200 = ref(0.)
+
+def eventos_harbor(tipo, identificador) =
+  corpo = json()
+  corpo.add("tipo", tipo)
+  corpo.add("identificador", identificador)
+  corpo.add("ocorridoEmUtc", time.string("%Y-%m-%dT%H:%M:%SZ"))
+  try
+    resp = http.post(headers=[("Content-Type", "application/json"), ...autorizacao], timeout=5.,
+                     data=json.stringify(compact=true, corpo), "#{api}/api/v1/internal/harbor/eventos")
+    if resp.status_code != 202 then
+      log.important(label="harbor", "API respondeu #{resp.status_code} ao evento #{tipo}.")
+    end
+  catch err do
+    log.important(label="harbor", "Evento #{tipo} não entregue: #{err.kind}.")
+  end
+end
+
+def autenticar_harbor(login) =
+  usuario = login.user
+  senha = login.password
+  ip = ip_anonimo(login.address)
+  if not formato_valido(re_usuario, usuario) then
+    log.important(label="harbor", "Recusado: usuario_invalido (#{tamanho_para_log(usuario)} caracteres) ip #{ip}.")
+    false
+  elsif not formato_valido(re_senha, senha) then
+    log.important(label="harbor", "Recusado: senha_invalida identificador #{usuario} ip #{ip}.")
+    false
+  else
+    try
+      corpo = json()
+      corpo.add("usuario", usuario)
+      corpo.add("senha", senha)
+      corpo.add("enderecoIp", login.address)
+      resp = http.post(headers=[("Content-Type", "application/json"), ...autorizacao], timeout=5.,
+                       data=json.stringify(compact=true, corpo), "#{api}/api/v1/internal/harbor/auth")
+      if resp.status_code == 200 then
+        let json.parse (janela : {programaId: string, fimUtc: string}) = resp
+        # Com alguém no ar o estado não se mexe: se o harbor aceitar esta conexão, ela não leva o identificador do outro.
+        if not ao_vivo_conectado() then
+          ident_pendente := usuario
+          fim_utc := epoch_de(janela.fimUtc)
+          ultimo_200 := time()
+        end
+        log.important(label="harbor", "Autorizado identificador #{usuario} ip #{ip}.")
+        true
+      else
+        # 401 é a recusa de sempre (credencial errada, revogada ou fora da janela); o resto é a API fora do ar. Nos dois, recusa.
+        log.important(label="harbor", "Recusado: API respondeu #{resp.status_code} identificador #{usuario} ip #{ip}.")
+        false
+      end
+    catch err do
+      log.important(label="harbor", "Recusado: auth falhou (#{err.kind}) identificador #{usuario} ip #{ip}.")
+      false
+    end
+  end
+end
+
+entrada_ao_vivo = input.harbor("live", port=8005, auth=autenticar_harbor)
+
+def derrubar_ao_vivo(motivo) =
+  log.important(label="harbor", "Derrubando o ao vivo: #{motivo}.")
+  entrada_ao_vivo.stop()
+end
+
+entrada_ao_vivo.on_connect(synchronous=false, fun (_) -> begin
+  ident_ao_vivo := ident_pendente()
+  ident_pendente := ""
+  ao_vivo_conectado := true
+  if ident_ao_vivo() == "" then
+    # Sem identificador autorizado a consulta periódica não teria o que conferir: ninguém fica no ar assim.
+    log.severe(label="harbor", "Conexão aceita sem identificador autorizado.")
+    derrubar_ao_vivo("sem identificador autorizado")
+  else
+    log.important(label="harbor", "Source client conectado (identificador #{ident_ao_vivo()}).")
+    eventos_harbor("Conectado", ident_ao_vivo())
+  end
+end)
+
+entrada_ao_vivo.on_disconnect(synchronous=false, fun () -> begin
+  identificador = ident_ao_vivo()
+  ident_ao_vivo := ""
+  ao_vivo_conectado := false
+  log.important(label="harbor", "Source client desconectado.")
+  if identificador != "" then eventos_harbor("Desconectado", identificador) end
+end)
+
+# A cada 10 s: o locutor no ar ainda está autorizado? (06 "Autorização do ao vivo": a janela é calculada no SQL.)
+def consultar_autorizacao() =
+  if ao_vivo_conectado() and ident_ao_vivo() != "" then
+    agora = time()
+    status = ref(0)
+    try
+      resp = http.get(headers=autorizacao, timeout=5., "#{api}/api/v1/internal/harbor/autorizacao/#{ident_ao_vivo()}")
+      status := resp.status_code
+      if resp.status_code == 200 then
+        let json.parse (janela : {programaId: string, fimUtc: string}) = resp
+        fim_utc := epoch_de(janela.fimUtc)
+      end
+    catch err do
+      log.severe(label="harbor", "Consulta de autorização sem resposta útil (#{err.kind}).")
+    end
+    teto = min(fim_utc() + 60., ultimo_200() + 900.)
+    if status() == 200 then
+      ultimo_200 := agora
+    elsif status() >= 400 and status() < 500 then
+      derrubar_ao_vivo("autorização negada (HTTP #{status()})")
+    else
+      log.severe(label="harbor", "Consulta de autorização falhou (status #{status()}). Mantendo o locutor por mais #{max(0., teto - agora)} s, no máximo.")
+      if agora >= teto then derrubar_ao_vivo("teto da falha aberta") end
+    end
+  end
+end
+
+thread.run(fast=false, every=10., consultar_autorizacao)
+
+# Título e artista do source client passam por metadado_seguro; o que não passar some (nada mais do source client segue adiante).
+def sanear_ao_vivo(m) =
+  titulo = m["title"]
+  artista = m["artist"]
+  list.append(
+    if titulo != "" and metadado_seguro(titulo) then [("title", titulo)] else [] end,
+    if artista != "" and metadado_seguro(artista) then [("artist", artista)] else [] end
+  )
+end
+
+ao_vivo = metadata.map(update=false, sanear_ao_vivo, entrada_ao_vivo)
 
 # --------------------------------------------------------------- rotação local
 rotacao = playlist("/musica-teste", mode="randomize", reload_mode="watch")

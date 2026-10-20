@@ -285,7 +285,7 @@ services:
       API_INTERNA: "http://api:8081"
       # O radio.liq manda "ocorridoEmUtc" com sufixo Z: o relógio do contêiner precisa ser UTC de fato.
       TZ: UTC
-    secrets: [playout_token, icecast_source_password, liquidsoap_harbor_password]
+    secrets: [playout_token, icecast_source_password]
     volumes:
       - ./infra/liquidsoap/radio.liq:/etc/liquidsoap/radio.liq:ro
       - ./infra/liquidsoap/playlist-teste:/musica-teste:ro
@@ -403,7 +403,6 @@ secrets:
   icecast_admin_user: { file: ./secrets/icecast_admin_user }
   icecast_admin_password: { file: ./secrets/icecast_admin_password }
   icecast_relay_password: { file: ./secrets/icecast_relay_password }
-  liquidsoap_harbor_password: { file: ./secrets/liquidsoap_harbor_password }
   seed_admin_email: { file: ./secrets/seed_admin_email }
   seed_admin_senha: { file: ./secrets/seed_admin_senha }
   # Só o docker-compose.dev.yml o monta (Seed__DevSenha, DevDataSeeder); a base de produção não o usa.
