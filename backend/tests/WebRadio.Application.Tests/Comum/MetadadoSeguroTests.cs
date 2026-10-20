@@ -53,6 +53,16 @@ public class MetadadoSeguroTests
     public void Recusa_surrogate_baixo_solto() => Assert.False(MetadadoSeguro.Valido("a\uDFB5b"));
 
     [Fact]
+    public void O_tamanho_conta_caracteres_e_nao_unidades_UTF16()
+    {
+        Assert.True(MetadadoSeguro.TamanhoValido(string.Concat(Enumerable.Repeat("😀", 200)))); // 400 unidades UTF-16, 200 caracteres
+        Assert.False(MetadadoSeguro.TamanhoValido(string.Concat(Enumerable.Repeat("😀", 201))));
+        Assert.True(MetadadoSeguro.TamanhoValido(new string('t', 200)));
+        Assert.False(MetadadoSeguro.TamanhoValido(new string('t', 201)));
+        Assert.True(MetadadoSeguro.TamanhoValido(null));
+    }
+
+    [Fact]
     public void Nulo_e_aceito_o_campo_e_opcional()
     {
         Assert.True(MetadadoSeguro.Valido(null));
