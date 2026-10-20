@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
-import { ApiError, apiFetchComEtag } from '../../shared/api/httpClient'
-import { descreverErro, type ErroDescrito } from '../../shared/api/descreverErro'
+import { apiFetchComEtag } from '../../shared/api/httpClient'
+import { descreverErro, semVersao, type ErroDescrito } from '../../shared/api/descreverErro'
 import type { ProgramaDto, ProgramaRequest } from '../../shared/api/types'
 import { campoLocalBrasiliaParaUtc, utcParaCampoLocalBrasilia } from '../../shared/lib/timezone'
 import { ConflitoDeGrade } from './ConflitoDeGrade'
@@ -115,9 +115,7 @@ export function ProgramaForm({
 
     if (programa && etag === null) {
       // Sem ETag não há como mandar o If-Match: não arrisca sobrescrever uma edição alheia.
-      onRecarregar(
-        descreverErro(new ApiError(428, { type: '/erros/pre-condicao', title: 'x', status: 428 })),
-      )
+      onRecarregar(semVersao())
       return
     }
 

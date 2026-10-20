@@ -22,6 +22,13 @@ function versaoDesatualizada(): ErroDescrito {
   )
 }
 
+/** O formulário não tem o ETag do programa: sem ele o `PUT` nem sai (evita o 428 e a sobrescrita). */
+export function semVersao(): ErroDescrito {
+  return descrito('Não foi possível confirmar a versão do programa. Recarregue e tente de novo.', {
+    recarregar: true,
+  })
+}
+
 function camel(chave: string): string {
   return chave.charAt(0).toLowerCase() + chave.slice(1)
 }
@@ -71,12 +78,7 @@ export function descreverErro(err: unknown): ErroDescrito {
     case 412:
       return versaoDesatualizada()
     case 428:
-      return descrito(
-        'Não foi possível confirmar a versão do programa. Recarregue e tente de novo.',
-        {
-          recarregar: true,
-        },
-      )
+      return semVersao()
     case 429:
       return descrito('Muitas tentativas em pouco tempo. Aguarde um instante e tente de novo.')
     case 503:

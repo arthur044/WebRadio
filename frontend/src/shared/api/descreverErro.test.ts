@@ -27,7 +27,7 @@ describe('descreverErro', () => {
   })
 
   it('428: não foi possível confirmar a versão', () => {
-    const d = descreverErro(erro(428, '/erros/pre-condicao'))
+    const d = descreverErro(erro(428, '/erros/precondicao-obrigatoria'))
     expect(d.mensagem).toMatch(/versão/i)
     expect(d.recarregar).toBe(true)
   })
