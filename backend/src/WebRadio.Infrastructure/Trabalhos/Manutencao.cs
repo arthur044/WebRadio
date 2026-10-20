@@ -3,7 +3,7 @@ using WebRadio.Infrastructure.Persistencia;
 
 namespace WebRadio.Infrastructure.Trabalhos;
 
-public sealed record ResultadoDaManutencao(int PedidosAnonimizados, int EventosApagados, int RefreshApagados);
+public sealed record ResultadoDaManutencao(int PedidosAnonimizados, int EventosApagados, int RefreshApagados, int CredenciaisApagadas);
 
 public interface IManutencao
 {
@@ -47,7 +47,13 @@ public sealed class Manutencao(RadioDbContext db) : IManutencao
               AND NOT EXISTS (SELECT 1 FROM seg.RefreshToken AS a WHERE a.SubstituidoPorId = t.Id);
             """, ct));
 
-        return new ResultadoDaManutencao(anonimizados, eventos, refresh);
+        // E2-F09: a credencial de transmissão revogada há mais de 90 dias não serve mais nem de histórico. Nenhuma tabela a
+        // referencia, então um DELETE simples em lotes basta (sem o passo duplo do RefreshToken).
+        var credenciais = await EmLotes(() => db.Database.ExecuteSqlAsync($"""
+            DELETE TOP ({Lote}) FROM seg.CredencialTransmissao WHERE RevogadaEmUtc < DATEADD(DAY, -90, SYSUTCDATETIME());
+            """, ct));
+
+        return new ResultadoDaManutencao(anonimizados, eventos, refresh, credenciais);
     }
 
     private async Task<int> EmLotes(Func<Task<int>> passo)
