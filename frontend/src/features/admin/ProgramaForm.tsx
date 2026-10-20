@@ -93,14 +93,15 @@ export function ProgramaForm({
   )
   const [enviando, setEnviando] = useState(false)
 
-  // O locutor do programa continua selecionável mesmo que já não esteja na lista (desativado, rebaixado).
-  const opcoes =
-    programa && !locutores.some((l) => l.id === programa.locutor.id)
-      ? [
-          ...locutores,
-          { id: programa.locutor.id, nome: programa.locutor.nome, role: 'Locutor' as const },
-        ]
-      : locutores
+  // O locutor do programa continua selecionável mesmo que já não esteja na lista (desativado, rebaixado). O
+  // ProgramaDto não traz o papel dele, então o rótulo diz só que está fora da lista, sem chutar Locutor ou Admin.
+  const opcoes = locutores.map((l) => ({
+    id: l.id,
+    rotulo: l.role === 'Admin' ? `${l.nome} (Admin)` : l.nome,
+  }))
+  if (programa && !locutores.some((l) => l.id === programa.locutor.id)) {
+    opcoes.push({ id: programa.locutor.id, rotulo: `${programa.locutor.nome} (fora da lista)` })
+  }
   const titulos = programa ? 'Editar programa' : 'Novo programa'
 
   async function enviar(e: FormEvent) {
@@ -215,7 +216,7 @@ export function ProgramaForm({
           </option>
           {opcoes.map((l) => (
             <option key={l.id} value={l.id}>
-              {l.role === 'Admin' ? `${l.nome} (Admin)` : l.nome}
+              {l.rotulo}
             </option>
           ))}
         </select>

@@ -462,7 +462,9 @@ describe('AdminGradePage', () => {
       await user.click(await screen.findByRole('button', { name: 'Editar Café da Manhã' }))
       const form = await screen.findByRole('form', { name: 'Editar programa' })
 
-      expect(await within(form).findByRole('option', { name: 'Ex-locutor' })).toBeInTheDocument()
+      expect(
+        await within(form).findByRole('option', { name: 'Ex-locutor (fora da lista)' }),
+      ).toBeInTheDocument()
       expect(within(form).getByLabelText('Locutor')).toHaveValue('fora')
     })
 
