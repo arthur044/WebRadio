@@ -27,11 +27,17 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(3) };
 
     public MinioObjectStorage(StorageOptions o, IClock clock)
+        : this(Criar(o.Endpoint, o.UsarSsl, o), CriarPublico(o), o, clock)
+    {
+    }
+
+    /// <summary>Costura para teste de unidade com cliente falso (o comportamento do servidor é coberto contra MinIO real).</summary>
+    internal MinioObjectStorage(IMinioClient interno, IMinioClient publico, StorageOptions o, IClock clock)
     {
         _clock = clock;
         _publicEndpoint = new Uri(o.PublicEndpoint.TrimEnd('/') + "/");
-        _interno = Criar(o.Endpoint, o.UsarSsl, o);
-        _publico = Criar(_publicEndpoint.Authority, _publicEndpoint.Scheme == Uri.UriSchemeHttps, o);
+        _interno = interno;
+        _publico = publico;
         _urlSaudeInterna = $"{(o.UsarSsl ? "https" : "http")}://{o.Endpoint}/minio/health/live";
     }
 
@@ -88,10 +94,56 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
         string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(etagEsperado);
-        var origem = new CopySourceObjectArgs().WithBucket(bucketOrigem).WithObject(chaveOrigem).WithMatchETag(etagEsperado.Trim('"'));
+        var esperado = etagEsperado.Trim('"');
+        var origem = new CopySourceObjectArgs().WithBucket(bucketOrigem).WithObject(chaveOrigem).WithMatchETag(esperado);
 
-        await _interno.CopyObjectAsync(
-            new CopyObjectArgs().WithBucket(bucketDestino).WithObject(chaveDestino).WithCopyObjectSource(origem), ct);
+        // S-M02, duas armadilhas do SDK (Minio 6.0.4 e 7.0.0, confirmadas contra MinIO real):
+        // 1) WithMatchETag é descartado: o PUT da cópia sai só com x-amz-copy-source. O header vai explícito, para o servidor
+        //    recusar (412) a cópia de um objeto diferente do verificado, de forma atômica.
+        // 2) No Minio 6.x o CopyObjectAsync devolvia normalmente mesmo com o 412 (o 7.x lança PreconditionFailedException, tratada
+        //    abaixo). Por isso o destino é conferido ANTES de apagar a origem, seja qual for a versão.
+        var copia = new CopyObjectArgs().WithBucket(bucketDestino).WithObject(chaveDestino).WithCopyObjectSource(origem)
+            .WithHeaders(new Dictionary<string, string> { ["x-amz-copy-source-if-match"] = esperado });
+        var mensagem =
+            $"O objeto {bucketOrigem}/{chaveOrigem} mudou depois da verificação: a cópia para {bucketDestino}/{chaveDestino} não confere com o ETag esperado.";
+        // O que já estava no destino antes da cópia: a limpeza só apaga o que ESTA cópia escreveu (Sentinel B1 do #52).
+        var antes = await HeadAsync(bucketDestino, chaveDestino, ct);
+        try
+        {
+            await _interno.CopyObjectAsync(copia, ct);
+        }
+        catch (PreconditionFailedException e)
+        {
+            // Minio 7 passou a lançar o 412 (o 6.x o engolia); em qualquer dos dois o servidor recusou e nada foi copiado.
+            throw new EtagDivergenteException(mensagem, e);
+        }
+
+        var destino = await HeadAsync(bucketDestino, chaveDestino, ct);
+        if (destino?.ETag is null || !string.Equals(destino.ETag.Trim('"'), esperado, StringComparison.OrdinalIgnoreCase))
+        {
+            // Se algo no caminho descartou o header e a cópia foi feita, o objeto trocado não pode ficar no bucket final.
+            // Só é apagado o que a cópia escreveu: o destino não existia antes ou o ETag mudou depois dela. Um objeto que já estava
+            // lá e continua igual (cópia que voltou sem escrever) não é tocado, mesmo que a chave devesse ser exclusiva.
+            var escritoPelaCopia = destino is not null
+                && (antes?.ETag is null || !string.Equals(antes.ETag.Trim('"'), destino.ETag?.Trim('"'), StringComparison.OrdinalIgnoreCase));
+            if (escritoPelaCopia)
+            {
+                // Limpeza não cancelável pelo chamador (um shutdown no meio deixaria o objeto não verificado no bucket final),
+                // com prazo próprio.
+                using var prazo = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                try
+                {
+                    await _interno.RemoveObjectAsync(new RemoveObjectArgs().WithBucket(bucketDestino).WithObject(chaveDestino), prazo.Token);
+                }
+                catch (Exception e)
+                {
+                    throw new EtagDivergenteException(mensagem + " A limpeza do destino também falhou: o objeto não verificado continua lá.", e);
+                }
+            }
+
+            throw new EtagDivergenteException(mensagem);
+        }
+
         await _interno.RemoveObjectAsync(new RemoveObjectArgs().WithBucket(bucketOrigem).WithObject(chaveOrigem), ct);
     }
 
@@ -117,6 +169,12 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
         _http.Dispose();
         _interno.Dispose();
         _publico.Dispose();
+    }
+
+    private static IMinioClient CriarPublico(StorageOptions o)
+    {
+        var publico = new Uri(o.PublicEndpoint.TrimEnd('/') + "/");
+        return Criar(publico.Authority, publico.Scheme == Uri.UriSchemeHttps, o);
     }
 
     private static IMinioClient Criar(string endpoint, bool ssl, StorageOptions o) =>
