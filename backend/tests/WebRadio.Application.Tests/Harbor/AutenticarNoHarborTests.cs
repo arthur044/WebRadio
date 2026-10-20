@@ -69,6 +69,12 @@ public class AutenticarNoHarborTests
 
     private Task<JanelaDoHarbor?> Certo(string ip = IpA) => Auth(_id.ToString(), _segredo, ip);
 
+    /// <summary>
+    /// Mesmo formato (43 caracteres de base64url), valor sempre diferente: troca o primeiro caractere por outro. Um "x" fixo na frente
+    /// reproduzia o segredo verdadeiro em 1 de cada 64 execuções (quando o segredo sorteado já começava com "x") e o teste falhava.
+    /// </summary>
+    internal static string Adulterar(string segredo) => (segredo[0] == 'x' ? 'y' : 'x') + segredo[1..];
+
     private Task<JanelaDoHarbor?> Errado(Guid? id = null, string ip = IpA) => Auth((id ?? _id).ToString(), SegredoDeTransmissao.Gerar().Segredo, ip);
 
     [Fact]
@@ -211,6 +217,18 @@ public class AutenticarNoHarborTests
         Assert.Equal(_janela, await handler.Handle(new AutenticarNoHarborCommand(_id.ToString(), _segredo, "192.0.2.200"), CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData("xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    [InlineData("yAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    [InlineData("0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    public void Adulterar_sempre_devolve_outro_valor_do_mesmo_formato(string segredo)
+    {
+        var outro = Adulterar(segredo);
+
+        Assert.NotEqual(segredo, outro);
+        Assert.True(SegredoDeTransmissao.SenhaValida(outro));
+    }
+
     [Fact]
     public async Task Contador_fora_nao_derruba_o_ao_vivo_segue_sem_throttle_e_registra_erro()
     {
@@ -220,7 +238,7 @@ public class AutenticarNoHarborTests
             new ThrottleDoHarbor(_contadores, new IpHasher(new byte[32]), Options.Create(_opcoes), alertas), new IpHasher(new byte[32]), _log);
 
         Assert.Equal(_janela, await handler.Handle(new AutenticarNoHarborCommand(_id.ToString(), _segredo, IpA), CancellationToken.None));
-        Assert.Null(await handler.Handle(new AutenticarNoHarborCommand(_id.ToString(), "x" + _segredo[1..], IpA), CancellationToken.None));
+        Assert.Null(await handler.Handle(new AutenticarNoHarborCommand(_id.ToString(), Adulterar(_segredo), IpA), CancellationToken.None));
         Assert.Contains(alertas.Linhas, l => l.Contains("HARBOR_THROTTLE_INDISPONIVEL"));
     }
 
