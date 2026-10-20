@@ -18,11 +18,17 @@ export function limparCachePrivado(queryClient: QueryClient): void {
   queryClient.removeQueries({ predicate: (query) => !ehPublica(query.queryKey) })
 }
 
-/** Limpa o cache privado quando o usuário da sessão sai ou muda (logout, expiração, outro login). */
+/**
+ * Limpa o cache privado quando o usuário da sessão sai, muda ou muda de papel (logout, expiração, outro login,
+ * rebaixamento). O papel conta: um Admin rebaixado mantém o `id`, e o cache do papel antigo (credenciais de todos,
+ * grade com cancelados) apareceria de imediato antes de a busca refazer (Sentinel #2 do #57).
+ */
 export function ligarLimpezaDeCache(queryClient: QueryClient): () => void {
   return useAuthStore.subscribe((estado, anterior) => {
-    if (anterior.usuario && anterior.usuario.id !== estado.usuario?.id) {
+    const antes = anterior.usuario
+    if (antes && (antes.id !== estado.usuario?.id || antes.role !== estado.usuario?.role)) {
       limparCachePrivado(queryClient)
+      queryClient.getMutationCache().clear()
     }
   })
 }

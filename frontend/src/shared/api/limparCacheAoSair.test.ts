@@ -54,6 +54,20 @@ describe('limparCacheAoSair', () => {
     parar()
   })
 
+  it('limpa quando o papel muda com o mesmo id (Admin rebaixado a Locutor) e quando a renovação só reafirma o papel, não', () => {
+    const client = clienteComCache()
+    useAuthStore.setState({ accessToken: 't', usuario: admin })
+    const parar = ligarLimpezaDeCache(client)
+
+    useAuthStore.getState().setSession('t2', { ...admin, nome: 'Admin Renomeado' })
+    expect(client.getQueryData(['locutores'])).toBeDefined()
+
+    useAuthStore.getState().setSession('t3', { ...admin, role: 'Locutor' })
+    expect(client.getQueryData(['locutores'])).toBeUndefined()
+    expect(client.getQueryData(['stream-info'])).toBeDefined()
+    parar()
+  })
+
   it('limpa quando outro usuário entra no lugar', () => {
     const client = clienteComCache()
     useAuthStore.setState({ accessToken: 't', usuario: admin })
