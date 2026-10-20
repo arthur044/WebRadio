@@ -1,0 +1,18 @@
+# =============================================================================
+# WebRadio — docker-compose.live.yml (E2-F11) · uso EXPLÍCITO, nunca override automático (S-M12):
+#   docker compose -f docker-compose.yml -f docker-compose.live.yml up -d --wait
+#
+# Liga o ao vivo em produção: publica a porta do harbor-borda SÓ no IP do .env (HARBOR_BIND_IP: a interface da VPN ou do
+# estúdio; nunca 0.0.0.0) e põe a API em Harbor__AtrasDoProxy=true (o Liquidsoap só vê o IP do proxy: a API não bloqueia
+# por IP nem por par, só registra e alerta; o limite por cliente é do nginx). HARBOR_PERMITIDOS é obrigatório aqui.
+# =============================================================================
+services:
+  harbor-borda:
+    environment:
+      HARBOR_PERMITIDOS: "${HARBOR_PERMITIDOS:?Defina HARBOR_PERMITIDOS no .env (IPs ou redes CIDR dos locutores, ex.: a VPN)}"
+    ports:
+      - "${HARBOR_BIND_IP:?Defina HARBOR_BIND_IP no .env (o IP da interface da VPN ou do estúdio; nunca 0.0.0.0)}:${HARBOR_PORT:-8005}:8005"
+
+  api:
+    environment:
+      Harbor__AtrasDoProxy: "true"

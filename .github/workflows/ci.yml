@@ -227,7 +227,7 @@ jobs:
   # B3-01: os dois teste.sh de infraestrutura (hardening do Icecast e playout do Liquidsoap) não rodavam em nenhum job.
   # O do Liquidsoap usa a imagem webradio-icecast:teste que o do Icecast constrói: a ordem importa.
   infra-testes:
-    name: Infra (teste.sh do Icecast e do Liquidsoap)
+    name: Infra (teste.sh do Icecast, do Liquidsoap e do harbor-borda)
     runs-on: ubuntu-latest
     if: github.event_name != 'schedule'
     needs: seguranca
@@ -245,6 +245,9 @@ jobs:
 
       - name: infra/liquidsoap/teste.sh
         run: infra/liquidsoap/teste.sh
+
+      - name: infra/harbor-borda/teste.sh
+        run: infra/harbor-borda/teste.sh
 
   # F17: o 03-schema-sqlserver.sql (contrato, ADR D14) e as migrations do EF precisam gerar o MESMO schema. Dois bancos
   # descartáveis no SQL Server do próprio job; o resultado (catálogo e diff) vai para o resumo do job, para o Atlas.

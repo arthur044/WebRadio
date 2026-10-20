@@ -35,7 +35,7 @@
 
 ## Contratos novos e alterados
 
-Esta seção é o contrato. O `02-api-rest.md` é atualizado no mesmo PR desta spec. O DDL entra no `03` **no mesmo commit da migration**, no PR B2 (o job `ddl-check` compara o `03` com as migrations e falharia antes disso); nesse mesmo PR, o bloco de DDL abaixo vira um ponteiro para o `03` §3.1, para não haver duas fontes.
+Esta seção é o contrato. O `02-api-rest.md` é atualizado no mesmo PR desta spec. O DDL entra no `03` **no mesmo commit da migration**, no PR B2 (o job `ddl-check` compara o `03` com as migrations e falharia antes disso); nesse mesmo PR, o bloco de DDL que ficava aqui virou um ponteiro para o `03` §3.1, para não haver duas fontes.
 
 ### Credencial de transmissão (S-A08, decisão de 2026-10-15)
 
@@ -49,28 +49,7 @@ Esta seção é o contrato. O `02-api-rest.md` é atualizado no mesmo PR desta s
 - **Revogação automática**: desativar a conta, trocar a senha da conta ou mudar o papel para `Ouvinte` revoga a credencial. Troca entre `Admin` e `Locutor` **não** revoga (os dois podem transmitir). O gatilho é o evento `UsuarioCredenciaisAlteradas`, filtrado pelo motivo no handler.
 - **Não é o login do site.** A senha da conta nunca trafega pelo harbor. Vazar a credencial de transmissão permite, no máximo, transmitir na janela do programa daquele locutor, e o locutor ou o Admin a revoga na hora (o ao vivo cai em até 15 s: consulta a cada 10 s mais o timeout de 5 s).
 
-DDL proposto (entra no `03` §3.1 e na migration no B2; aprovado pelo Atlas no PR #38):
-
-```sql
-/* ---------- 3.1 seg.CredencialTransmissao (Épico 2, S-A08) ---------- */
-CREATE TABLE seg.CredencialTransmissao (
-    Id               uniqueidentifier NOT NULL CONSTRAINT DF_CredencialTransmissao_Id DEFAULT NEWSEQUENTIALID(),
-    UsuarioId        uniqueidentifier NOT NULL,
-    Identificador    uniqueidentifier NOT NULL,          -- o "usuário" do source client; Guid.NewGuid(), opaco
-    SegredoHash      binary(32)       NOT NULL,          -- SHA-256(salt || ASCII dos 43 caracteres)
-    Salt             binary(16)       NOT NULL,
-    CriadaEmUtc      datetime2(3)     NOT NULL CONSTRAINT DF_CredencialTransmissao_CriadaEmUtc DEFAULT SYSUTCDATETIME(),
-    RevogadaEmUtc    datetime2(3)     NULL,
-    UltimoUsoEmUtc   datetime2(3)     NULL,
-    CONSTRAINT PK_CredencialTransmissao PRIMARY KEY CLUSTERED (Id),
-    CONSTRAINT FK_CredencialTransmissao_Usuario FOREIGN KEY (UsuarioId) REFERENCES seg.Usuario (Id) ON DELETE CASCADE
-);
-CREATE UNIQUE INDEX UX_CredencialTransmissao_Identificador ON seg.CredencialTransmissao (Identificador);
--- Uma credencial ativa por locutor.
-CREATE UNIQUE INDEX UX_CredencialTransmissao_Ativa ON seg.CredencialTransmissao (UsuarioId) WHERE RevogadaEmUtc IS NULL;
-```
-
-Notas do Atlas para a migration: nomes explícitos no EF (`HasConstraintName` na FK, `HasDatabaseName` nos dois índices, filtro `[RevogadaEmUtc] IS NULL`); se a `ForeignKeyIndexConvention` do EF gerar um `IX_CredencialTransmissao_UsuarioId`, o `03` espelha exatamente o que `dotnet ef migrations script` gerar. **Não** acrescentar `CHECK (RevogadaEmUtc >= CriadaEmUtc)`: os dois relógios são diferentes (SQL e `IClock`) e a revogação falharia com erro 547.
+DDL: `docs/specs/03-schema-sqlserver.sql` §3.1 (`seg.CredencialTransmissao`), aplicado pela migration `CredencialTransmissao` no mesmo commit (aprovado pelo Atlas no PR #38, E2-A01). O `03` é a única fonte: o bloco que estava aqui saiu no B2. Sem `CHECK (RevogadaEmUtc >= CriadaEmUtc)`: os dois relógios são diferentes (SQL e `IClock`) e a revogação falharia com erro 547.
 
 ### Autorização do ao vivo: pela janela, não pelo `Status`
 
@@ -105,9 +84,10 @@ Todos na `:8081`, com o Bearer `Playout__Token` e o filtro de porta do S-A06, co
 
 **Throttle do `harbor/auth`** (no desenho do D21 do login):
 - Só contam as falhas de **credencial** (identificador desconhecido, segredo errado). "Credencial certa, fora da janela" responde 401 igual, mas **não** conta: o BUTT reconecta sozinho a cada poucos segundos, e o locutor que conecta minutos antes do programa não pode ficar bloqueado na hora de entrar.
-- Bloqueio por **par (identificador, IP)**: 10 falhas em 5 min. Por **IP**: um limite mais alto, contra varredura de identificadores. Por **identificador sozinho**: só log e alerta, **nunca** bloqueio (quem conhece o identificador, que trafega em claro, não pode travar o locutor).
+- Bloqueio por **par (identificador, IP)**: 10 falhas em 5 min. Por **IP**: um limite mais alto (50 falhas em 5 min), contra varredura de identificadores. Por **identificador sozinho**: só log e alerta, **nunca** bloqueio (quem conhece o identificador, que trafega em claro, não pode travar o locutor).
 - Sucesso zera o par. As chaves do throttle são `ChaveOpaca` (HMAC) e só valores que passaram na validação entram nelas.
-- **Atrás do proxy da E2-F11, o Liquidsoap só vê o IP do proxy** (o harbor não lê PROXY protocol). Nesse caso o par (identificador, IP) degeneraria em "por identificador", que é justamente o bloqueio proibido acima. Por isso, atrás do proxy, a API **não bloqueia** por IP nem por par: registra e alerta. O limite por cliente fica no proxy (`limit_conn` por IP real, lista de IPs/VPN), e o IP real do cliente existe **só** no log do `harbor-borda`. Contra força bruta, o que protege é o segredo de 256 bits.
+- **Atrás do proxy da E2-F11, o Liquidsoap só vê o IP do proxy** (o harbor não lê PROXY protocol). Nesse caso o par (identificador, IP) degeneraria em "por identificador", que é justamente o bloqueio proibido acima. Por isso, atrás do proxy, a API **não bloqueia** por IP nem por par: registra e alerta. O limite por cliente fica no proxy (`limit_conn` por IP real, lista de IPs/VPN), e o IP real do cliente existe **só** no log do `harbor-borda`. Contra força bruta, o que protege é o segredo de 256 bits. A chave é a configuração `Harbor__AtrasDoProxy` (padrão `false`; `true` só no `docker-compose.live.yml`, junto do `harbor-borda`).
+- Contador fora (Redis): o `auth` segue **sem** limite e loga `HARBOR_THROTTLE_INDISPONIVEL`. Recusar tudo tiraria o ao vivo do ar junto com o Redis, e o segredo de 256 bits continua valendo.
 
 **Logs** (API e `radio.liq`): identificador **só** se passou na regex; senão `usuario_invalido` e o tamanho (o locutor pode trocar os campos e mandar o segredo no lugar do usuário). IP **anonimizado** (/24 para IPv4, /64 para IPv6), como o nginx; nunca o segredo.
 
@@ -123,6 +103,8 @@ Estado: o cliente guarda o último `eventoId` aplicado e, ao reconectar, ressinc
 
 Título e artista que o locutor manda pelo source client são validados **no `radio.liq` e no servidor** (`POST /internal/harbor/eventos` e `TocandoAgora`): até 200 caracteres, rejeitando as categorias Unicode `Cc`, `Cf` (inclui os caracteres de controle de direção, como `U+202E`, e os invisíveis, como `U+200B`) e `Cs`. Aplicados por `metadata.map`/`insert_metadata`, nunca por `annotate:`.
 
+Exceção decidida no B2 (Nexus, 2026-10-16), para emoji composto não virar 400: o **ZWJ** (`U+200D`) é aceito, e as **tags** `U+E0020`–`U+E007E` só dentro de uma bandeira (logo depois de `U+1F3F4` e fechadas por `U+E007F`). Tag solta ou sequência sem o `U+E007F` no fim é recusada. Todo o resto de `Cc`, `Cf` e `Cs` continua recusado (por exemplo `U+200B`, `U+202E`, `U+2066`–`U+2069`, `U+FEFF`, `U+00AD` e surrogate solto), além dos separadores `U+2028`/`U+2029`. Um validador só (`MetadadoSeguro`) atende o harbor e o `TocandoAgora`, para as duas regras não se separarem.
+
 ## Tarefas — Forge (Backend, Worker, Liquidsoap e contêineres)
 
 | ID | Tarefa | Depende | Critério de aceite |
@@ -133,7 +115,7 @@ Título e artista que o locutor manda pelo source client são validados **no `ra
 | **E2-F04** | **Credencial de transmissão**: entidade, migration (DDL do contrato; `03` §3.1 no mesmo commit; ponteiro no lugar do bloco deste arquivo), endpoints da credencial, geração e hash conforme o contrato, revogação automática pelo `UsuarioCredenciaisAlteradas` filtrado por motivo | A01 | O segredo não aparece em nenhum log nem em nenhuma resposta além do `POST` (teste que varre os logs da requisição); `[SqlFact]` com dois `POST` concorrentes termina com **exatamente uma** ativa e nenhum 500; `POST` sem `senhaAtual` correta → 401; sexta tentativa na hora (inclusive com senha errada) → 429; token de troca de senha pendente → 403; `Cache-Control: no-store`; troca Admin ↔ Locutor não revoga, ida para `Ouvinte` revoga |
 | **E2-F05** | **`POST /internal/harbor/auth`** e **`GET /internal/harbor/autorizacao/{identificador}`** conforme o contrato (janela no SQL, validação estrita, tempo constante, throttle, logs) | F01, F04 | Cada motivo de recusa (inexistente, revogada, segredo errado, dono desativado, fora da janela, programa de outro locutor) → **401 idênticos**; `usuario` que não é GUID, `senha` fora do alfabeto ou do tamanho, `usuario` com `../`, aspas ou quebra de linha → 401 e **nenhuma** linha de log com o valor (teste que manda o segredo no campo usuário e varre os logs); **com o Worker parado, `/autorizacao` responde 403 já na primeira consulta depois de `FimUtc`**; falhas de "fora da janela" não consomem o throttle; o par (identificador, IP) bloqueia e o identificador sozinho não; só na `:8081` (o teste de bypass do S-A06 cobre as rotas novas) |
 | **E2-F06** | **`POST /internal/harbor/eventos`** + evento `TransmissaoAoVivoAlterada` pelo outbox + campo `aoVivo` em `GET /stream/info`; metadados validados no servidor conforme o contrato | F05 | Conectar → `noAr: true` com `programaId`; desconectar → `noAr: false`; evento repetido não muda o estado; título com `U+202E` ou `U+200B` é recusado |
-| **E2-F07** | ***Spike* (primeira tarefa do B2): derrubar o harbor pelo Liquidsoap.** Roda contra um **stub** HTTP mínimo no `teste.sh` (responde 200 com `{ programaId, fimUtc }`, 401 e 403 sob comando), sem depender da F05. Provar, com a imagem fixada do Liquidsoap: (a) o `auth` do `input.harbor` valida o formato e chama `POST /internal/harbor/auth`; exceção ou timeout (5 s) = recusa; (b) uma tarefa periódica (`thread.run`, 10 s) consulta `/autorizacao` e, no 403, **desconecta o source client** e volta para a rotação sem derrubar o `output.icecast`; (c) **falha aberta com teto**: só erro de **transporte** (timeout, conexão recusada, 5xx) mantém o locutor; **qualquer 4xx derruba na hora**; o teto é `min(fimUtc + 1 min, último 200 + 15 min)`; cada consulta que falha gera log `Warning`; (d) **conexão nova com a API fora é recusada**; (e) uma segunda conexão com credencial válida não derruba a que está no ar; (f) qual IP o `auth` recebe na topologia real (direto e atrás do proxy da F11); (g) se a imagem sustenta `input.harbor` com TLS e se BUTT e Mixxx conectam (só medir) | — | Relatório no PR com cada item e o que funcionou na versão fixada. **Se (b) ou (c) não forem possíveis**, o Forge para e avisa o Nexus antes de seguir: a alternativa é decisão de arquitetura |
+| **E2-F07** | ***Spike* (primeira tarefa do B2): derrubar o harbor pelo Liquidsoap.** Roda contra um **stub** HTTP mínimo no `teste.sh` (responde 200 com `{ programaId, fimUtc }`, 401 e 403 sob comando), sem depender da F05. Provar, com a imagem fixada do Liquidsoap: (a) o `auth` do `input.harbor` valida o formato e chama `POST /internal/harbor/auth`; exceção ou timeout (5 s) = recusa; (b) uma tarefa periódica (`thread.run`, 10 s) consulta `/autorizacao` e, no 403, **desconecta o source client** e volta para a rotação sem derrubar o `output.icecast`; (c) **falha aberta com teto**: só erro de **transporte** (timeout, conexão recusada, 5xx) mantém o locutor; **qualquer 4xx derruba na hora**; o teto é `min(fimUtc + 1 min, último 200 + 15 min)`; cada consulta que falha gera log `log.severe` (nível 2; o Liquidsoap 2.4 não tem nível Warning); (d) **conexão nova com a API fora é recusada**; (e) uma segunda conexão com credencial válida não derruba a que está no ar; (f) qual IP o `auth` recebe na topologia real (direto e atrás do proxy da F11); (g) se a imagem sustenta `input.harbor` com TLS e se BUTT e Mixxx conectam (só medir) | — | Relatório no PR com cada item e o que funcionou na versão fixada. **Se (b) ou (c) não forem possíveis**, o Forge para e avisa o Nexus antes de seguir: a alternativa é decisão de arquitetura |
 | **E2-F08** | **`radio.liq` do ao vivo**: `input.harbor` com o `auth` da F07; metadados validados; `on_connect`/`on_disconnect` chamando `POST /internal/harbor/eventos`; logs conforme o contrato. Sai a senha única `liquidsoap_harbor_password` de **todos** os lugares: `radio.liq` (`segredo(...)`), `gerar-segredos.sh` e `.ps1`, `verificar-paridade-segredos.sh`, `.env.example`, compose, tabela de serviços do `04` e tabela 5.1 do `05` | F06, F07 | `teste.sh` cobre: credencial certa na janela → toca o ao vivo; errada → recusa; programa encerrado → derruba em ≤ 30 s e volta para a rotação; API parada → conexão nova recusada e a já conectada segue até o teto; o stream de saída não cai em nenhum dos casos; CI verde no meio do B2 (a paridade de segredos não quebra) |
 | **E2-F09** | **Manutenção**: apagar credenciais revogadas há mais de 90 dias, no job diário do Worker, com `DELETE TOP (4000)` simples em laço até o lote vir incompleto (nenhuma tabela referencia a credencial, então não precisa do passo duplo do `RefreshToken`) | F04 | Teste com SQL real; seção 11 do `03` atualizada no mesmo commit |
 | **E2-F10** | **Smoke e CI**: o `smoke-compose.sh` cobre os itens 1, 3, 4 e 7 da Definição de pronto (programa vira `AoVivo`; source client de teste com `ffmpeg` conecta e é derrubado no encerramento; o `harbor-borda` recusa IP fora da lista; a base de produção não publica a porta do ao vivo) | F08, F11 | Job `compose-smoke` verde com os itens novos |

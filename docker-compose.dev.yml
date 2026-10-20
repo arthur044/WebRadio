@@ -3,7 +3,7 @@
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait
 #
 # Só muda o que é de desenvolvimento: ambiente Development (seed da grade, scanner NoOp liberado) e portas
-# de diagnóstico em 127.0.0.1 (1433, console do MinIO 9001, harbor 8005). Segredos: os mesmos arquivos.
+# de diagnóstico em 127.0.0.1 (1433, console do MinIO 9001, harbor-borda 8005). Segredos: os mesmos arquivos.
 # =============================================================================
 x-dev-env: &dev-env
   ASPNETCORE_ENVIRONMENT: Development
@@ -37,6 +37,7 @@ services:
       # Seed de dev pelo DevDataSeeder, no boot da Api (E2-A03): locutores, uma semana de grade e 3 divulgações. Desligado por
       # padrão; ligue com SEED_DEV_DATA=true no `up`. A senha dos locutores vem do arquivo de segredo, nunca do YAML.
       Seed__DevData: "${SEED_DEV_DATA:-false}"
+      Harbor__AtrasDoProxy: "true"
     secrets:
       - { source: seed_dev_senha, target: Seed__DevSenha }
 
@@ -44,14 +45,16 @@ services:
     environment:
       DOTNET_ENVIRONMENT: Development
 
-  liquidsoap:
+  # O ao vivo do dev entra pela borda, como em produção (E2-F11): a API vê o IP do proxy e roda com Harbor__AtrasDoProxy.
+  # No dev a porta é só do loopback e o cliente chega pelo gateway do Docker, então a lista libera tudo.
+  harbor-borda:
+    environment:
+      HARBOR_PERMITIDOS: "${HARBOR_PERMITIDOS:-0.0.0.0/0}"
     ports:
       - "127.0.0.1:8005:8005"
-    networks: [playout, diag-liquidsoap]
 
 # Porta publicada não funciona em rede "internal". Cada serviço com porta de diagnóstico ganha uma rede SÓ
-# sua (nunca uma compartilhada: o Liquidsoap não pode ganhar rota até o sqlserver por aqui).
+# sua (nunca uma compartilhada). O harbor-borda não precisa: ele já está na borda.
 networks:
   diag-sql: {}
   diag-minio: {}
-  diag-liquidsoap: {}

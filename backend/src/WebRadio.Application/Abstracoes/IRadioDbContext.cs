@@ -3,6 +3,7 @@ using WebRadio.Domain.Autenticacao;
 using WebRadio.Domain.Grade;
 using WebRadio.Domain.Interacao;
 using WebRadio.Domain.Midia;
+using WebRadio.Domain.Transmissao;
 using WebRadio.Domain.Usuarios;
 
 namespace WebRadio.Application.Abstracoes;
@@ -16,6 +17,8 @@ public interface IRadioDbContext
     DbSet<Usuario> Usuarios { get; }
 
     DbSet<RefreshToken> RefreshTokens { get; }
+
+    DbSet<CredencialTransmissao> CredenciaisTransmissao { get; }
 
     DbSet<Programa> Programas { get; }
 

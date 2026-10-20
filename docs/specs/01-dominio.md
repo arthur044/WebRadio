@@ -187,3 +187,5 @@ Invariante: `Aprovado ⇒ MimeType, HashSHA256, DuracaoSegundos, SanitizadoEmUtc
 | `TransicaoInvalida` / `PedidoJaModerado` | 409 | `/erros/transicao-invalida` |
 | `RowVersion` divergente (`If-Match`) | 412 | `/erros/versao-desatualizada` |
 | Throttle de pedido | 429 | `/erros/muitos-pedidos` (+ `retryAfterSeconds`) |
+| Limite por usuário (ex.: 5 gerações de credencial de transmissão por hora, Épico 2) | 429 | `/erros/limite-excedido` (+ `retryAfterSeconds` e `Retry-After`) |
+| Duas gerações de credencial de transmissão ao mesmo tempo (índice de "uma ativa") | 409 | `/erros/conflito-credencial` |

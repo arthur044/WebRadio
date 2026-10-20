@@ -26,7 +26,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);
 
 // Serilog JSON; request logging registra o path SEM a query string (S-M09: access_token na query do hub).
-builder.Host.UseSerilog((ctx, cfg) => cfg
+// ReadFrom.Services: sinks extras registrados no DI (os testes capturam os logs da requisição por ele).
+builder.Host.UseSerilog((ctx, services, cfg) => cfg
+    .ReadFrom.Services(services)
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
     // Cada comando SQL sairia como Information (texto do SQL a cada request e a cada tick do outbox).
@@ -42,6 +44,8 @@ builder.Services.AddOptions<PlayoutOptions>().BindConfiguration(PlayoutOptions.S
 builder.Services.AddOptions<RedisOptions>().BindConfiguration(RedisOptions.Secao).ValidateOnStart();
 builder.Services.AddOptions<SeedOptions>().BindConfiguration(SeedOptions.Secao).ValidateOnStart();
 builder.Services.AddOptions<StorageOptions>().BindConfiguration(StorageOptions.Secao).ValidateOnStart();
+// Harbor__AtrasDoProxy: true só no docker-compose.live.yml, junto do harbor-borda (E2-F11).
+builder.Services.AddOptions<WebRadio.Application.Features.Harbor.HarborOptions>().BindConfiguration(WebRadio.Application.Features.Harbor.HarborOptions.Secao);
 builder.Services.AddSingleton<IValidateOptions<StorageOptions>, StorageOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<RedisOptions>, RedisOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<SeedOptions>, SeedOptionsValidator>();

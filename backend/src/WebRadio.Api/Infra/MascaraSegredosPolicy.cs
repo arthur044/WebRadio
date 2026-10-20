@@ -8,14 +8,14 @@ namespace WebRadio.Api.Infra;
 
 /// <summary>
 /// Destructuring policy do Serilog (05 §5.3): propriedades e chaves de dicionário chamadas *Password*, *Senha*,
-/// *Token*, *Key*, *Pepper*, *Secret*, *Authorization*, *Refresh*, *Cookie*, *Hash* e *Email* (sem PII em log)
+/// *Segredo*, *Salt*, *Token*, *Key*, *Pepper*, *Secret*, *Authorization*, *Refresh*, *Cookie*, *Hash* e *Email* (sem PII em log)
 /// saem como "***" ao logar com <c>{@Obj}</c>. Vale SÓ para <c>{@Obj}</c>: com <c>{Obj}</c> o Serilog usa
 /// ToString() e esta policy não roda — por isso os requests sensíveis redefinem o ToString (teste de arquitetura).
 /// </summary>
 public sealed class MascaraSegredosPolicy : IDestructuringPolicy
 {
     private static readonly string[] Sensiveis =
-        ["password", "senha", "token", "key", "pepper", "secret", "authorization", "refresh", "cookie", "hash", "email"];
+        ["password", "senha", "segredo", "salt", "token", "key", "pepper", "secret", "authorization", "refresh", "cookie", "hash", "email"];
 
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> Propriedades = new();
 

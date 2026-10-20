@@ -60,6 +60,7 @@ public class RegistrarHandlerTests
     {
         public DbSet<WebRadio.Domain.Usuarios.Usuario> Usuarios => inner.Usuarios;
         public DbSet<WebRadio.Domain.Autenticacao.RefreshToken> RefreshTokens => inner.RefreshTokens;
+        public DbSet<WebRadio.Domain.Transmissao.CredencialTransmissao> CredenciaisTransmissao => inner.CredenciaisTransmissao;
         public DbSet<WebRadio.Domain.Grade.Programa> Programas => inner.Programas;
         public DbSet<WebRadio.Domain.Interacao.PedidoMusica> PedidosMusica => inner.PedidosMusica;
         public DbSet<WebRadio.Domain.Midia.ArquivoMidia> ArquivosMidia => inner.ArquivosMidia;
