@@ -68,7 +68,7 @@ Validação de horário: `inicioUtc`/`fimUtc` **precisam** terminar em `Z` (offs
 
 ### 4.1 Credencial de transmissão do locutor (Épico 2)
 
-Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin; o `POST` exige `{ senhaAtual }`), `GET /credenciais-transmissao` e `DELETE /usuarios/{id}/credencial-transmissao` (Admin). O segredo só aparece na resposta do `POST`, com `Cache-Control: no-store`. `encerrar` e `cancelar` de `/programas` publicam `ProgramaStatusAlterado`. Contrato completo em `06-epico-2-tarefas.md`.
+Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin; o `POST` exige `{ senhaAtual }`), `GET /credenciais-transmissao` e `DELETE /usuarios/{id}/credencial-transmissao` (Admin). O segredo só aparece na resposta do `POST`, com `Cache-Control: no-store`. As respostas do `GET` e do `POST` do próprio locutor trazem `conexao: { host, porta, mount }` (o que ele digita no source client; `host` é `null` sem `Harbor__HostPublico`). `encerrar` e `cancelar` de `/programas` publicam `ProgramaStatusAlterado`. Contrato completo em `06-epico-2-tarefas.md`.
 
 ## 5. Pedidos de música — `/pedidos`
 

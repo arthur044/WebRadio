@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using WebRadio.Infrastructure.Persistencia;
+using WebRadio.Infrastructure.Persistencia.Eventos;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace WebRadio.Api.IntegrationTests;
@@ -50,7 +51,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             foreach (var d in services.Where(d => d.ServiceType == typeof(DbContextOptions<RadioDbContext>)
                                                   || d.ServiceType.Name.StartsWith("IDbContextOptionsConfiguration", StringComparison.Ordinal)).ToList())
                 services.Remove(d);
-            services.AddDbContext<RadioDbContext>(o => o.UseInMemoryDatabase(_nomeDoBanco));
+            services.AddDbContext<RadioDbContext>((escopo, o) => o.UseInMemoryDatabase(_nomeDoBanco).ComEventosDeDominio(escopo));
         });
     }
 

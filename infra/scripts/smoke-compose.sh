@@ -9,6 +9,10 @@
 # O stack no ar é o do DEV (docker-compose.dev.yml); por isso as seções "base de produção" conferem a topologia do
 # docker-compose.yml SOZINHO pelo `docker compose config --format json` (redes, portas, capabilities), sem subir nada.
 #
+# O ao vivo (DoD 1, 3, 4 e 7 do Épico 2) é conferido por infra/scripts/smoke-ao-vivo.sh, que roda DEPOIS deste (o primeiro login do
+# Admin semeado, com a troca de senha pendente, só existe antes dele) e antes do E2E; a porta do harbor só existir no live.yml e a
+# base de produção publicar só a 8080 ficam aqui, na seção "base de PRODUÇÃO".
+#
 #   infra/scripts/smoke-compose.sh
 # =============================================================================
 set -euo pipefail
@@ -139,11 +143,15 @@ echo "== base de PRODUÇÃO (docker-compose.yml sozinho): redes, portas, capabil
 # O stack acima é o do dev; aqui a base é conferida sem o override (B3-08, B3-02/03/04/11). O JSON fica em arquivo: nunca é impresso.
 docker compose -f docker-compose.yml --profile '*' config --format json > "$TMP/prod.json"
 docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile '*' config --format json > "$TMP/dev.json"
-topologia="$(python3 -I - "$TMP/prod.json" "$TMP/dev.json" <<'PY'
+# Ao vivo (E2-F11) com valores de exemplo: o que importa é ONDE a porta é publicada, não o IP em si.
+HARBOR_BIND_IP=203.0.113.10 HARBOR_PERMITIDOS=203.0.113.0/24 \
+  docker compose -f docker-compose.yml -f docker-compose.live.yml --profile '*' config --format json > "$TMP/live.json"
+topologia="$(python3 -I - "$TMP/prod.json" "$TMP/dev.json" "$TMP/live.json" <<'PY'
 import json, re, sys
 
 prod = json.load(open(sys.argv[1]))
 dev = json.load(open(sys.argv[2]))
+live = json.load(open(sys.argv[3]))
 saida = []
 
 def confere(descricao, condicao, detalhe=""):
@@ -160,6 +168,21 @@ publicadas = {n: [(p.get("published"), p.get("target"), p.get("host_ip")) for p 
 confere("só o web publica porta, e só a 8080", publicadas == {"web": [("8080", 8080, None)]}, str(publicadas))
 confere("web nas redes borda, app e midia-borda, e NÃO na playout", redes("web") == {"borda", "app", "midia-borda"}, str(sorted(redes("web"))))
 confere("liquidsoap só na playout", redes("liquidsoap") == {"playout"}, str(sorted(redes("liquidsoap"))))
+confere("harbor-borda nas redes borda e playout", redes("harbor-borda") == {"borda", "playout"}, str(sorted(redes("harbor-borda"))))
+# --- E2-F11: a porta do ao vivo só existe com o live.yml, só ela a mais e só no IP configurado; a API passa a "atrás do proxy"
+publicadas_live = {n: [(p.get("published"), p.get("target"), p.get("host_ip")) for p in s.get("ports", [])]
+                   for n, s in live["services"].items() if s.get("ports")}
+confere("live.yml: só web 8080 e harbor-borda 8005 em HARBOR_BIND_IP",
+        publicadas_live == {"web": [("8080", 8080, None)], "harbor-borda": [("8005", 8005, "203.0.113.10")]}, str(publicadas_live))
+confere("live.yml: api com Harbor__AtrasDoProxy=true", live["services"]["api"]["environment"].get("Harbor__AtrasDoProxy") == "true")
+confere("live.yml: harbor-borda recebe HARBOR_BIND_IP (o entrypoint recusa 0.0.0.0 e ::)",
+        live["services"]["harbor-borda"]["environment"].get("HARBOR_BIND_IP") == "203.0.113.10")
+confere("só o dev define HARBOR_LIBERAR_TUDO (lista aberta no harbor-borda)",
+        dev["services"]["harbor-borda"]["environment"].get("HARBOR_LIBERAR_TUDO") == "1"
+        and not servicos["harbor-borda"]["environment"].get("HARBOR_LIBERAR_TUDO")
+        and not live["services"]["harbor-borda"]["environment"].get("HARBOR_LIBERAR_TUDO"))
+confere("base: api sem Harbor__AtrasDoProxy=true", servicos["api"]["environment"].get("Harbor__AtrasDoProxy") in (None, "false"))
+confere("dev: liquidsoap sem porta publicada (o ao vivo entra pelo harbor-borda)", not dev["services"]["liquidsoap"].get("ports"))
 confere("api em app, dados e playout", redes("api") == {"app", "dados", "playout"}, str(sorted(redes("api"))))
 confere("worker só na dados", redes("worker") == {"dados"}, str(sorted(redes("worker"))))
 confere("sanitizer sem rede (network_mode none)", servicos["sanitizer"].get("network_mode") == "none")

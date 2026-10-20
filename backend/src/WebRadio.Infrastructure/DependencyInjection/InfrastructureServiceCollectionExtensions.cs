@@ -6,8 +6,10 @@ using WebRadio.Application.Abstracoes;
 using Microsoft.Extensions.Hosting;
 using StackExchange.Redis;
 using WebRadio.Infrastructure.Armazenamento;
+using WebRadio.Infrastructure.Harbor;
 using WebRadio.Infrastructure.Triagem;
 using WebRadio.Infrastructure.Persistencia;
+using WebRadio.Infrastructure.Persistencia.Eventos;
 using WebRadio.Infrastructure.Persistencia.Outbox;
 using WebRadio.Infrastructure.Playout;
 using WebRadio.Application.Features.Playout;
@@ -59,8 +61,8 @@ public static class InfrastructureServiceCollectionExtensions
 
     /// <summary>O <see cref="RadioDbContext"/> com a mesma configuração para a Api e para o Worker.</summary>
     internal static IServiceCollection AddRadioDbContext(this IServiceCollection services, string connectionString) =>
-        services.AddDbContext<RadioDbContext>(options =>
-            options.UseSqlServer(connectionString, sql =>
+        services.AddScoped<DespachanteDeEventosDeDominio>().AddDbContext<RadioDbContext>((escopo, options) =>
+            options.ComEventosDeDominio(escopo).UseSqlServer(connectionString, sql =>
             {
                 // ATENÇÃO: com EnableRetryOnFailure o EF recusa transações manuais (BeginTransaction) fora de uma
                 // execution strategy ("does not support user-initiated transactions"). Todo fluxo que abre
@@ -79,6 +81,7 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddScoped<IRadioDbContext>(sp => sp.GetRequiredService<RadioDbContext>());
         services.AddScoped<ITransacaoComTrava, TransacaoComTrava>();
+        services.AddScoped<IConsultasDoHarbor, ConsultasDoHarbor>();
         services.AddScoped<ISondaDoBanco, SondaDoBanco>();
         services.AddScoped<IOutbox, OutboxEf>();
         services.AddMemoryCache();
@@ -111,6 +114,8 @@ public static class InfrastructureServiceCollectionExtensions
         AddStorage(services, configuration);
         services.AddSingleton<ITocandoAgoraStore>(sp => new TocandoAgoraStore(
             sp.GetRequiredService<IClock>(), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TocandoAgoraStore>>(), sp.GetService<IConnectionMultiplexer>()));
+        services.AddSingleton<WebRadio.Application.Features.Harbor.IEstadoDoAoVivoStore>(sp => new EstadoDoAoVivoStore(
+            sp.GetRequiredService<IClock>(), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<EstadoDoAoVivoStore>>(), sp.GetService<IConnectionMultiplexer>()));
 
         services.AddScoped<IInicializadorDeDados, AdminSeeder>();
 

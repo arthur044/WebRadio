@@ -35,6 +35,9 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
             NaoEncontradoException n => Criar(404, "/erros/nao-encontrado", "Não encontrado.", n.Message),
             VersaoDesatualizadaException d => Criar(412, "/erros/versao-desatualizada", "Versão desatualizada.", d.Message),
             ServidorOcupadoException o => Criar(503, "/erros/servidor-ocupado", "Servidor ocupado.", o.Message),
+            LimiteExcedidoException l => Criar(429, "/erros/limite-excedido", "Limite excedido.", l.Message,
+                ("retryAfterSeconds", SegundosDeEspera(l))),
+            GeracaoConcorrenteException g => Criar(409, "/erros/conflito-credencial", "Geração concorrente.", g.Message),
             _ => null,
         };
 
@@ -50,9 +53,13 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
 
         http.Response.StatusCode = problema.Status!.Value;
         if (ex is ServidorOcupadoException) http.Response.Headers.RetryAfter = "5";
+        if (ex is LimiteExcedidoException limite)
+            http.Response.Headers.RetryAfter = SegundosDeEspera(limite).ToString(System.Globalization.CultureInfo.InvariantCulture);
         await http.Response.WriteAsJsonAsync(problema, options: null, contentType: "application/problem+json", ct);
         return true;
     }
+
+    private static int SegundosDeEspera(LimiteExcedidoException l) => Math.Max(1, (int)Math.Ceiling(l.TenteDeNovoEm.TotalSeconds));
 
     /// <summary>Corpo ÚNICO de todo 401 de login (credencial errada, e-mail inexistente, inativo, bloqueado, limite).</summary>
     public static ProblemDetails Credenciais()

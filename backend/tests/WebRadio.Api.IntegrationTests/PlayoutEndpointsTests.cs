@@ -203,6 +203,10 @@ public class PlayoutEndpointsTests
         { "override de direcao (RLO)", Faixa(titulo: "Faixa\u202E3pm.exe") },
         { "isolate de direcao", Faixa(artista: "Banda\u2066x") },
         { "marca RLM", Faixa(titulo: "Faixa\u200F") },
+        { "zero width space (Cf)", Faixa(titulo: "Fai\u200Bxa") },
+        { "BOM (Cf)", Faixa(artista: "\uFEFFBanda") },
+        { "tag de emoji solta", Faixa(titulo: "Faixa\U000E0067") },
+        { "surrogate solto (escapado no JSON)", new StringContent("{\"tipo\":\"FaixaIniciada\",\"titulo\":\"Faixa\\ud83c\",\"ocorridoEmUtc\":\"" + DateTime.UtcNow.ToString("O") + "\"}", Encoding.UTF8, "application/json") },
         { "data uma hora no futuro", Faixa(ocorridoEmUtc: DateTime.UtcNow.AddHours(1)) },
         { "tipo desconhecido", Faixa(tipo: "FaixaTerminada") },
         { "tipo vazio", Faixa(tipo: "") },
@@ -233,6 +237,15 @@ public class PlayoutEndpointsTests
         Assert.Equal(200, titulo.Length);
 
         Assert.Equal(HttpStatusCode.Accepted, (await c.SendAsync(Req(HttpMethod.Post, Eventos, token: Token, corpo: Faixa(titulo: titulo)))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Bandeira_com_tags_e_aceita()
+    {
+        var (_, c) = Novo();
+        var escocia = "\U0001F3F4\U000E0067\U000E0062\U000E0073\U000E0063\U000E0074\U000E007F";
+
+        Assert.Equal(HttpStatusCode.Accepted, (await c.SendAsync(Req(HttpMethod.Post, Eventos, token: Token, corpo: Faixa(titulo: "Hino " + escocia)))).StatusCode);
     }
 
     [Fact]

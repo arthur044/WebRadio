@@ -31,6 +31,23 @@ public class MascaraLogTests
         Assert.Contains("Ana", texto);
     }
 
+    private sealed record Credencial(Guid Identificador, string Segredo, byte[] Salt);
+
+    [Fact]
+    public void Segredo_e_salt_da_credencial_de_transmissao_sao_mascarados()
+    {
+        var sink = new Captura();
+        using var log = new LoggerConfiguration().Destructure.With<MascaraSegredosPolicy>().WriteTo.Sink(sink).CreateLogger();
+        var id = Guid.NewGuid();
+
+        log.Information("{@Dados}", new Credencial(id, "segredo-de-43-caracteres-xxxxxxxxxxxxxxxxxx", [7, 7, 7]));
+
+        var texto = sink.Eventos.Single().Properties["Dados"].ToString();
+        Assert.DoesNotContain("segredo-de-43", texto);
+        Assert.DoesNotContain("7", texto.Replace(id.ToString(), ""));
+        Assert.Contains(id.ToString(), texto);
+    }
+
     [Fact]
     public void Dicionarios_e_tipos_anonimos_tambem_sao_mascarados()
     {

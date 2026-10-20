@@ -130,6 +130,27 @@ CREATE INDEX IX_RefreshToken_FamiliaId ON seg.RefreshToken (FamiliaId) WHERE Rev
 CREATE INDEX IX_RefreshToken_SubstituidoPorId ON seg.RefreshToken (SubstituidoPorId);
 GO
 
+/* ---------- 3.1 seg.CredencialTransmissao (Épico 2, S-A08) ----------
+   Credencial do source client do ao vivo (docs/specs/06-epico-2-tarefas.md, "Credencial de transmissão"). Revisado pelo
+   Atlas no PR #38 (E2-A01). Sem CHECK (RevogadaEmUtc >= CriadaEmUtc): os dois relógios são diferentes (SQL e IClock).
+   UX_CredencialTransmissao_Ativa tem UsuarioId à esquerda e cobre a FK: o EF não gera IX_ separado. */
+CREATE TABLE seg.CredencialTransmissao (
+    Id               uniqueidentifier NOT NULL CONSTRAINT DF_CredencialTransmissao_Id DEFAULT NEWSEQUENTIALID(),
+    UsuarioId        uniqueidentifier NOT NULL,
+    Identificador    uniqueidentifier NOT NULL,          -- o "usuário" do source client; Guid.NewGuid(), opaco
+    SegredoHash      binary(32)       NOT NULL,          -- SHA-256(salt || ASCII dos 43 caracteres)
+    Salt             binary(16)       NOT NULL,
+    CriadaEmUtc      datetime2(3)     NOT NULL CONSTRAINT DF_CredencialTransmissao_CriadaEmUtc DEFAULT SYSUTCDATETIME(),
+    RevogadaEmUtc    datetime2(3)     NULL,
+    UltimoUsoEmUtc   datetime2(3)     NULL,
+    CONSTRAINT PK_CredencialTransmissao PRIMARY KEY CLUSTERED (Id),
+    CONSTRAINT FK_CredencialTransmissao_Usuario FOREIGN KEY (UsuarioId) REFERENCES seg.Usuario (Id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX UX_CredencialTransmissao_Identificador ON seg.CredencialTransmissao (Identificador);
+-- Uma credencial ativa por locutor.
+CREATE UNIQUE INDEX UX_CredencialTransmissao_Ativa ON seg.CredencialTransmissao (UsuarioId) WHERE RevogadaEmUtc IS NULL;
+GO
+
 /* ---------- 4. grade.Programa ---------- */
 CREATE TABLE grade.Programa (
     Id                uniqueidentifier NOT NULL CONSTRAINT DF_Programa_Id DEFAULT NEWSEQUENTIALID(),
@@ -385,7 +406,10 @@ GO
             AND NOT EXISTS (SELECT 1 FROM seg.RefreshToken AS a WHERE a.SubstituidoPorId = t.Id);
      Um vencido ainda apontado por um token que não venceu fica para outra rodada.
      (Corrigido em 2026-10-13: é o que o Manutencao.cs do Worker executa desde o PR #29.)
-   Outbox e RefreshToken também rodam em lotes, como a rotina de LGPD.
+   - CredencialTransmissao (E2-F09; nenhuma tabela a referencia, então um DELETE simples basta, sem o passo duplo do RefreshToken):
+       DELETE TOP (4000) FROM seg.CredencialTransmissao WHERE RevogadaEmUtc < DATEADD(DAY, -90, SYSUTCDATETIME());
+       repetido até o lote vir incompleto. A credencial ativa (RevogadaEmUtc IS NULL) nunca sai.
+   Outbox, RefreshToken e CredencialTransmissao também rodam em lotes, como a rotina de LGPD.
    Executadas pelo Worker (job diário), não por SQL Agent: o SQL Server Linux em
    contêiner não é dependência de agendamento.
    --------------------------------------------------------------------------------------- */

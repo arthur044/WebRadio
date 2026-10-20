@@ -1,6 +1,7 @@
 using FluentValidation;
 using MediatR;
 using WebRadio.Application.Abstracoes;
+using WebRadio.Application.Comum;
 
 namespace WebRadio.Application.Features.Playout;
 
@@ -21,7 +22,7 @@ public sealed record RegistrarEventoDoPlayoutCommand(string? Tipo, Guid? MidiaId
 public sealed class RegistrarEventoDoPlayoutValidator : AbstractValidator<RegistrarEventoDoPlayoutCommand>
 {
     public const string FaixaIniciada = "FaixaIniciada";
-    public const int TamanhoMaximoDoMetadado = 200;
+    public const int TamanhoMaximoDoMetadado = MetadadoSeguro.TamanhoMaximo;
 
     /// <summary>Folga para o relógio do contêiner do playout. Além disso, a data é recusada.</summary>
     public static readonly TimeSpan ToleranciaDeRelogio = TimeSpan.FromMinutes(5);
@@ -36,22 +37,15 @@ public sealed class RegistrarEventoDoPlayoutValidator : AbstractValidator<Regist
         RuleFor(x => x.MidiaId).NotEqual(Guid.Empty).WithMessage("midiaId inválido.");
         RuleFor(x => x.PedidoId).NotEqual(Guid.Empty).WithMessage("pedidoId inválido.");
         // S-A09: no ao vivo, título e artista vêm do programa do locutor (harbor) e seguem para TODOS os clientes do hub.
+        // A regra é a mesma do harbor (MetadadoSeguro), para as duas não se separarem.
         RuleFor(x => x.Titulo)
-            .MaximumLength(TamanhoMaximoDoMetadado).WithMessage($"titulo pode ter no máximo {TamanhoMaximoDoMetadado} caracteres.")
-            .Must(SemCaractereDeControle).WithMessage("titulo não pode ter caracteres de controle.");
+            .Must(MetadadoSeguro.TamanhoValido).WithMessage($"titulo pode ter no máximo {TamanhoMaximoDoMetadado} caracteres.")
+            .Must(MetadadoSeguro.Valido).WithMessage("titulo não pode ter caracteres de controle nem de formato.");
         RuleFor(x => x.Artista)
-            .MaximumLength(TamanhoMaximoDoMetadado).WithMessage($"artista pode ter no máximo {TamanhoMaximoDoMetadado} caracteres.")
-            .Must(SemCaractereDeControle).WithMessage("artista não pode ter caracteres de controle.");
+            .Must(MetadadoSeguro.TamanhoValido).WithMessage($"artista pode ter no máximo {TamanhoMaximoDoMetadado} caracteres.")
+            .Must(MetadadoSeguro.Valido).WithMessage("artista não pode ter caracteres de controle nem de formato.");
     }
 
-    /// <summary>
-    /// Controle C0/C1 (inclusive quebra de linha, tab e NUL) e os separadores de linha/parágrafo do Unicode, que também
-    /// quebram linha: servem para forjar linha de log ou de protocolo. Também as marcas e os controles de direção
-    /// (LRM/RLM/ALM, embeddings, overrides e isolates): invertem o texto exibido a todos os ouvintes (spoofing visual).
-    /// Acento, emoji (inclusive com ZWJ) e outros alfabetos passam.
-    /// </summary>
-    private static bool SemCaractereDeControle(string? texto) =>
-        texto is null || !texto.Any(c => char.IsControl(c) || c is '\u2028' or '\u2029' || c is '\u061C' or '\u200E' or '\u200F' or (>= '\u202A' and <= '\u202E') or (>= '\u2066' and <= '\u2069'));
 }
 
 /// <summary>

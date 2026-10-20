@@ -14,6 +14,7 @@ nenhum serviço ficou sem esse bloco.
 | `web` (nginx) | access log em stdout (`access_anon`) | **anonimizado** na origem: último octeto IPv4 zerado, /64 em IPv6 (`infra/nginx/nginx.conf`) |
 | `web` (nginx) | `error_log` em `warn` (`nginx.conf:2`), no stderr | **IP completo** (`client: 203.0.113.5`) a cada 429 de `limit_req`/`limit_conn`, justamente na hora de um ataque |
 | `icecast` | só o error log (stderr); o access log vai para `/dev/null` | nenhum IP de ouvinte em claro |
+| `harbor-borda` (nginx stream, E2-F11) | access log de sessão em stdout (`sessao_anon`); `error_log` em `crit` | **anonimizado** (/24, /64). É o único serviço que vê o IP real do locutor; as recusas (allow/deny, `limit_conn`) aparecem no access log como 403/503, e o `error_log` fica em `crit` justamente porque essas recusas, em `error`, levariam o IP completo |
 | `api`, `worker` | JSON de aplicação | sem IP; ouvinte aparece só como hash |
 
 O nível do log do nginx **não** foi alterado: o sinal dos 429 no `error_log` é útil, e o custo é a retenção abaixo. Se um dia
@@ -24,7 +25,7 @@ essas linhas do `error_log warn` (o status 429 continua no access log anonimizad
 
 A rotação por **tamanho** limita o espaço, mas **não limita o tempo**: num dia de pouco acesso o arquivo corrente pode guardar
 linhas por mais de 14 dias, e os dois rotacionados ficam no disco até uma rotação futura empurrá-los para fora. Por isso existe
-`infra/scripts/limpar-logs.sh`: zera o log **corrente** do `web` e do `icecast` (truncando, o daemon o mantém aberto) e **apaga os
+`infra/scripts/limpar-logs.sh`: zera o log **corrente** do `web`, do `icecast` e do `harbor-borda` (truncando, o daemon o mantém aberto) e **apaga os
 rotacionados** (`.1`, `.2`). Não derruba contêiner nem stream. Se um serviço pedido não for achado (por exemplo, `COMPOSE_PROJECT` diferente do padrão `webradio`), limpa os outros e **sai com 1**, e o systemd marca a unidade como falha. Rodando **toda semana**, nenhuma linha com IP passa de 7 dias (folga
 sobre os 14); o que garante isso é o script **instalado e agendado**, não o compose.
 
