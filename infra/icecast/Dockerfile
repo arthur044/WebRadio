@@ -4,10 +4,10 @@
 # O icecast.xml NUNCA entra na imagem com senha: o entrypoint o renderiza no tmpfs (/tmp) a partir de /run/secrets.
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
-# icecast 2.4.x; o pacote cria o usuário de sistema "icecast" (uid 100). Versão fixada (B3-09): a base é por digest e o pacote
-# flutuaria mesmo com a base fixada. O repositório do Alpine 3.22 guarda só a revisão corrente: quando uma correção sair (-r14) este build
+# icecast 2.5.x; o pacote cria o usuário de sistema "icecast" (uid 100). Versão fixada (B3-09): a base é por digest e o pacote
+# flutuaria mesmo com a base fixada. O repositório do Alpine 3.24 guarda só a revisão corrente: quando uma correção sair (-r1) este build
 # falha com "no such package" e a revisão nova é conferida e fixada aqui, de propósito (não existe Dependabot para apk).
-RUN apk add --no-cache icecast=2.4.4-r13 \
+RUN apk add --no-cache icecast=2.5.0-r0 \
     && rm -f /etc/icecast.xml \
     && mkdir -p -m 0755 /etc/icecast
 
