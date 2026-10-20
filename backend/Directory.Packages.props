@@ -35,7 +35,7 @@
 
   <!-- Worker (E1-F11): host generico fora do ciclo de vida da Api -->
   <ItemGroup>
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.13" />
     <!-- Segredos por arquivo no Worker (a Api recebe o mesmo pacote pelo shared framework do ASP.NET) -->
     <PackageVersion Include="Microsoft.Extensions.Configuration.KeyPerFile" Version="10.0.13" />
     <PackageVersion Include="StackExchange.Redis" Version="3.4.5" />
@@ -71,7 +71,7 @@
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
     <PackageVersion Include="coverlet.collector" Version="10.1.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.13" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.13" />
   </ItemGroup>
 
