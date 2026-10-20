@@ -78,9 +78,25 @@ public class ReconciliadorDoAoVivoTests
         Assert.True(await Novo().ExecutarAsync(default)); // a passada seguinte funciona
     }
 
-    private sealed class OutboxQueFalha : IOutbox
+    [Fact]
+    public async Task O_rollback_nao_sobrescreve_um_Conectado_que_entrou_no_meio()
     {
-        public void EnfileirarParaTodos(string tipo, object carga) => throw new InvalidOperationException("banco fora (simulado)");
+        NoAr();
+        _estado.Agora = Fim.AddMinutes(2);
+        var novo = new EstadoDoAoVivo(true, Guid.NewGuid(), "Bia", Guid.NewGuid(), Fim.AddMinutes(2), Fim.AddHours(1));
+
+        Assert.False(await Novo(new OutboxQueFalha(() => _estado.Atual = novo)).ExecutarAsync(default));
+
+        Assert.Equal(novo, _estado.Atual); // o Conectado novo fica
+    }
+
+    private sealed class OutboxQueFalha(Action? aoFalhar = null) : IOutbox
+    {
+        public void EnfileirarParaTodos(string tipo, object carga)
+        {
+            aoFalhar?.Invoke(); // um Conectado novo entra enquanto o evento não grava
+            throw new InvalidOperationException("banco fora (simulado)");
+        }
         public void EnfileirarParaGrupos(IReadOnlyCollection<string> grupos, string tipo, object carga) => throw new InvalidOperationException("banco fora (simulado)");
         public void EnfileirarSessoesRevogadas(Guid usuarioId) => throw new InvalidOperationException("banco fora (simulado)");
     }

@@ -88,7 +88,7 @@ sobe() { # $1 = HARBOR_PERMITIDOS, $2 = HARBOR_BIND_IP, $3 = HARBOR_LIBERAR_TUDO
     --entrypoint /usr/local/bin/harbor-borda.sh "$NGINX" 2>&1)" && codigo=0 || codigo=$?
   printf '%s|%s' "$codigo" "$saida"
 }
-for aberto in "0.0.0.0/0|10.8.0.1" "::/0|10.8.0.1" "10.0.0.0/0|10.8.0.1" "203.0.113.10, 0.0.0.0/0|10.8.0.1" "10.8.0.0/24|0.0.0.0" "10.8.0.0/24|::" "10.8.0.0/24|[::]"; do
+for aberto in "0.0.0.0/0|10.8.0.1" "::/0|10.8.0.1" "10.0.0.0/0|10.8.0.1" "203.0.113.10, 0.0.0.0/0|10.8.0.1" "10.8.0.0/24|0.0.0.0" "10.8.0.0/24|::" "10.8.0.0/24|[::]" "10.8.0.0/24|::0" "10.8.0.0/24|0::" "10.8.0.0/24|0::0" "10.8.0.0/24|0:0:0:0:0:0:0:0" "10.8.0.0/24|00.0.0.0"; do
   r="$(sobe "${aberto%%|*}" "${aberto##*|}" "")"
   if [[ "${r%%|*}" == 1 ]] && grep -q "ficaria\|deixaria o ao vivo" <<<"$r"; then ok "recusa lista='${aberto%%|*}' bind='${aberto##*|}'"; else falha "lista='${aberto%%|*}' bind='${aberto##*|}' não foi recusada: $r"; fi
 done

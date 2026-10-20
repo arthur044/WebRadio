@@ -53,9 +53,7 @@ public sealed class EstadoDoAoVivoStore(IClock clock, ILogger<EstadoDoAoVivoStor
             // Só grava se ninguém mudou o valor desde a leitura (um Conectado novo, ou outra réplica já expirou): quem perde não
             // publica. Um script Lua, e não Condition/ValueCondition: o Redis do compose é anterior ao 8.4 e a transação com WATCH
             // não é atômica no servidor.
-            var gravou = (long)await db.ScriptEvaluateAsync(TrocarSeIgual, [Chave],
-                [valor, JsonSerializer.Serialize(depois), (long)Validade.TotalMilliseconds]);
-            if (gravou != 1) return null;
+            if (!await TrocarSeIgualAsync(db, valor.ToString(), depois)) return null;
 
             _local = depois;
             return new ExpiracaoDoAoVivo(antes, depois);
@@ -64,6 +62,24 @@ public sealed class EstadoDoAoVivoStore(IClock clock, ILogger<EstadoDoAoVivoStor
         {
             logger.LogWarning(ex, "REDIS_INDISPONIVEL: o vencimento do ao vivo foi avaliado só com a memória desta instância");
             return ExpirarLocal();
+        }
+    }
+
+    private async Task<bool> TrocarSeIgualAsync(IDatabase db, string esperado, EstadoDoAoVivo novo) =>
+        (long)await db.ScriptEvaluateAsync(TrocarSeIgual, [Chave], [esperado, JsonSerializer.Serialize(novo), (long)Validade.TotalMilliseconds]) == 1;
+
+    public async Task DesfazerExpiracaoAsync(ExpiracaoDoAoVivo troca, CancellationToken ct)
+    {
+        if (_local == troca.Depois) _local = troca.Antes;
+        if (redis is null) return;
+
+        try
+        {
+            await TrocarSeIgualAsync(redis.GetDatabase(), JsonSerializer.Serialize(troca.Depois), troca.Antes);
+        }
+        catch (Exception ex) when (ex is RedisException or TimeoutException)
+        {
+            logger.LogWarning(ex, "REDIS_INDISPONIVEL: o estado vencido não voltou ao Redis; a próxima passada o reavalia");
         }
     }
 

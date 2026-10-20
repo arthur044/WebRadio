@@ -87,4 +87,24 @@ public class EstadoDoAoVivoStoreTests
         Assert.Null(await store.ExpirarVencidoAsync(default));
         Assert.Equal(novo, await store.ObterAsync(default));
     }
+
+    [Fact]
+    public async Task Desfazer_a_expiracao_restaura_o_vencido_mas_nao_sobrescreve_um_Conectado_novo()
+    {
+        var relogio = new RelogioFalso(Inicio);
+        var store = new EstadoDoAoVivoStore(relogio, NullLogger<EstadoDoAoVivoStore>.Instance);
+        await store.DefinirAsync(NoAr(Inicio, Inicio.AddHours(1)), default);
+        relogio.Avancar(TimeSpan.FromHours(2));
+        var troca = (await store.ExpirarVencidoAsync(default))!;
+
+        await store.DesfazerExpiracaoAsync(troca, default);
+        Assert.NotNull(await store.ExpirarVencidoAsync(default)); // voltou: a próxima passada o expira de novo
+
+        var troca2 = new ExpiracaoDoAoVivo(troca.Antes, EstadoDoAoVivo.ForaDoAr(troca.Antes.DesdeUtc));
+        var novo = NoAr(relogio.UtcNow, relogio.UtcNow.AddHours(1));
+        await store.DefinirAsync(novo, default);
+        await store.DesfazerExpiracaoAsync(troca2, default);
+
+        Assert.Equal(novo, await store.ObterAsync(default));
+    }
 }
