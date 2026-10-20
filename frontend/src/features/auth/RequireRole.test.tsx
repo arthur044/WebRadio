@@ -85,24 +85,19 @@ describe('RequireRole — papel que mudou no servidor (Sentinel L2 do #42)', () 
     useAuthStore.getState().setRestoring(false)
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) =>
-        url.endsWith('/auth/refresh')
-          ? new Response(
-              JSON.stringify({
-                accessToken: 'token-locutor',
-                expiraEmUtc: new Date().toISOString(),
-                deveTrocarSenha: false,
-                usuario: { ...eu, role: 'Locutor' },
-              }),
-              { status: 200, headers: { 'Content-Type': 'application/json' } },
-            )
-          : new Response(
-              JSON.stringify({ type: '/erros/acesso-negado', title: 'x', status: 403 }),
-              {
-                status: 403,
-                headers: { 'Content-Type': 'application/json' },
-              },
-            ),
+      vi.fn(
+        async (url: string) =>
+          url.endsWith('/auth/refresh')
+            ? new Response(
+                JSON.stringify({
+                  accessToken: 'token-locutor',
+                  expiraEmUtc: new Date().toISOString(),
+                  deveTrocarSenha: false,
+                  usuario: { ...eu, role: 'Locutor' },
+                }),
+                { status: 200, headers: { 'Content-Type': 'application/json' } },
+              )
+            : new Response(null, { status: 403 }), // a política de papel responde 403 sem corpo
       ),
     )
 
