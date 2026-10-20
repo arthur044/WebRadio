@@ -318,7 +318,7 @@ curl -I http://localhost:8080/stream/radio.mp3
 | `REDIS_ERROR: WRONGPASS` | Senha Redis incorreta | Atualize o secret e restart do Redis; aguarde reconexão |
 | `Invalid token` após rotação JWT | Token emitido com chave antigo, e `Jwt__SigningKeyAnterior` não está preenchido | Preencha `Jwt__SigningKeyAnterior` com a chave velha; restart da API |
 | Liquidsoap desconecta de Icecast | Senha `Playout__Token` ou `ICECAST_SOURCE_PASSWORD` errada | Verifique nos logs da API: `Invalid bearer token`; em Icecast: `auth failed` |
-| Source recusado pelo Icecast 2.5 sem `401` (cliente vê `Empty reply` / conexão encerrada) | Desde o Alpine 3.24 (Icecast 2.5.0) o Icecast **fecha a conexão** do `PUT` de source com senha errada, em vez de responder `401` como o 2.4. Com `loglevel` 2 não aparece linha de recusa no log | Trate "conexão encerrada ao conectar" como senha de source errada: confira `ICECAST_SOURCE_PASSWORD` no Icecast e no Liquidsoap |
+| Teste manual de senha de source no Icecast 2.5 dá `Empty reply` / conexão encerrada | Desde o Alpine 3.24 (Icecast 2.5.0) um `PUT` curto com `Content-Length` (ex.: `curl -X PUT --data-binary x`) fecha a conexão sem resposta com QUALQUER senha, até a certa. Um stream de verdade (stdin, como o Liquidsoap) com senha errada recebe `401`, como no 2.4 | Teste a senha com `printf x \| curl -T - -H 'Content-Type: audio/mpeg' -u source:<senha> http://<icecast>:8000/<mount>`: `401` = senha errada; `100` (com timeout) ou `200` = aceita. `infra/icecast/teste.sh` faz essa checagem |
 | `Failed to parse password alphabet` (entrypoint) | Segredo não segue base64url ou tem caracteres inválidos | Gere um novo segredo com os scripts; não copie valores não-base64url |
 
 ## Auditoria
