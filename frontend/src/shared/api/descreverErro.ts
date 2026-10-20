@@ -59,6 +59,13 @@ export function descreverErro(err: unknown): ErroDescrito {
         'O programa mudou de estado (já começou, terminou ou foi cancelado) e não aceita mais esta ação.',
         { recarregar: true },
       )
+    case '/erros/credenciais':
+      return descrito('Senha incorreta.', { campos: { senhaAtual: 'Senha incorreta.' } })
+    case '/erros/conflito-credencial':
+      return descrito(
+        'Outra geração aconteceu ao mesmo tempo. Confira a credencial atual e, se precisar, gere de novo.',
+        { recarregar: true },
+      )
     case '/erros/validacao': {
       const campos: Record<string, string> = {}
       for (const [chave, mensagens] of Object.entries(problem.errors ?? {})) {
