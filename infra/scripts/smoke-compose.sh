@@ -175,6 +175,12 @@ publicadas_live = {n: [(p.get("published"), p.get("target"), p.get("host_ip")) f
 confere("live.yml: só web 8080 e harbor-borda 8005 em HARBOR_BIND_IP",
         publicadas_live == {"web": [("8080", 8080, None)], "harbor-borda": [("8005", 8005, "203.0.113.10")]}, str(publicadas_live))
 confere("live.yml: api com Harbor__AtrasDoProxy=true", live["services"]["api"]["environment"].get("Harbor__AtrasDoProxy") == "true")
+confere("live.yml: harbor-borda recebe HARBOR_BIND_IP (o entrypoint recusa 0.0.0.0 e ::)",
+        live["services"]["harbor-borda"]["environment"].get("HARBOR_BIND_IP") == "203.0.113.10")
+confere("só o dev define HARBOR_LIBERAR_TUDO (lista aberta no harbor-borda)",
+        dev["services"]["harbor-borda"]["environment"].get("HARBOR_LIBERAR_TUDO") == "1"
+        and not servicos["harbor-borda"]["environment"].get("HARBOR_LIBERAR_TUDO")
+        and not live["services"]["harbor-borda"]["environment"].get("HARBOR_LIBERAR_TUDO"))
 confere("base: api sem Harbor__AtrasDoProxy=true", servicos["api"]["environment"].get("Harbor__AtrasDoProxy") in (None, "false"))
 confere("dev: liquidsoap sem porta publicada (o ao vivo entra pelo harbor-borda)", not dev["services"]["liquidsoap"].get("ports"))
 confere("api em app, dados e playout", redes("api") == {"app", "dados", "playout"}, str(sorted(redes("api"))))

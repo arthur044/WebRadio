@@ -22,7 +22,7 @@ FALHAS=0
 ENDURECIDO=(--read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp:uid=101,gid=101)
 
 limpar() {
-  docker rm -f "$P-borda" "$P-liq" >/dev/null 2>&1 || true
+  docker rm -f "$P-borda" "$P-liq" "$P-aberta" >/dev/null 2>&1 || true
   docker network rm "$P" >/dev/null 2>&1 || true
 }
 trap limpar EXIT
@@ -78,6 +78,33 @@ for ruim in "10.0.0.0/33" "300.1.1.1" "estudio.exemplo.com" "1.2.3.4;deny" "all"
     --entrypoint /usr/local/bin/harbor-borda.sh "$NGINX" 2>&1)" && codigo=0 || codigo=$?
   if [[ $codigo -ne 0 ]] && grep -q "HARBOR_PERMITIDOS" <<<"$saida" && ! grep -qF -- "$ruim" <<<"$saida"; then ok "recusa '$ruim' sem ecoar o valor"; else falha "'$ruim': saiu $codigo: $saida"; fi
 done
+
+echo "== 1b. lista aberta e bind em 0.0.0.0 abortam, salvo HARBOR_LIBERAR_TUDO=1"
+sobe() { # $1 = HARBOR_PERMITIDOS, $2 = HARBOR_BIND_IP, $3 = HARBOR_LIBERAR_TUDO; imprime "codigo|saida"
+  local saida codigo
+  saida="$(timeout 20 docker run --rm --network none "${ENDURECIDO[@]}" -e HARBOR_PERMITIDOS="$1" -e HARBOR_BIND_IP="$2" -e HARBOR_LIBERAR_TUDO="$3" \
+    -v "$PWD/infra/harbor-borda/nginx.conf:/etc/nginx/nginx.conf:ro" \
+    -v "$PWD/infra/harbor-borda/entrypoint.sh:/usr/local/bin/harbor-borda.sh:ro" \
+    --entrypoint /usr/local/bin/harbor-borda.sh "$NGINX" 2>&1)" && codigo=0 || codigo=$?
+  printf '%s|%s' "$codigo" "$saida"
+}
+for aberto in "0.0.0.0/0|10.8.0.1" "::/0|10.8.0.1" "10.0.0.0/0|10.8.0.1" "203.0.113.10, 0.0.0.0/0|10.8.0.1" "10.8.0.0/24|0.0.0.0" "10.8.0.0/24|::" "10.8.0.0/24|[::]"; do
+  r="$(sobe "${aberto%%|*}" "${aberto##*|}" "")"
+  if [[ "${r%%|*}" == 1 ]] && grep -q "ficaria\|deixaria o ao vivo" <<<"$r"; then ok "recusa lista='${aberto%%|*}' bind='${aberto##*|}'"; else falha "lista='${aberto%%|*}' bind='${aberto##*|}' não foi recusada: $r"; fi
+done
+# Sobe de verdade (o nginx ficaria de pé): conferimos só o log da subida e matamos em seguida.
+for liberado in "0.0.0.0/0|0.0.0.0|1"; do
+  docker rm -f "$P-aberta" >/dev/null 2>&1 || true
+  docker run -d --name "$P-aberta" --network none "${ENDURECIDO[@]}" -e HARBOR_PERMITIDOS="${liberado%%|*}" -e HARBOR_BIND_IP="$(cut -d'|' -f2 <<<"$liberado")" -e HARBOR_LIBERAR_TUDO="${liberado##*|}" \
+    -v "$PWD/infra/harbor-borda/nginx.conf:/etc/nginx/nginx.conf:ro" \
+    -v "$PWD/infra/harbor-borda/entrypoint.sh:/usr/local/bin/harbor-borda.sh:ro" \
+    --entrypoint /usr/local/bin/harbor-borda.sh "$NGINX" >/dev/null
+  sleep 3
+  confere "HARBOR_LIBERAR_TUDO=1 (só o dev) deixa a lista aberta subir" grep -q "entrada(s) permitida(s)" <(docker logs "$P-aberta" 2>&1)
+  docker rm -f "$P-aberta" >/dev/null 2>&1 || true
+done
+r="$(sobe "10.8.0.0/24, 203.0.113.10" "10.8.0.1" "")"
+confere "lista fechada e bind num IP de VPN sobem normalmente" grep -q "2 entrada(s) permitida(s)" <<<"$r"
 
 echo "== sobe a rede e o liquidsoap falso"
 docker network create --subnet "$REDE.0/24" "$P" >/dev/null

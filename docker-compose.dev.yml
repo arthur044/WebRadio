@@ -53,6 +53,8 @@ services:
   harbor-borda:
     environment:
       HARBOR_PERMITIDOS: "${HARBOR_PERMITIDOS:-0.0.0.0/0}"
+      # Só o dev tem permissão para a lista aberta (o entrypoint do harbor-borda a recusa sem isto).
+      HARBOR_LIBERAR_TUDO: "1"
     ports:
       - "127.0.0.1:8005:8005"
 
