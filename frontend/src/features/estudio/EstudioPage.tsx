@@ -1,8 +1,17 @@
+import { useAuthStore } from '../../shared/api/authStore'
+import { CredenciaisAtivasAdmin } from './CredenciaisAtivasAdmin'
+import { EstadoNoArPainel } from './EstadoNoArPainel'
+import { PainelDeTransmissao } from './PainelDeTransmissao'
+
 export function EstudioPage() {
+  const role = useAuthStore((s) => s.usuario?.role)
+
   return (
-    <section>
+    <section className="flex flex-col gap-4">
       <h1 className="font-display text-2xl font-bold">Estúdio</h1>
-      <p className="text-text-muted mt-2">Área restrita — em breve.</p>
+      <EstadoNoArPainel />
+      <PainelDeTransmissao />
+      {role === 'Admin' && <CredenciaisAtivasAdmin />}
     </section>
   )
 }

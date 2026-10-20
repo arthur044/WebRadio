@@ -61,7 +61,7 @@ export function criarDedupe() {
 }
 
 /**
- * Liga os 6 eventos do hub (02-api-rest.md §10) às invalidações de query que cada um afeta.
+ * Liga os 7 eventos do hub (02-api-rest.md §10) às invalidações de query que cada um afeta.
  * As chaves ('programa-ao-vivo', 'stream-info', ...) são o contrato entre este módulo e as
  * páginas que ainda vão consumi-las — combinar o nome ao criar cada `useQuery`.
  */
@@ -83,6 +83,11 @@ export function registrarEventos(
     queryClient.invalidateQueries({ queryKey: ['grade-semana'] })
   })
   on('TocandoAgora', () => {
+    queryClient.invalidateQueries({ queryKey: ['stream-info'] })
+  })
+  // O ao vivo muda a barra do player e o painel do Estúdio. Reler o `/stream/info` em vez de aplicar o
+  // payload: a ordem de chegada não é garantida com mais de uma réplica (02 §10), e o REST é a fonte.
+  on('TransmissaoAoVivoAlterada', () => {
     queryClient.invalidateQueries({ queryKey: ['stream-info'] })
   })
   on('PedidoCriado', () => {

@@ -29,10 +29,27 @@ export async function encerrarPrograma(request: APIRequestContext, id: string): 
   await request.post(`/api/v1/programas/${id}/encerrar`, { headers: autorizacao() })
 }
 
+/** Tira o programa da grade: encerra se já começou; se o encerrar recusar (Agendado futuro), cancela. */
+async function liberarJanela(request: APIRequestContext, id: string): Promise<void> {
+  const encerrado = await request.post(`/api/v1/programas/${id}/encerrar`, {
+    headers: autorizacao(),
+  })
+  if (encerrado.ok()) return
+  const cancelado = await request.post(`/api/v1/programas/${id}/cancelar`, {
+    headers: autorizacao(),
+  })
+  if (!cancelado.ok()) {
+    throw new Error(
+      `Não consegui liberar a janela: encerrar HTTP ${encerrado.status()}, cancelar HTTP ${cancelado.status()}`,
+    )
+  }
+}
+
 /**
  * Cria um programa cuja janela começa agora (o Worker o vira AoVivo no próximo ciclo de 10 s), com o
- * próprio Admin como locutor. O seed do dev ocupa uma janela por dia: se o horário conflitar,
- * encerra quem conflita (ao vivo ou já começado) e tenta de novo.
+ * próprio Admin como locutor. O seed do dev ocupa uma janela por dia (a primeira começa amanhã às 12:00 UTC): se o
+ * horário conflitar, libera a janela do conflitante e tenta de novo. `Encerrar` só vale para quem já começou
+ * (ao vivo ou com início no passado); um `Agendado` que ainda não começou dá 409 no encerrar e é cancelado.
  */
 export async function criarProgramaAgora(
   request: APIRequestContext,
@@ -60,7 +77,7 @@ export async function criarProgramaAgora(
     }
     const conflitante = (await resposta.json()).programaConflitanteId as string | undefined
     if (!conflitante) throw new Error('409 sem programaConflitanteId')
-    await encerrarPrograma(request, conflitante)
+    await liberarJanela(request, conflitante)
   }
   throw new Error('Não consegui abrir a janela de agora: o conflito persiste.')
 }

@@ -19,7 +19,8 @@ export default defineConfig({
   reporter: 'html',
   use: {
     baseURL: stackURL ?? 'http://localhost:4173',
-    trace: 'on-first-retry',
+    // No modo stack os specs digitam a senha nova do Admin; o trace gravaria esse valor em test-results/ (Sentinel L3 do #42).
+    trace: stackURL ? 'off' : 'on-first-retry',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], channel: canal } }],
   webServer: stackURL

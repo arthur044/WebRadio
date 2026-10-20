@@ -19,16 +19,16 @@ Definida em OKLCH (uniformidade perceptual entre claro/escuro) e exposta como to
 `--color-*` no `@theme` do Tailwind v4 (`src/index.css`), com os mesmos nomes redefinidos em
 `@media (prefers-color-scheme: dark)`.
 
-| Token | Claro | Escuro | Uso |
-|---|---|---|---|
-| `--color-surface` | `oklch(97% 0.006 80)` | `oklch(16% 0.012 280)` | fundo da página |
-| `--color-surface-raised` | `oklch(100% 0 0)` | `oklch(21% 0.014 280)` | cards, PlayerBar, mesa |
-| `--color-border` | `oklch(88% 0.008 80)` | `oklch(30% 0.016 280)` | divisórias |
-| `--color-text` | `oklch(20% 0.01 80)` | `oklch(94% 0.01 80)` | texto principal |
-| `--color-text-muted` | `oklch(48% 0.01 80)` | `oklch(68% 0.012 280)` | texto secundário |
-| `--color-on-air` | `oklch(55% 0.21 25)` | `oklch(62% 0.22 25)` | selo "AO VIVO", sinal, foco de erro |
-| `--color-accent` | `oklch(58% 0.14 250)` | `oklch(72% 0.13 250)` | ações primárias, links |
-| `--color-accent-contrast` | `oklch(99% 0 0)` | `oklch(12% 0.01 280)` | texto sobre `--color-accent`/`--color-on-air` |
+| Token                     | Claro                 | Escuro                 | Uso                                           |
+| ------------------------- | --------------------- | ---------------------- | --------------------------------------------- |
+| `--color-surface`         | `oklch(97% 0.006 80)` | `oklch(16% 0.012 280)` | fundo da página                               |
+| `--color-surface-raised`  | `oklch(100% 0 0)`     | `oklch(21% 0.014 280)` | cards, PlayerBar, mesa                        |
+| `--color-border`          | `oklch(88% 0.008 80)` | `oklch(30% 0.016 280)` | divisórias                                    |
+| `--color-text`            | `oklch(20% 0.01 80)`  | `oklch(94% 0.01 80)`   | texto principal                               |
+| `--color-text-muted`      | `oklch(48% 0.01 80)`  | `oklch(68% 0.012 280)` | texto secundário                              |
+| `--color-on-air`          | `oklch(55% 0.21 25)`  | `oklch(62% 0.22 25)`   | selo "AO VIVO", sinal, foco de erro           |
+| `--color-accent`          | `oklch(58% 0.14 250)` | `oklch(72% 0.13 250)`  | ações primárias, links                        |
+| `--color-accent-contrast` | `oklch(99% 0 0)`      | `oklch(12% 0.01 280)`  | texto sobre `--color-accent`/`--color-on-air` |
 
 `--color-on-air` nunca é reaproveitado para nada que não seja o sinal de transmissão ativa ou
 um erro bloqueante — é o único vermelho da paleta, para preservar o significado.

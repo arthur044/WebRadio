@@ -97,11 +97,51 @@ export interface DivulgacaoDto {
   ativo: boolean
 }
 
+/** Transmissão ao vivo de um locutor (06-epico-2-tarefas.md §SignalR); sem `programaId`/`locutorNome` quando `noAr` é false. */
+export interface AoVivoDto {
+  noAr: boolean
+  programaId?: string | null
+  locutorNome?: string | null
+}
+
 export interface StreamInfoDto {
   url: string
   formato: string
   bitrateKbps: number
-  tocandoAgora: { titulo: string; artista: string | null; tipo: TipoMidia } | null
+  tocandoAgora: { titulo: string | null; artista: string | null; tipo: TipoMidia | null } | null
+  aoVivo: AoVivoDto
+}
+
+/**
+ * Onde o source client conecta (06 §Conexão): `host` vem de `Harbor__HostPublico` e é `null` sem ele; `porta` de
+ * `Harbor__PortaPublica` (padrão 8005); `mount` é fixo, `/live`. Não é segredo; só o dono a recebe.
+ */
+export interface ConexaoDeTransmissaoDto {
+  host: string | null
+  porta: number
+  mount: string
+}
+
+/** `GET /locutores/me/credencial-transmissao` (200; o 204 não tem corpo): nunca traz o segredo. */
+export interface CredencialDto {
+  identificador: string
+  criadaEmUtc: string
+  ultimoUsoEmUtc: string | null
+  conexao: ConexaoDeTransmissaoDto
+}
+
+/** `POST /locutores/me/credencial-transmissao`: a ÚNICA resposta com o segredo. Não vai para o cache de queries. */
+export interface CredencialGeradaDto {
+  identificador: string
+  segredo: string
+  criadaEmUtc: string
+  conexao: ConexaoDeTransmissaoDto
+}
+
+/** `GET /credenciais-transmissao` (Admin). */
+export interface CredencialAtivaDto extends Omit<CredencialDto, 'conexao'> {
+  usuarioId: string
+  usuarioNome: string
 }
 
 export interface PaginaResposta<T> {

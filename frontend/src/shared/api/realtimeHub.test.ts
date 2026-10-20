@@ -77,6 +77,7 @@ describe('registrarEventos', () => {
   it.each([
     ['ProgramaStatusAlterado', ['programa-ao-vivo', 'grade-semana']],
     ['TocandoAgora', ['stream-info']],
+    ['TransmissaoAoVivoAlterada', ['stream-info']],
     ['PedidoCriado', ['pedidos-moderacao']],
     ['PedidoModerado', ['pedidos-meus']],
     ['PedidoTocado', ['pedidos-meus']],
