@@ -2,6 +2,8 @@
 # ecossistema para não abrir um PR por pacote. Os FROM dos Dockerfiles são `imagem:tag@sha256:...` (a tag dá ao Dependabot o que
 # comparar; o digest fixa o conteúdo). As imagens do docker-compose.yml são só por digest e o Dependabot só acompanha Dockerfile:
 # a troca delas é manual, conferida no PR que a faz (e o job `vulnerabilidades` acusa o envelhecimento).
+# Os grupos só juntam minor e patch: cada major chega num PR próprio, para não travar o grupo inteiro (o #46 e o #37
+# quebraram por um major misturado a 15 atualizações seguras) e para a triagem semanal separar o que pede análise manual.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -11,6 +13,7 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: "nuget"
     directory: "/backend"
@@ -19,6 +22,7 @@ updates:
     groups:
       nuget:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
     # MediatR fica no 12.x: a licença passa a RPL/comercial a partir da 13 (decisão do usuário em 19/10/2026).
     # Ver o aviso em backend/Directory.Packages.props.
     ignore:
@@ -32,6 +36,7 @@ updates:
     groups:
       npm:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
     ignore:
       # typescript-eslint ainda não declara o TypeScript 7 no peer (`npm ci` falha com ERESOLVE no #46): fica no 6.x até ele suportar.
       - dependency-name: "typescript"
