@@ -153,6 +153,15 @@ async function fetchComSessao(path: string, options: RequestOptions): Promise<Re
     }
   }
 
+  // Sentinel L2 do #42: o papel viaja no access token. Depois de rebaixar ou desativar a conta, o token velho segue
+  // dando 403 e a tela montada continuaria à mostra. Renovar traz o papel de agora (ou derruba a sessão, se a conta
+  // saiu), e o RequireRole reavalia. Aguarda para a store já estar certa quando o chamador tratar o erro. Não repete
+  // a chamada: o 403 continua valendo. `refreshSession` não passa por aqui, então não há laço.
+  const tokenAtual = useAuthStore.getState().accessToken
+  if (response.status === 403 && tokenAtual !== null && !SEM_RETRY.has(path)) {
+    await refreshSession(tokenAtual)
+  }
+
   if (!response.ok) {
     throw await toApiError(response)
   }

@@ -196,3 +196,70 @@ describe('apiFetchComEtag', () => {
     })
   })
 })
+
+describe('apiFetch — 403 renova a sessão (Sentinel L2 do #42)', () => {
+  const sessao = (role: 'Admin' | 'Locutor') => ({
+    id: '1',
+    nome: 'Ana',
+    email: 'a@a.com',
+    role,
+    deveTrocarSenha: false,
+  })
+
+  beforeEach(() => {
+    useAuthStore.getState().setSession('token-admin', sessao('Admin'))
+  })
+
+  afterEach(() => {
+    useAuthStore.getState().clearSession()
+    vi.restoreAllMocks()
+  })
+
+  function stub(refresh: Response) {
+    const urls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(url)
+        if (url.endsWith('/auth/refresh')) return refresh
+        return jsonResponse(403, { type: '/erros/acesso-negado', title: 'x', status: 403 })
+      }),
+    )
+    return urls
+  }
+
+  it('o 403 busca o papel de agora: conta rebaixada passa a valer na store, e a chamada não é repetida', async () => {
+    const urls = stub(
+      jsonResponse(200, {
+        accessToken: 'token-locutor',
+        expiraEmUtc: new Date().toISOString(),
+        deveTrocarSenha: false,
+        usuario: sessao('Locutor'),
+      }),
+    )
+
+    await expect(apiFetch('/programas')).rejects.toMatchObject({ status: 403 })
+
+    expect(useAuthStore.getState().usuario?.role).toBe('Locutor')
+    expect(useAuthStore.getState().accessToken).toBe('token-locutor')
+    expect(urls.filter((u) => u.endsWith('/programas'))).toHaveLength(1)
+    expect(urls.filter((u) => u.endsWith('/auth/refresh'))).toHaveLength(1)
+  })
+
+  it('conta desativada: o refresh falha e a sessão cai', async () => {
+    stub(jsonResponse(401, { type: '/erros/credenciais', title: 'morta', status: 401 }))
+
+    await expect(apiFetch('/programas')).rejects.toMatchObject({ status: 403 })
+
+    expect(useAuthStore.getState().usuario).toBeNull()
+  })
+
+  it('anônimo não dispara refresh', async () => {
+    useAuthStore.getState().clearSession()
+    const urls = stub(jsonResponse(500, {}))
+
+    await expect(apiFetch('/programas')).rejects.toMatchObject({ status: 403 })
+
+    expect(urls.some((u) => u.endsWith('/auth/refresh'))).toBe(false)
+  })
+})
