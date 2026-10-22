@@ -138,6 +138,10 @@ Grupos atribuídos pelo servidor no `OnConnectedAsync` (o cliente **não** escol
 - todos → canal global
 - `listener:{deviceHash}` → derivado do `listenerId`
 - `locutores` → se o JWT tiver `role ∈ {Locutor, Admin}`
+- `admins` → se o JWT tiver `role = Admin` (Épico 2, E2-F12)
+- `usuario:{usuarioId}` → todo JWT autenticado, a partir do `sub` (Épico 2, E2-F12)
+
+Nenhum grupo autenticado é atribuído com o token restrito de troca de senha.
 
 Eventos servidor → cliente (todos com `eventoId` e `ocorridoEmUtc`; o cliente descarta `eventoId` repetido). **A ordem de chegada não é garantida** quando há mais de uma réplica da API: para eventos de estado (`ProgramaStatusAlterado` por `programaId`, `TocandoAgora`), o cliente guarda o último `eventoId` aplicado por chave e ignora o que chegar com `eventoId` menor. A comparação é **numérica** (o `eventoId` é o id inteiro do outbox enviado como texto; como texto, "10" < "9"); `TocandoAgora` tem uma chave só:
 
@@ -146,6 +150,7 @@ Eventos servidor → cliente (todos com `eventoId` e `ocorridoEmUtc`; o cliente 
 | `ProgramaStatusAlterado` | todos | `{ programaId, titulo, status, locutorNome }` |
 | `TocandoAgora` | todos | `{ titulo, artista, tipoMidia, pedidoId? }` |
 | `TransmissaoAoVivoAlterada` | todos | `{ noAr, programaId?, locutorNome? }` (Épico 2) |
+| `AlertaHarborFalhas` | `admins` (+ `usuario:{usuarioId}` do dono no tipo `credencial`) | `{ tipo, falhas, janelaMinutos, locutorId?, locutorNome?, credencialAtiva? }` (Épico 2; contrato no `06`, E2-F12) |
 | `PedidoCriado` | `locutores` | `PedidoDto` |
 | `PedidoModerado` | `listener:{hash}` + `locutores` | `{ pedidoId, status, motivoRejeicao? }` |
 | `PedidoTocado` | `listener:{hash}` + `locutores` | `{ pedidoId }` |
