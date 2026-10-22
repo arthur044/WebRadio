@@ -20,6 +20,12 @@ public interface IRealtimeNotifier
 public static class GruposDoHub
 {
     public const string Locutores = "locutores";
+
+    /// <summary>Todo JWT com <c>role = Admin</c> (e sem o token restrito de troca de senha): alertas administrativos (E2-F12).</summary>
+    public const string Admins = "admins";
+
+    /// <summary>Todo JWT autenticado, a partir do <c>sub</c>: eventos que só o próprio usuário recebe (E2-F12).</summary>
+    public static string Usuario(Guid usuarioId) => $"usuario:{usuarioId:D}";
 }
 
 /// <summary>

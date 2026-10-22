@@ -93,6 +93,7 @@ public sealed class RealtimeEndpoints : IEndpointModule
         {
             services.AddHostedService<OutboxDispatcher>();
             services.AddHostedService<WebRadio.Infrastructure.Harbor.ReconciliadorDoAoVivoJob>();
+            services.AddHostedService<WebRadio.Infrastructure.Harbor.AlertaDoHarborJob>();
         }
 
         if (string.IsNullOrWhiteSpace(configuration["Redis:Host"])) return services;

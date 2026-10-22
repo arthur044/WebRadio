@@ -10,8 +10,10 @@ using Microsoft.Extensions.DependencyInjection;
 using WebRadio.Api.Features.Realtime;
 using WebRadio.Application.Abstracoes;
 using WebRadio.Domain.Enums;
+using WebRadio.Domain.Usuarios;
 using WebRadio.Infrastructure.Persistencia;
 using WebRadio.Infrastructure.Persistencia.Outbox;
+using WebRadio.Infrastructure.Seguranca;
 using Xunit;
 using static WebRadio.Api.IntegrationTests.ApiFactoryExtensions;
 
@@ -294,6 +296,141 @@ public class RadioHubTests
         await Task.WhenAll(cairam).WaitAsync(Prazo);
         Assert.Equal(HubConnectionState.Connected, doColega.State);
         Assert.Equal(1, cena.Servicos.GetRequiredService<ConexoesDoHub>().Total);
+    }
+
+    private static readonly string[] SoOAlerta = [EventosDoOutbox.AlertaHarborFalhas];
+
+    /// <summary>Envia o par de alertas da E2-F12 (credencial do dono e global) mais a sentinela, e roda o passe do outbox.</summary>
+    private static async Task EnviarAlertas(Cena cena, Guid donoId)
+    {
+        await cena.Enfileirar(EventosDoOutbox.AlertaHarborFalhas,
+            new { tipo = "credencial", falhas = 10, janelaMinutos = 5, locutorId = donoId, locutorNome = "Fulano", credencialAtiva = true },
+            GruposDoHub.Admins, GruposDoHub.Usuario(donoId));
+        await cena.Enfileirar(EventosDoOutbox.AlertaHarborFalhas, new { tipo = "global", falhas = 50, janelaMinutos = 5 }, GruposDoHub.Admins);
+        await cena.Enfileirar("Fim", new { });
+        await cena.PasseDoOutbox();
+    }
+
+    private static string[] Tipos(Escuta e) { lock (e.Recebidos) return e.Recebidos.Select(r => r.Carga.GetProperty("tipo").GetString()!).ToArray(); }
+
+    [Fact]
+    public async Task AlertaHarborFalhas_so_chega_a_admins_e_ao_dono_nunca_a_outro_locutor_nem_ao_token_restrito()
+    {
+        await using var cena = Cena.Nova();
+        var donoId = cena.F.CriarUsuario("dono@example.com", Role.Locutor);
+        cena.F.CriarUsuario("outro@example.com", Role.Locutor);
+        cena.F.CriarUsuario("admin@example.com", Role.Admin);
+        cena.F.CriarUsuario("admin-restrito@example.com", Role.Admin, deveTrocar: true);
+        var donoRestritoId = cena.F.CriarUsuario("dono-restrito@example.com", Role.Locutor, deveTrocar: true);
+
+        var dono = cena.Conexao(Listener(), await cena.TokenDe("dono@example.com"));
+        var outro = cena.Conexao(Listener(), await cena.TokenDe("outro@example.com"));
+        var admin = cena.Conexao(Listener(), await cena.TokenDe("admin@example.com"));
+        var adminRestrito = cena.Conexao(Listener(), await cena.TokenDe("admin-restrito@example.com"));
+        var donoRestrito = cena.Conexao(Listener(), await cena.TokenDe("dono-restrito@example.com"));
+        var anonimo = cena.Conexao(Listener());
+        HubConnection[] todas = [dono, outro, admin, adminRestrito, donoRestrito, anonimo];
+        var escutas = todas.Select(c => new Escuta(c, SoOAlerta)).ToArray();
+        await cena.Iniciar(todas);
+
+        await EnviarAlertas(cena, donoId);
+        // O dono com token restrito também seria destinatário do grupo dele: o evento do SEU id não chega por causa do token.
+        await cena.Enfileirar(EventosDoOutbox.AlertaHarborFalhas, new { tipo = "credencial", falhas = 10, janelaMinutos = 5, locutorId = donoRestritoId, locutorNome = "Fulano", credencialAtiva = false },
+            GruposDoHub.Admins, GruposDoHub.Usuario(donoRestritoId));
+        await cena.Enfileirar("Fim", new { });
+        await cena.PasseDoOutbox();
+        foreach (var e in escutas) await e.AteOFim();
+
+        Assert.Equal(["credencial"], Tipos(escutas[0]));                  // o dono: só o alerta da credencial dele
+        Assert.Empty(escutas[1].Nomes());                                 // outro locutor: nada
+        Assert.Equal(["credencial", "global", "credencial"], Tipos(escutas[2])); // Admin: tudo
+        Assert.Empty(escutas[3].Nomes());                                 // Admin com token restrito: nada
+        Assert.Empty(escutas[4].Nomes());                                 // dono com token restrito: nada
+        Assert.Empty(escutas[5].Nomes());                                 // anônimo: nada
+    }
+
+    [Theory]
+    [InlineData("role")]
+    [InlineData("ativo")]
+    public async Task Admin_rebaixado_ou_desativado_perde_a_conexao_e_nao_recebe_mais_o_AlertaHarborFalhas(string mudanca)
+    {
+        await using var cena = Cena.Nova();
+        var donoId = cena.F.CriarUsuario("dono@example.com", Role.Locutor);
+        var alvoId = cena.F.CriarUsuario("alvo@example.com", Role.Admin);
+        cena.F.CriarUsuario("admin@example.com", Role.Admin);
+        var tokenAlvo = await cena.TokenDe("alvo@example.com");
+        var tokenAdmin = await cena.TokenDe("admin@example.com");
+
+        var doAlvo = cena.Conexao(Listener(), tokenAlvo);
+        var doAdmin = cena.Conexao(Listener(), tokenAdmin);
+        var caiu = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        doAlvo.Closed += _ => { caiu.TrySetResult(); return Task.CompletedTask; };
+        var escutaAdmin = new Escuta(doAdmin, SoOAlerta);
+        await cena.Iniciar(doAlvo, doAdmin);
+
+        object corpo = mudanca == "role" ? new { role = "Ouvinte" } : new { ativo = false };
+        var patch = new HttpRequestMessage(HttpMethod.Patch, $"/api/v1/usuarios/{alvoId}") { Content = JsonContent.Create(corpo) };
+        patch.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenAdmin);
+        patch.Headers.TryAddWithoutValidation("If-Match", "\"\"");
+        Assert.Equal(HttpStatusCode.OK, (await cena.Http.SendAsync(patch)).StatusCode);
+        await cena.PasseDoOutbox();
+        await caiu.Task.WaitAsync(Prazo);
+
+        // O Closed do cliente volta antes de o servidor tirar a conexão da contagem: espera, senão o Iniciar contaria a que caiu.
+        Assert.True(SpinWait.SpinUntil(() => cena.Servicos.GetRequiredService<ConexoesDoHub>().Prontas == 1, Prazo));
+
+        // Quem tenta voltar com o token antigo cai na checagem da `sv`: entra como anônimo, sem `admins`.
+        var volta = cena.Conexao(Listener(), tokenAlvo);
+        var escutaVolta = new Escuta(volta, SoOAlerta);
+        await cena.Iniciar(volta);
+
+        await EnviarAlertas(cena, donoId);
+        await escutaAdmin.AteOFim();
+        await escutaVolta.AteOFim();
+
+        Assert.Equal(["credencial", "global"], Tipos(escutaAdmin));
+        Assert.Empty(escutaVolta.Nomes());
+        Assert.Equal(HubConnectionState.Disconnected, doAlvo.State);
+    }
+
+    [Fact]
+    public async Task Admin_com_token_vencido_nao_recebe_o_AlertaHarborFalhas_nem_ao_ficar_conectado_nem_ao_reconectar()
+    {
+        await using var cena = Cena.Nova();
+        var donoId = cena.F.CriarUsuario("dono@example.com", Role.Locutor);
+        var adminId = cena.F.CriarUsuario("admin@example.com", Role.Admin);
+        Usuario admin;
+        await using (var escopo = cena.Servicos.CreateAsyncScope())
+            admin = await escopo.ServiceProvider.GetRequiredService<RadioDbContext>().Usuarios.AsNoTracking().SingleAsync(u => u.Id == adminId);
+
+        // Tokens emitidos com o relógio atrasado: o que vence em ~3 s (conectado, o hub fecha na hora do vencimento) e o que já
+        // venceu há 2 min (além da tolerância de 30 s: a conexão entra como anônima).
+        var chave = System.Buffers.Text.Base64Url.DecodeFromChars(ApiFactory.ChaveValida);
+        string Emitir(TimeSpan faltaParaVencer) =>
+            new EmissorDeTokens(chave, new RelogioFixo(DateTime.UtcNow - EmissorDeTokens.DuracaoDoAccess + faltaParaVencer)).EmitirAccessToken(admin).Token;
+
+        var vencendo = cena.Conexao(Listener(), Emitir(TimeSpan.FromSeconds(3)));
+        var jaVencido = cena.Conexao(Listener(), Emitir(TimeSpan.FromMinutes(-2)));
+        var caiu = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        vencendo.Closed += _ => { caiu.TrySetResult(); return Task.CompletedTask; };
+        var escutaVencendo = new Escuta(vencendo, SoOAlerta);
+        var escutaVencido = new Escuta(jaVencido, SoOAlerta);
+        var vivo = cena.Conexao(Listener(), await cena.TokenDe("admin@example.com"));
+        var escutaVivo = new Escuta(vivo, SoOAlerta);
+        await cena.Iniciar(vencendo, jaVencido, vivo);
+
+        await caiu.Task.WaitAsync(Prazo); // o token venceu: o hub encerrou a conexão
+        await EnviarAlertas(cena, donoId);
+        await escutaVivo.AteOFim();
+
+        Assert.Equal(["credencial", "global"], Tipos(escutaVivo)); // controle: o Admin com token válido recebe
+        Assert.Empty(escutaVencendo.Nomes());
+        Assert.Empty(escutaVencido.Nomes());
+    }
+
+    private sealed class RelogioFixo(DateTime agora) : IClock
+    {
+        public DateTime UtcNow => agora;
     }
 
     [Fact]

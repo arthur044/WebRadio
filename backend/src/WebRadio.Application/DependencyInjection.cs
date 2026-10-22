@@ -3,6 +3,7 @@ using MediatR;
 using WebRadio.Application.Abstracoes;
 using WebRadio.Application.Features.Harbor;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using WebRadio.Application.Pipeline;
 
 namespace WebRadio.Application;
@@ -21,6 +22,8 @@ public static class DependencyInjection
         });
         services.AddValidatorsFromAssembly(typeof(AssemblyMarker).Assembly);
         services.AddScoped<ThrottleDoHarbor>();
+        services.AddScoped<AlertaDoHarbor>();
+        services.AddSingleton(sp => new FilaDeAlertasDoHarbor(sp.GetRequiredService<ILogger<FilaDeAlertasDoHarbor>>()));
 
         // D22: reações aos eventos de domínio, despachadas pelo interceptor da Infrastructure antes do commit.
         foreach (var tipo in typeof(AssemblyMarker).Assembly.GetTypes().Where(t => t is { IsClass: true, IsAbstract: false }))

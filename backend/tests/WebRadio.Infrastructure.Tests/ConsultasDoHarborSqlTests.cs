@@ -156,4 +156,27 @@ public class ConsultasDoHarborSqlTests(BancoDeTeste banco) : IClassFixture<Banco
         Assert.NotNull(uso);
         Assert.InRange(uso.Value, antes, DateTime.UtcNow.AddSeconds(5));
     }
+
+    [SqlFact]
+    public async Task DonoDaCredencial_acha_a_ativa_e_a_revogada_ainda_nao_apagada_e_nada_para_identificador_desconhecido()
+    {
+        var (ativa, donoAtiva, _) = await MontarAsync(comPrograma: false);
+        var (revogada, donoRevogada, _) = await MontarAsync(comPrograma: false);
+        await using (var db = _c.NovoDb())
+        {
+            (await db.CredenciaisTransmissao.SingleAsync(c => c.UsuarioId == donoRevogada)).Revogar(DateTime.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        var consultas = Consultas();
+        var daAtiva = await consultas.DonoDaCredencialAsync(ativa, CancellationToken.None);
+        var daRevogada = await consultas.DonoDaCredencialAsync(revogada, CancellationToken.None);
+
+        Assert.Equal(donoAtiva, daAtiva!.UsuarioId);
+        Assert.True(daAtiva.Ativa);
+        Assert.False(string.IsNullOrWhiteSpace(daAtiva.Nome));
+        Assert.Equal(donoRevogada, daRevogada!.UsuarioId);
+        Assert.False(daRevogada.Ativa);
+        Assert.Null(await consultas.DonoDaCredencialAsync(SegredoDeTransmissao.NovoIdentificador(), CancellationToken.None));
+    }
 }

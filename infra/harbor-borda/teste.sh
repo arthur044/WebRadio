@@ -8,7 +8,8 @@
 #   3. lista vazia: ninguém entra;
 #   4. limit_conn: a terceira conexão simultânea do mesmo IP é recusada;
 #   5. o log tem o IP anonimizado (/24) e nunca o IP completo do cliente;
-#   6. roda sem root, read-only, sem capabilities.
+#   6. roda sem root, read-only, sem capabilities;
+#   7. HARBOR_PERMITIDOS_MULTIPLOS: aviso (sem abortar) com mais de uma entrada ou prefixo menor que /32 (/128); sem aviso com um IP só.
 # Uso (na raiz do repositório):  infra/harbor-borda/teste.sh
 # =============================================================================
 set -euo pipefail
@@ -105,6 +106,26 @@ for liberado in "0.0.0.0/0|0.0.0.0|1"; do
 done
 r="$(sobe "10.8.0.0/24, 203.0.113.10" "10.8.0.1" "")"
 confere "lista fechada e bind num IP de VPN sobem normalmente" grep -q "2 entrada(s) permitida(s)" <<<"$r"
+
+echo "== 7. aviso HARBOR_PERMITIDOS_MULTIPLOS"
+sobe_log() { # $1 = HARBOR_PERMITIDOS; sobe de verdade, imprime o log da subida e remove o contêiner
+  docker rm -f "$P-aberta" >/dev/null 2>&1 || true
+  docker run -d --name "$P-aberta" --network none "${ENDURECIDO[@]}" -e HARBOR_PERMITIDOS="$1" -e HARBOR_BIND_IP=10.8.0.1 \
+    -v "$PWD/infra/harbor-borda/nginx.conf:/etc/nginx/nginx.conf:ro" \
+    -v "$PWD/infra/harbor-borda/entrypoint.sh:/usr/local/bin/harbor-borda.sh:ro" \
+    --entrypoint /usr/local/bin/harbor-borda.sh "$NGINX" >/dev/null
+  sleep 2
+  docker logs "$P-aberta" 2>&1
+  docker rm -f "$P-aberta" >/dev/null 2>&1 || true
+}
+for lista in "203.0.113.10, 198.51.100.7" "10.8.0.0/24" "2001:db8::/64" "203.0.113.10/31"; do
+  r="$(sobe_log "$lista")"
+  if grep -q "HARBOR_PERMITIDOS_MULTIPLOS" <<<"$r" && grep -q "entrada(s) permitida(s)" <<<"$r"; then ok "avisa e sobe para '$lista'"; else falha "'$lista' não avisou ou não subiu: $r"; fi
+done
+for lista in "203.0.113.10" "203.0.113.10/32" "2001:db8::1" "2001:db8::1/128"; do
+  r="$(sobe_log "$lista")"
+  if grep -q "1 entrada(s) permitida(s)" <<<"$r" && ! grep -q "HARBOR_PERMITIDOS_MULTIPLOS" <<<"$r"; then ok "um IP só ('$lista') sobe sem aviso"; else falha "'$lista' avisou ou não subiu: $r"; fi
+done
 
 echo "== sobe a rede e o liquidsoap falso"
 docker network create --subnet "$REDE.0/24" "$P" >/dev/null

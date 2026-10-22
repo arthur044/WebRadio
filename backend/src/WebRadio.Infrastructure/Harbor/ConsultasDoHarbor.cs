@@ -17,6 +17,12 @@ public sealed class ConsultasDoHarbor(RadioDbContext db) : IConsultasDoHarbor
             .Select(c => new CredencialDoHarbor(c.Id, c.Salt, c.SegredoHash))
             .FirstOrDefaultAsync(ct);
 
+    public Task<DonoDaCredencial?> DonoDaCredencialAsync(Guid identificador, CancellationToken ct) =>
+        db.CredenciaisTransmissao.AsNoTracking()
+            .Where(c => c.Identificador == identificador)
+            .Join(db.Usuarios, c => c.UsuarioId, u => u.Id, (c, u) => new DonoDaCredencial(u.Id, u.Nome, c.RevogadaEmUtc == null))
+            .FirstOrDefaultAsync(ct);
+
     public async Task<JanelaDoHarbor?> JanelaAsync(Guid identificador, CancellationToken ct)
     {
         // Status NOT IN (3, 4) = Finalizado, Cancelado; Role IN (1, 2) = Admin, Locutor (01 §1). O limite da duração máxima

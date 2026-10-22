@@ -8,6 +8,9 @@
 # "Nunca 0.0.0.0" (06 F11, risco aceito 2 do 05 §4: harbor sem TLS só vale com a porta alcançável por VPN ou lista de IPs): a subida
 # também aborta com HARBOR_BIND_IP = 0.0.0.0 ou :: (o live.yml o repassa) e com qualquer entrada de HARBOR_PERMITIDOS de prefixo /0
 # (0.0.0.0/0, ::/0). Só HARBOR_LIBERAR_TUDO=1 passa, e só o docker-compose.dev.yml o define.
+#
+# HARBOR_PERMITIDOS_MULTIPLOS (06 F12, risco aceito 3): a API não compara IPs porque a lista tem só o IP do locutor. Mais de uma
+# entrada, ou uma entrada com prefixo menor que /32 (IPv4) ou /128 (IPv6), deixa de ser isso: a subida segue, com um aviso no log.
 # =============================================================================
 set -eu
 
@@ -51,7 +54,23 @@ for item in $(printf '%s' "${HARBOR_PERMITIDOS:-}" | tr ',' ' '); do
   total=$((total + 1))
 done
 
+multiplos=0
+[ "$total" -gt 1 ] && multiplos=1
+for item in $(printf '%s' "${HARBOR_PERMITIDOS:-}" | tr ',' ' '); do
+  case "$item" in
+    */*)
+      prefixo="${item##*/}"
+      case "$item" in
+        *:*) [ "$prefixo" -lt 128 ] && multiplos=1 ;;
+        *) [ "$prefixo" -lt 32 ] && multiplos=1 ;;
+      esac ;;
+  esac
+done
+
 printf '%sdeny all;\n' "$linhas" > "$destino"
+if [ "$multiplos" -eq 1 ]; then
+  echo "harbor-borda: HARBOR_PERMITIDOS_MULTIPLOS: a lista tem mais de uma entrada ou uma rede (prefixo menor que /32 ou /128). O risco aceito 3 (06, 05 §4) vale só com o IP fixo de um locutor: reavalie." >&2
+fi
 if [ "$total" -eq 0 ]; then
   echo "harbor-borda: HARBOR_PERMITIDOS vazio: nenhuma conexão de locutor será aceita." >&2
 else
