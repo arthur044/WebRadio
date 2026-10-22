@@ -84,7 +84,8 @@ public class AlertaDoHarborTests
             return (envelope.GetProperty("grupos").EnumerateArray().Select(g => g.GetString()!).ToArray(), envelope.GetProperty("dados").Clone());
         }).ToList();
 
-    private string[] Tipos() => [.. Alertas().Select(a => a.Dados.GetProperty("tipo").GetString()!)];
+    /// <summary>Os tipos gravados, em ordem alfabética: a drenagem tira o global antes das credenciais.</summary>
+    private string[] Tipos() => [.. Alertas().Select(a => a.Dados.GetProperty("tipo").GetString()!).Order()];
 
     [Fact]
     public async Task A_decima_falha_grava_exatamente_um_alerta_de_credencial_e_a_11a_na_mesma_janela_nao()
@@ -249,7 +250,7 @@ public class AlertaDoHarborTests
 
         await Task.WhenAll(Task.Run(() => Drenar()), Task.Run(() => Drenar()));
 
-        Assert.Equal(["credencial", "global"], Tipos().Order().ToArray());
+        Assert.Equal(["credencial", "global"], Tipos());
     }
 
     [Fact]
@@ -284,33 +285,45 @@ public class AlertaDoHarborTests
         Assert.Empty(Alertas());
     }
 
-    [Fact]
-    public async Task Fila_cheia_descarta_o_alerta_e_loga_HARBOR_ALERTA_FALHOU_e_o_auth_responde_o_mesmo_401()
+    /// <summary>Outra credencial conhecida (com dono), para encher a fila de credenciais.</summary>
+    private Guid OutraCredencial()
     {
-        var pequena = new FilaDeAlertasDoHarbor(_logFila, capacidade: 1);
-
-        // O alerta de credencial (10ª falha do dono) ocupa a única vaga; ninguém esvazia a fila.
-        for (var i = 1; i <= ThrottleDoHarbor.AlertaPorIdentificador; i++)
-            Assert.Null(await Falha(_id, $"192.0.2.{i}", pequena));
-        Assert.DoesNotContain(_logFila.Linhas, l => l.Contains("HARBOR_ALERTA_FALHOU"));
-
-        // O global (50ª no total) não cabe: some com log, e todas as respostas continuam o mesmo 401.
-        for (var i = 0; i < ThrottleDoHarbor.AlertaGlobal - ThrottleDoHarbor.AlertaPorIdentificador; i++)
-            Assert.Null(await Falha(Guid.NewGuid(), $"198.51.100.{i + 1}", pequena));
-
-        Assert.Contains(_logFila.Linhas, l => l.Contains("HARBOR_ALERTA_FALHOU"));
-        await Drenar(pequena);
-        Assert.Equal(["credencial"], Tipos());
+        var outro = Guid.NewGuid();
+        var g = SegredoDeTransmissao.Gerar();
+        _consultas.Credenciais[outro] = new CredencialDoHarbor(Guid.NewGuid(), g.Salt, g.Hash);
+        _consultas.Donos[outro] = new DonoDaCredencial(Guid.NewGuid(), "Bia", Ativa: true);
+        return outro;
     }
 
     [Fact]
-    public void A_fila_tem_100_itens_e_o_consumidor_no_maximo_30_consultas_por_minuto()
+    public async Task Fila_de_credenciais_cheia_descarta_com_HARBOR_ALERTA_FALHOU_e_o_global_ainda_chega_ao_outbox()
+    {
+        var pequena = new FilaDeAlertasDoHarbor(_logFila, capacidade: 1);
+        var segunda = OutraCredencial();
+
+        // A 10ª falha de _id ocupa a única vaga da fila de credenciais; ninguém a esvazia. O auth responde o mesmo 401 sempre.
+        for (var i = 1; i <= ThrottleDoHarbor.AlertaPorIdentificador; i++) Assert.Null(await Falha(_id, $"192.0.2.{i}", pequena));
+        Assert.DoesNotContain(_logFila.Linhas, l => l.Contains("HARBOR_ALERTA_FALHOU"));
+
+        // O alerta da segunda credencial não cabe: descartado com log.
+        for (var i = 1; i <= ThrottleDoHarbor.AlertaPorIdentificador; i++) Assert.Null(await Falha(segunda, $"192.0.3.{i}", pequena));
+        Assert.Single(_logFila.Linhas, l => l.Contains("HARBOR_ALERTA_FALHOU"));
+
+        // A 50ª falha no total dispara o global, que tem fila própria: chega mesmo com a de credenciais cheia.
+        for (var i = 0; i < ThrottleDoHarbor.AlertaGlobal - 2 * ThrottleDoHarbor.AlertaPorIdentificador; i++)
+            Assert.Null(await Falha(Guid.NewGuid(), $"198.51.100.{i + 1}", pequena));
+        Assert.Single(_logFila.Linhas, l => l.Contains("HARBOR_ALERTA_FALHOU")); // o global não foi descartado
+
+        await Drenar(pequena);
+        Assert.Equal(["credencial", "global"], Tipos()); // a 1ª credencial e o global; a 2ª credencial foi descartada
+    }
+
+    [Fact]
+    public void A_fila_de_credenciais_tem_100_itens_e_o_consumidor_no_maximo_30_consultas_por_minuto()
     {
         Assert.Equal(100, FilaDeAlertasDoHarbor.CapacidadePadrao);
         Assert.Equal(30, FilaDeAlertasDoHarbor.MaximoDeConsultasPorMinuto);
         Assert.Equal(TimeSpan.FromSeconds(2), FilaDeAlertasDoHarbor.EspacoEntreConsultas);
-        Assert.True(AlertaDoHarbor.ConsultaODono(new AlertaPendente(AlertasDaFalha.Identificador, Guid.NewGuid())));
-        Assert.False(AlertaDoHarbor.ConsultaODono(new AlertaPendente(AlertasDaFalha.Global, Guid.NewGuid())));
     }
 
     [Fact]

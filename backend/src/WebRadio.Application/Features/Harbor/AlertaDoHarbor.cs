@@ -11,43 +11,60 @@ public sealed record AlertaPendente(AlertasDaFalha Alertas, Guid Identificador)
 }
 
 /// <summary>
-/// E2-F12: fila em memória entre o <c>harbor/auth</c> e o serviço em segundo plano. O <c>auth</c> só enfileira (nenhuma consulta, nenhuma
-/// gravação) e responde o 401 no tempo de sempre. Fila cheia (<see cref="CapacidadePadrao"/> itens) descarta o alerta e loga
-/// <c>HARBOR_ALERTA_FALHOU</c>: perder um alerta é aceito (um reinício da API também perde a fila), atrasar ou derrubar o <c>auth</c> não.
+/// E2-F12: filas em memória entre o <c>harbor/auth</c> e o serviço em segundo plano. O <c>auth</c> só enfileira (nenhuma consulta,
+/// nenhuma gravação) e responde o 401 no tempo de sempre. Fila cheia descarta o alerta e loga <c>HARBOR_ALERTA_FALHOU</c>: perder um
+/// alerta é aceito (um reinício da API também perde a fila), atrasar ou derrubar o <c>auth</c> não.
+/// Duas filas: a de credenciais (<see cref="CapacidadePadrao"/> itens), que depende da consulta do dono e é espaçada pelo consumidor, e a
+/// do global, que é só uma gravação no outbox, sai no máximo uma vez por janela e nunca espera atrás de consulta. Assim uma varredura
+/// com identificadores aleatórios, que enche a fila de credenciais, não esconde o sinal mais amplo.
 /// </summary>
 public sealed class FilaDeAlertasDoHarbor
 {
     public const int CapacidadePadrao = 100;
+
+    /// <summary>O global sai uma vez por janela de 5 min; 10 vagas sobram.</summary>
+    public const int CapacidadeDoGlobal = 10;
 
     /// <summary>Teto de consultas do dono por minuto (E2-F12): o consumidor se espaça por isto; o que não couber na fila é descartado.</summary>
     public const int MaximoDeConsultasPorMinuto = 30;
 
     public static readonly TimeSpan EspacoEntreConsultas = TimeSpan.FromMinutes(1.0 / MaximoDeConsultasPorMinuto);
 
-    private readonly Channel<AlertaPendente> _canal;
+    private readonly Channel<AlertaPendente> _credenciais;
+    private readonly Channel<AlertaPendente> _globais;
     private readonly ILogger<FilaDeAlertasDoHarbor> _logger;
 
     public FilaDeAlertasDoHarbor(ILogger<FilaDeAlertasDoHarbor> logger, int capacidade = CapacidadePadrao)
     {
         _logger = logger;
-        _canal = Channel.CreateBounded<AlertaPendente>(new BoundedChannelOptions(capacidade)
-        {
-            FullMode = BoundedChannelFullMode.Wait, // TryWrite devolve false quando cheia; quem descarta somos nós, com log
-            SingleWriter = false,
-            SingleReader = false,
-        });
+        _credenciais = Nova(capacidade);
+        _globais = Nova(CapacidadeDoGlobal);
     }
+
+    // FullMode.Wait: TryWrite devolve false quando cheia; quem descarta somos nós, com log.
+    private static Channel<AlertaPendente> Nova(int capacidade) =>
+        Channel.CreateBounded<AlertaPendente>(new BoundedChannelOptions(capacidade) { FullMode = BoundedChannelFullMode.Wait });
 
     public void Enfileirar(AlertaPendente alerta)
     {
-        if (alerta.Alertas == AlertasDaFalha.Nenhum) return;
-        if (!_canal.Writer.TryWrite(alerta))
+        if (alerta.Alertas.HasFlag(AlertasDaFalha.Identificador))
+            Escrever(_credenciais, new AlertaPendente(AlertasDaFalha.Identificador, alerta.Identificador));
+        if (alerta.Alertas.HasFlag(AlertasDaFalha.Global))
+            Escrever(_globais, new AlertaPendente(AlertasDaFalha.Global, alerta.Identificador));
+    }
+
+    private void Escrever(Channel<AlertaPendente> fila, AlertaPendente alerta)
+    {
+        if (!fila.Writer.TryWrite(alerta))
             _logger.LogWarning("HARBOR_ALERTA_FALHOU fila cheia: alerta {Alertas} descartado", alerta.Alertas);
     }
 
-    public bool TentarLer(out AlertaPendente? alerta) => _canal.Reader.TryRead(out alerta);
+    /// <summary>Tira o próximo sem esperar, o global primeiro (testes e drenagem manual).</summary>
+    public bool TentarLer(out AlertaPendente? alerta) => _globais.Reader.TryRead(out alerta) || _credenciais.Reader.TryRead(out alerta);
 
-    public ValueTask<AlertaPendente> LerAsync(CancellationToken ct) => _canal.Reader.ReadAsync(ct);
+    public ValueTask<AlertaPendente> LerCredencialAsync(CancellationToken ct) => _credenciais.Reader.ReadAsync(ct);
+
+    public ValueTask<AlertaPendente> LerGlobalAsync(CancellationToken ct) => _globais.Reader.ReadAsync(ct);
 }
 
 /// <summary>
@@ -61,9 +78,6 @@ public sealed class AlertaDoHarbor(IConsultasDoHarbor consultas, IOutbox outbox,
 {
     public const string TipoCredencial = "credencial";
     public const string TipoGlobal = "global";
-
-    /// <summary>true quando o alerta faz a consulta do dono (a que o <see cref="FilaDeAlertasDoHarbor.MaximoDeConsultasPorMinuto"/> limita).</summary>
-    public static bool ConsultaODono(AlertaPendente pendente) => pendente.Alertas.HasFlag(AlertasDaFalha.Identificador);
 
     public async Task ProcessarAsync(AlertaPendente pendente, CancellationToken ct)
     {
