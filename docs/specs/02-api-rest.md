@@ -150,7 +150,7 @@ Eventos servidor → cliente (todos com `eventoId` e `ocorridoEmUtc`; o cliente 
 | `ProgramaStatusAlterado` | todos | `{ programaId, titulo, status, locutorNome }` |
 | `TocandoAgora` | todos | `{ titulo, artista, tipoMidia, pedidoId? }` |
 | `TransmissaoAoVivoAlterada` | todos | `{ noAr, programaId?, locutorNome? }` (Épico 2) |
-| `AlertaHarborFalhas` | `admins` (+ `usuario:{locutorId}` no tipo `credencial`) | `{ tipo, falhas, janelaMinutos, locutorId?, locutorNome?, credencialAtiva? }` (Épico 2; contrato no `06`, E2-F12) |
+| `AlertaHarborFalhas` | `admins` (+ `usuario:{usuarioId}` do dono no tipo `credencial`) | `{ tipo, falhas, janelaMinutos, locutorId?, locutorNome?, credencialAtiva? }` (Épico 2; contrato no `06`, E2-F12) |
 | `PedidoCriado` | `locutores` | `PedidoDto` |
 | `PedidoModerado` | `listener:{hash}` + `locutores` | `{ pedidoId, status, motivoRejeicao? }` |
 | `PedidoTocado` | `listener:{hash}` + `locutores` | `{ pedidoId }` |
