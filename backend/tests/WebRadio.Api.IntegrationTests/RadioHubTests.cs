@@ -300,14 +300,17 @@ public class RadioHubTests
 
     private static readonly string[] SoOAlerta = [EventosDoOutbox.AlertaHarborFalhas];
 
-    /// <summary>Envia o par de alertas da E2-F12 (credencial do dono e global) mais a sentinela, e roda o passe do outbox.</summary>
-    private static async Task EnviarAlertas(Cena cena, Guid donoId)
+    /// <summary>
+    /// Envia o par de alertas da E2-F12 (credencial do dono e global) e roda o passe do outbox. A sentinela "Fim" libera o
+    /// <c>AteOFim</c> na PRIMEIRA que chega: quem manda mais eventos depois passa <c>comFim: false</c> e manda a sua, uma só, no fim.
+    /// </summary>
+    private static async Task EnviarAlertas(Cena cena, Guid donoId, bool comFim = true)
     {
         await cena.Enfileirar(EventosDoOutbox.AlertaHarborFalhas,
             new { tipo = "credencial", falhas = 10, janelaMinutos = 5, locutorId = donoId, locutorNome = "Fulano", credencialAtiva = true },
             GruposDoHub.Admins, GruposDoHub.Usuario(donoId));
         await cena.Enfileirar(EventosDoOutbox.AlertaHarborFalhas, new { tipo = "global", falhas = 50, janelaMinutos = 5 }, GruposDoHub.Admins);
-        await cena.Enfileirar("Fim", new { });
+        if (comFim) await cena.Enfileirar("Fim", new { });
         await cena.PasseDoOutbox();
     }
 
@@ -333,7 +336,7 @@ public class RadioHubTests
         var escutas = todas.Select(c => new Escuta(c, SoOAlerta)).ToArray();
         await cena.Iniciar(todas);
 
-        await EnviarAlertas(cena, donoId);
+        await EnviarAlertas(cena, donoId, comFim: false);
         // O dono com token restrito também seria destinatário do grupo dele: o evento do SEU id não chega por causa do token.
         await cena.Enfileirar(EventosDoOutbox.AlertaHarborFalhas, new { tipo = "credencial", falhas = 10, janelaMinutos = 5, locutorId = donoRestritoId, locutorNome = "Fulano", credencialAtiva = false },
             GruposDoHub.Admins, GruposDoHub.Usuario(donoRestritoId));
@@ -347,6 +350,26 @@ public class RadioHubTests
         Assert.Empty(escutas[3].Nomes());                                 // Admin com token restrito: nada
         Assert.Empty(escutas[4].Nomes());                                 // dono com token restrito: nada
         Assert.Empty(escutas[5].Nomes());                                 // anônimo: nada
+    }
+
+    [Fact]
+    public async Task Grupo_sem_nenhuma_conexao_junto_de_admins_nao_impede_a_entrega_ao_Admin()
+    {
+        // O dono da credencial offline: o grupo usuario:{dono} não existe, e o Admin recebe do mesmo jeito (o alerta não depende do dono).
+        await using var cena = Cena.Nova();
+        cena.F.CriarUsuario("admin@example.com", Role.Admin);
+        var admin = cena.Conexao(Listener(), await cena.TokenDe("admin@example.com"));
+        var escuta = new Escuta(admin, SoOAlerta);
+        await cena.Iniciar(admin);
+
+        await cena.Enfileirar(EventosDoOutbox.AlertaHarborFalhas, new { tipo = "credencial", falhas = 10, janelaMinutos = 5, locutorId = Guid.NewGuid(), locutorNome = "Fulano", credencialAtiva = true },
+            GruposDoHub.Admins, GruposDoHub.Usuario(Guid.NewGuid()));
+        await cena.Enfileirar("Fim", new { });
+        var lote = await cena.PasseDoOutbox();
+        await escuta.AteOFim();
+
+        Assert.Equal(new ResultadoDoLote(2, 0), lote); // nenhuma falha de entrega (OUTBOX_FALHA)
+        Assert.Equal(["credencial"], Tipos(escuta));
     }
 
     [Theory]
