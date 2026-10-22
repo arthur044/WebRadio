@@ -63,6 +63,12 @@ public static class EventosDoOutbox
 
     /// <summary>Carga <c>{ noAr, programaId?, locutorNome? }</c> (06 "SignalR"): vai para todos. Gravado pelos eventos do harbor (E2-F06).</summary>
     public const string TransmissaoAoVivoAlterada = "TransmissaoAoVivoAlterada";
+
+    /// <summary>
+    /// Carga <c>{ tipo, falhas, janelaMinutos, locutorId?, locutorNome?, credencialAtiva? }</c> (06 "SignalR", E2-F12). Tipo <c>credencial</c>: vai para
+    /// <c>admins</c> e para <c>usuario:{locutorId}</c>; tipo <c>global</c>: só <c>admins</c>. Nunca leva segredo, identificador nem IP.
+    /// </summary>
+    public const string AlertaHarborFalhas = "AlertaHarborFalhas";
 }
 
 /// <summary>

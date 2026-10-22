@@ -13,6 +13,7 @@ public sealed class ConsultasFalsas : IConsultasDoHarbor
 {
     public Dictionary<Guid, CredencialDoHarbor> Credenciais { get; } = [];
     public Dictionary<Guid, JanelaDoHarbor> Janelas { get; } = [];
+    public Dictionary<Guid, DonoDaCredencial> Donos { get; } = [];
     public List<Guid> Usos { get; } = [];
     public int Chamadas { get; private set; }
 
@@ -26,6 +27,14 @@ public sealed class ConsultasFalsas : IConsultasDoHarbor
     {
         Chamadas++;
         return Task.FromResult(Janelas.TryGetValue(identificador, out var j) ? j : null);
+    }
+
+    public int ConsultasAoDono { get; private set; }
+
+    public Task<DonoDaCredencial?> DonoDaCredencialAsync(Guid identificador, CancellationToken ct)
+    {
+        ConsultasAoDono++;
+        return Task.FromResult(Donos.GetValueOrDefault(identificador));
     }
 
     public Task RegistrarUsoAsync(Guid credencialId, CancellationToken ct)
@@ -62,7 +71,10 @@ public class AutenticarNoHarborTests
     }
 
     private AutenticarNoHarborHandler Handler() =>
-        new(_consultas, new ThrottleDoHarbor(_contadores, new IpHasher(new byte[32]), Options.Create(_opcoes), new LogCapturado<ThrottleDoHarbor>()), new IpHasher(new byte[32]), _log);
+        new(_consultas, new ThrottleDoHarbor(_contadores, new IpHasher(new byte[32]), Options.Create(_opcoes), new LogCapturado<ThrottleDoHarbor>()), SemAlerta(), new IpHasher(new byte[32]), _log);
+
+    /// <summary>Os testes do throttle não olham os alertas (E2-F12 tem testes próprios): uma fila que ninguém esvazia.</summary>
+    internal static FilaDeAlertasDoHarbor SemAlerta() => new(new LogCapturado<FilaDeAlertasDoHarbor>());
 
     private Task<JanelaDoHarbor?> Auth(string? usuario, string? senha, string? ip = IpA) =>
         Handler().Handle(new AutenticarNoHarborCommand(usuario, senha, ip), CancellationToken.None);
@@ -208,7 +220,7 @@ public class AutenticarNoHarborTests
     {
         var alertas = new LogCapturado<ThrottleDoHarbor>();
         var throttle = new ThrottleDoHarbor(_contadores, new IpHasher(new byte[32]), Options.Create(_opcoes), alertas);
-        var handler = new AutenticarNoHarborHandler(_consultas, throttle, new IpHasher(new byte[32]), _log);
+        var handler = new AutenticarNoHarborHandler(_consultas, throttle, SemAlerta(), new IpHasher(new byte[32]), _log);
 
         for (var i = 0; i < ThrottleDoHarbor.AlertaPorIdentificador; i++)
             await handler.Handle(new AutenticarNoHarborCommand(_id.ToString(), SegredoDeTransmissao.Gerar().Segredo, $"192.0.2.{i + 1}"), CancellationToken.None);
@@ -235,7 +247,7 @@ public class AutenticarNoHarborTests
         _contadores = new ThrottleQueFalha();
         var alertas = new LogCapturado<ThrottleDoHarbor>();
         var handler = new AutenticarNoHarborHandler(_consultas,
-            new ThrottleDoHarbor(_contadores, new IpHasher(new byte[32]), Options.Create(_opcoes), alertas), new IpHasher(new byte[32]), _log);
+            new ThrottleDoHarbor(_contadores, new IpHasher(new byte[32]), Options.Create(_opcoes), alertas), SemAlerta(), new IpHasher(new byte[32]), _log);
 
         Assert.Equal(_janela, await handler.Handle(new AutenticarNoHarborCommand(_id.ToString(), _segredo, IpA), CancellationToken.None));
         Assert.Null(await handler.Handle(new AutenticarNoHarborCommand(_id.ToString(), Adulterar(_segredo), IpA), CancellationToken.None));

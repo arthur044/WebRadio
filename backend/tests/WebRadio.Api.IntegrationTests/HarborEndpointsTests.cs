@@ -25,11 +25,14 @@ public class HarborEndpointsTests
     {
         public Dictionary<Guid, CredencialDoHarbor> Credenciais { get; } = [];
         public Dictionary<Guid, JanelaDoHarbor> Janelas { get; } = [];
+        public Dictionary<Guid, DonoDaCredencial> Donos { get; } = [];
 
         public Task<CredencialDoHarbor?> CredencialAtivaAsync(Guid identificador, CancellationToken ct) => Task.FromResult(Credenciais.GetValueOrDefault(identificador));
 
         public Task<JanelaDoHarbor?> JanelaAsync(Guid identificador, CancellationToken ct) =>
             Task.FromResult(Janelas.TryGetValue(identificador, out var j) ? j : null);
+
+        public Task<DonoDaCredencial?> DonoDaCredencialAsync(Guid identificador, CancellationToken ct) => Task.FromResult(Donos.GetValueOrDefault(identificador));
 
         public Task RegistrarUsoAsync(Guid credencialId, CancellationToken ct) => Task.CompletedTask;
     }
@@ -79,6 +82,55 @@ public class HarborEndpointsTests
 
     private static Task<HttpResponseMessage> Autenticar(Cena c, string? usuario, string? senha, string ip = "203.0.113.77") =>
         c.C.SendAsync(Req(HttpMethod.Post, Auth, new { usuario, senha, enderecoIp = ip }));
+
+    /// <summary>O serviço em segundo plano está desligado nos testes (Outbox:Dispatcher=false): esvazia a fila à mão, num escopo por alerta.</summary>
+    private static async Task DrenarAlertas(Cena c)
+    {
+        var fila = c.Servicos.GetRequiredService<WebRadio.Application.Features.Harbor.FilaDeAlertasDoHarbor>();
+        while (fila.TentarLer(out var pendente))
+        {
+            await using var escopo = c.Servicos.CreateAsyncScope();
+            await escopo.ServiceProvider.GetRequiredService<WebRadio.Application.Features.Harbor.AlertaDoHarbor>().ProcessarAsync(pendente!, default);
+        }
+    }
+
+    private static async Task<List<JsonElement>> AlertasNoOutbox(Cena c)
+    {
+        await using var escopo = c.Servicos.CreateAsyncScope();
+        var db = escopo.ServiceProvider.GetRequiredService<WebRadio.Infrastructure.Persistencia.RadioDbContext>();
+        return db.EventosOutbox.ToList().Where(e => e.Tipo == EventosDoOutbox.AlertaHarborFalhas)
+            .Select(e => JsonDocument.Parse(e.Payload).RootElement.Clone()).ToList();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_decima_falha_responde_o_mesmo_401_e_grava_um_unico_alerta_de_credencial_com_ou_sem_proxy(bool atrasDoProxy)
+    {
+        var c = NovaCena(atrasDoProxy);
+        var donoId = Guid.NewGuid();
+        c.Consultas.Donos[c.Id] = new DonoDaCredencial(donoId, "Ana", Ativa: true);
+
+        for (var i = 1; i <= 12; i++)
+        {
+            var r = await Autenticar(c, c.Id.ToString(), SegredoDeTransmissao.Gerar().Segredo, $"203.0.113.{i}");
+            Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode); // a 10ª não difere da 1ª
+            Assert.Equal(0, r.Content.Headers.ContentLength);
+        }
+
+        Assert.Empty(await AlertasNoOutbox(c)); // o auth só enfileirou
+        await DrenarAlertas(c);
+
+        var alerta = Assert.Single(await AlertasNoOutbox(c));
+        Assert.Equal(["admins", $"usuario:{donoId:D}"], alerta.GetProperty("grupos").EnumerateArray().Select(g => g.GetString()!).ToArray());
+        var dados = alerta.GetProperty("dados");
+        Assert.Equal("credencial", dados.GetProperty("tipo").GetString());
+        Assert.True(dados.GetProperty("credencialAtiva").GetBoolean());
+        var bruto = alerta.GetRawText();
+        Assert.DoesNotContain(c.Id.ToString(), bruto, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("203.0.113", bruto);
+        Assert.DoesNotContain("203.0.113.", c.Log.Tudo().Replace("203.0.113.0/24", "")); // nos logs só o /24 anonimizado
+    }
 
     [Fact]
     public async Task Credencial_certa_na_janela_devolve_200_com_programa_e_fim_utc()

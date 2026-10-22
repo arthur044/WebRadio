@@ -20,6 +20,7 @@ public sealed record AutenticarNoHarborCommand(string? Usuario, string? Senha, s
 public sealed class AutenticarNoHarborHandler(
     IConsultasDoHarbor consultas,
     ThrottleDoHarbor throttle,
+    FilaDeAlertasDoHarbor fila,
     IIpHasher ipHasher,
     ILogger<AutenticarNoHarborHandler> logger) : IRequestHandler<AutenticarNoHarborCommand, JanelaDoHarbor?>
 {
@@ -68,7 +69,8 @@ public sealed class AutenticarNoHarborHandler(
 
         if (!confere)
         {
-            await throttle.RegistrarFalhaAsync(identificador, ipHash, ct);
+            var alertas = await throttle.RegistrarFalhaAsync(identificador, ipHash, ct);
+            fila.Enfileirar(new AlertaPendente(alertas, identificador)); // só enfileira: o 401 sai sem esperar consulta nem gravação
             logger.LogWarning("HARBOR_AUTH_RECUSADO motivo {Motivo} identificador {Identificador} ip {Ip}", "credencial", identificador, ipLog);
             return null;
         }

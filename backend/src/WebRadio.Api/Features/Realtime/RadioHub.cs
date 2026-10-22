@@ -29,9 +29,17 @@ public sealed class RadioHub(IListenerIdentity identidade, ConexoesDoHub conexoe
         if (usuario?.Identity?.IsAuthenticated == true && Guid.TryParse(usuario.FindFirst("sub")?.Value, out var usuarioId))
         {
             conexoes.Registrar(usuarioId, Context);
-            // PedidoCriado leva nome e dedicatória dos ouvintes: só para quem modera, e nunca com o token restrito.
-            if ((usuario.IsInRole("Locutor") || usuario.IsInRole("Admin")) && !usuario.HasClaim(EmissorDeTokens.ClaimDeveTrocarSenha, "true"))
-                await Groups.AddToGroupAsync(Context.ConnectionId, GruposDoHub.Locutores);
+            // Nenhum grupo de usuário vale com o token restrito de troca de senha.
+            if (!usuario.HasClaim(EmissorDeTokens.ClaimDeveTrocarSenha, "true"))
+            {
+                // PedidoCriado leva nome e dedicatória dos ouvintes: só para quem modera.
+                if (usuario.IsInRole("Locutor") || usuario.IsInRole("Admin"))
+                    await Groups.AddToGroupAsync(Context.ConnectionId, GruposDoHub.Locutores);
+                // AlertaHarborFalhas (E2-F12): todos os Admins, e cada usuário no seu próprio grupo (o dono da credencial).
+                if (usuario.IsInRole("Admin"))
+                    await Groups.AddToGroupAsync(Context.ConnectionId, GruposDoHub.Admins);
+                await Groups.AddToGroupAsync(Context.ConnectionId, GruposDoHub.Usuario(usuarioId));
+            }
         }
 
         await base.OnConnectedAsync();

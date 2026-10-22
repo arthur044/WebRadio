@@ -18,7 +18,9 @@ public sealed class LogCapturado<T> : ILogger<T>
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
     public bool IsEnabled(LogLevel logLevel) => true;
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        => Linhas.Add(formatter(state, exception));
+    {
+        lock (Linhas) Linhas.Add(formatter(state, exception)); // handlers concorrentes (E2-F12) logam ao mesmo tempo
+    }
 }
 
 public sealed class ThrottleQueFalha : IRequestThrottle
