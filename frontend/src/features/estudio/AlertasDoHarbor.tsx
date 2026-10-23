@@ -37,6 +37,8 @@ function RevogarDoAlerta({ alerta, chave }: { alerta: AlertaHarbor; chave: strin
   const lista = useCredenciaisAtivas(true)
   const [confirmando, setConfirmando] = useState(false)
   const [revogando, setRevogando] = useState(false)
+  const [verificando, setVerificando] = useState(false)
+  const [naoConferiu, setNaoConferiu] = useState(false)
   const [erro, setErro] = useState<ErroDescrito | null>(null)
   const idPergunta = useId()
   const idAviso = useId()
@@ -67,6 +69,19 @@ function RevogarDoAlerta({ alerta, chave }: { alerta: AlertaHarbor; chave: strin
     credencial !== undefined &&
     new Date(credencial.criadaEmUtc).getTime() > new Date(alerta.ocorridoEmUtc).getTime()
 
+  // A lista pode ter mudado desde o aviso (credencial nova, outra revogação): relê antes de pedir a confirmação, para
+  // o aviso de "criada depois" valer para a credencial de agora. Se a leitura falhar, abre mesmo assim, sem a conferência.
+  async function abrirConfirmacao() {
+    setVerificando(true)
+    setNaoConferiu(false)
+    const resultado = await lista.refetch()
+    setVerificando(false)
+    if (resultado.isError) setNaoConferiu(true)
+    // Já não está ativa: a releitura troca o botão pelo texto "Essa credencial já não está ativa.".
+    else if (!resultado.data?.some((c) => c.usuarioId === locutorId)) return
+    setConfirmando(true)
+  }
+
   async function revogar() {
     setRevogando(true)
     setErro(null)
@@ -83,7 +98,7 @@ function RevogarDoAlerta({ alerta, chave }: { alerta: AlertaHarbor; chave: strin
     }
   }
 
-  if (lista.isError) {
+  if (lista.isError && !credencial && !confirmando) {
     return (
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <p role="alert" className="text-on-air text-sm">
@@ -112,16 +127,16 @@ function RevogarDoAlerta({ alerta, chave }: { alerta: AlertaHarbor; chave: strin
           ref={revogarRef}
           type="button"
           className={botao}
-          disabled={!credencial || revogando}
-          onClick={() => setConfirmando(true)}
+          disabled={!credencial || revogando || verificando}
+          onClick={() => void abrirConfirmacao()}
         >
-          Revogar a credencial de {nome}
+          {verificando ? 'Conferindo a credencial…' : `Revogar a credencial de ${nome}`}
         </button>
       ) : (
         <div
           role="alertdialog"
           aria-label={`Revogar a credencial de ${nome}`}
-          aria-describedby={criadaDepois ? `${idPergunta} ${idAviso}` : idPergunta}
+          aria-describedby={criadaDepois || naoConferiu ? `${idPergunta} ${idAviso}` : idPergunta}
           className="text-sm"
         >
           <p id={idPergunta}>
@@ -132,6 +147,12 @@ function RevogarDoAlerta({ alerta, chave }: { alerta: AlertaHarbor; chave: strin
               Atenção: a credencial ativa foi criada depois deste alerta (
               {formatarDataHoraBrasilia(credencial.criadaEmUtc)}). Revogar agora derruba a
               credencial nova, não a que gerou as falhas.
+            </p>
+          )}
+          {naoConferiu && (
+            <p id={idAviso} className="text-on-air mt-1 font-medium">
+              Não foi possível conferir a credencial ativa agora. Se ela foi criada depois deste
+              alerta, revogar derruba a credencial nova, não a que gerou as falhas.
             </p>
           )}
           <span className="mt-2 flex items-center gap-2">

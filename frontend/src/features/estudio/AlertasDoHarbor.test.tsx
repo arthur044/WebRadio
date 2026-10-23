@@ -9,6 +9,9 @@ import { AlertasDoHarbor } from './AlertasDoHarbor'
 import { CredenciaisAtivasAdmin } from './CredenciaisAtivasAdmin'
 
 const IDENTIFICADOR = '3f2a9c1e-7b64-4d85-9a10-5c8e2d7b6f41'
+const LOC1 = '0a1b2c3d-1111-4222-8333-444455556666'
+const LOC2 = '0a1b2c3d-2222-4222-8333-444455556666'
+const OUTRO = '0a1b2c3d-9999-4222-8333-444455556666'
 const OCORRIDO = '2026-10-22T12:00:00Z'
 
 function alerta(extras: object = {}) {
@@ -18,7 +21,7 @@ function alerta(extras: object = {}) {
     tipo: 'credencial',
     falhas: 10,
     janelaMinutos: 5,
-    locutorId: 'loc1',
+    locutorId: LOC1,
     locutorNome: 'Ana',
     credencialAtiva: true,
     ...extras,
@@ -37,11 +40,24 @@ function entrarComo(role: 'Locutor' | 'Admin', id: string) {
   })
 }
 
+interface CredencialDoTeste {
+  usuarioId: string
+  usuarioNome: string
+  identificador: string
+  criadaEmUtc: string
+  ultimoUsoEmUtc: string | null
+}
+
+/** A lista que o servidor falso devolve: o teste a muda entre o aviso e o clique. */
+let ativas: CredencialDoTeste[] = []
+/** Segura a resposta da lista até o teste liberar. */
+const portao: { espera: Promise<void> | null } = { espera: null }
+
 function montarApi(criadaEmUtc = '2026-10-20T10:00:00Z', listaFalha = { falhando: false }) {
   const chamadas: string[] = []
-  const ativas = [
+  ativas = [
     {
-      usuarioId: 'loc1',
+      usuarioId: LOC1,
       usuarioNome: 'Ana',
       identificador: IDENTIFICADOR,
       criadaEmUtc,
@@ -59,11 +75,12 @@ function montarApi(criadaEmUtc = '2026-10-20T10:00:00Z', listaFalha = { falhando
           headers: { 'Content-Type': 'application/json' },
         })
       if (caminho === '/credenciais-transmissao') {
+        if (portao.espera) await portao.espera
         return listaFalha.falhando
           ? json(500, { type: '/erros/inesperado', title: 'x', status: 500 })
           : json(200, ativas)
       }
-      if (caminho === '/usuarios/loc1/credencial-transmissao') return json(204)
+      if (caminho === `/usuarios/${LOC1}/credencial-transmissao`) return json(204)
       return json(500, { type: '/erros/inesperado', title: 'x', status: 500 })
     }),
   )
@@ -77,6 +94,7 @@ function renderar(ui: React.ReactElement) {
 
 beforeEach(() => {
   useAlertasHarbor.getState().limpar()
+  portao.espera = null
 })
 afterEach(() => {
   useAlertasHarbor.getState().limpar()
@@ -132,7 +150,7 @@ describe('AlertasDoHarbor: Admin', () => {
     expect(screen.getAllByRole('alert')).toHaveLength(1)
     expect(screen.getByText(/teve 12 tentativas/)).toBeInTheDocument()
 
-    receber(alerta({ locutorId: 'loc2', locutorNome: 'Bia' }))
+    receber(alerta({ locutorId: LOC2, locutorNome: 'Bia' }))
     receber({ ocorridoEmUtc: OCORRIDO, tipo: 'global', falhas: 50, janelaMinutos: 5 })
     expect(screen.getAllByRole('alert')).toHaveLength(3)
   })
@@ -167,11 +185,13 @@ describe('AlertasDoHarbor: Admin', () => {
     await user.click(await screen.findByRole('button', { name: 'Revogar a credencial de Ana' }))
     const dialogo = screen.getByRole('alertdialog')
     expect(within(dialogo).queryByText(/criada depois deste alerta/)).not.toBeInTheDocument()
-    expect(chamadas).not.toContain('DELETE /usuarios/loc1/credencial-transmissao')
+    expect(chamadas).not.toContain(`DELETE /usuarios/${LOC1}/credencial-transmissao`)
 
     await user.click(within(dialogo).getByRole('button', { name: 'Confirmar revogação' }))
 
-    await waitFor(() => expect(chamadas).toContain('DELETE /usuarios/loc1/credencial-transmissao'))
+    await waitFor(() =>
+      expect(chamadas).toContain(`DELETE /usuarios/${LOC1}/credencial-transmissao`),
+    )
     await waitFor(() => expect(useAlertasHarbor.getState().alertas).toEqual({}))
   })
 
@@ -225,6 +245,74 @@ describe('AlertasDoHarbor: Admin', () => {
     expect(await screen.findByRole('button', { name: 'Revogar a credencial de Ana' })).toBeEnabled()
   })
 
+  it('relê a lista ao clicar: a credencial criada depois do aviso entra na confirmação', async () => {
+    montarApi()
+    const user = userEvent.setup()
+    renderar(<AlertasDoHarbor para="Admin" />)
+    receber(alerta())
+    const revogar = await screen.findByRole('button', { name: 'Revogar a credencial de Ana' })
+    await waitFor(() => expect(revogar).toBeEnabled())
+
+    // Entre o aviso e o clique o locutor gerou outra credencial.
+    ativas[0].criadaEmUtc = '2026-10-22T12:30:00Z'
+    await user.click(revogar)
+
+    expect(await screen.findByRole('alertdialog')).toHaveAccessibleDescription(
+      /criada depois deste alerta/,
+    )
+  })
+
+  it('desabilita o botão enquanto relê e só abre a confirmação com o resultado novo', async () => {
+    montarApi()
+    const user = userEvent.setup()
+    renderar(<AlertasDoHarbor para="Admin" />)
+    receber(alerta())
+    const revogar = await screen.findByRole('button', { name: 'Revogar a credencial de Ana' })
+    await waitFor(() => expect(revogar).toBeEnabled())
+
+    let liberar!: () => void
+    portao.espera = new Promise<void>((r) => (liberar = r))
+    await user.click(revogar)
+
+    expect(screen.getByRole('button', { name: 'Conferindo a credencial…' })).toBeDisabled()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+
+    liberar()
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument()
+  })
+
+  it('se a releitura falha, abre a confirmação avisando que não deu para conferir', async () => {
+    const falha = { falhando: false }
+    montarApi('2026-10-20T10:00:00Z', falha)
+    const user = userEvent.setup()
+    renderar(<AlertasDoHarbor para="Admin" />)
+    receber(alerta())
+    const revogar = await screen.findByRole('button', { name: 'Revogar a credencial de Ana' })
+    await waitFor(() => expect(revogar).toBeEnabled())
+
+    falha.falhando = true
+    await user.click(revogar)
+
+    const dialogo = await screen.findByRole('alertdialog')
+    expect(dialogo).toHaveTextContent('Não foi possível conferir a credencial ativa agora')
+    expect(within(dialogo).getByRole('button', { name: 'Confirmar revogação' })).toBeEnabled()
+  })
+
+  it('se a credencial foi revogada entre o aviso e o clique, não abre a confirmação', async () => {
+    montarApi()
+    const user = userEvent.setup()
+    renderar(<AlertasDoHarbor para="Admin" />)
+    receber(alerta())
+    const revogar = await screen.findByRole('button', { name: 'Revogar a credencial de Ana' })
+    await waitFor(() => expect(revogar).toBeEnabled())
+
+    ativas = []
+    await user.click(revogar)
+
+    expect(await screen.findByText('Essa credencial já não está ativa.')).toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
   it('destaca o locutor na lista de credenciais ativas', async () => {
     montarApi()
     renderar(<CredenciaisAtivasAdmin />)
@@ -246,7 +334,7 @@ describe('AlertasDoHarbor: Admin', () => {
 })
 
 describe('AlertasDoHarbor: Locutor', () => {
-  beforeEach(() => entrarComo('Locutor', 'loc1'))
+  beforeEach(() => entrarComo('Locutor', LOC1))
 
   it('credencial ativa e credencial antiga', () => {
     montarApi()
@@ -271,7 +359,7 @@ describe('AlertasDoHarbor: Locutor', () => {
   it('não mostra alerta de outro locutor nem o global', () => {
     montarApi()
     renderar(<AlertasDoHarbor para="Locutor" />)
-    receber(alerta({ locutorId: 'outro' }))
+    receber(alerta({ locutorId: OUTRO }))
     receber({ ocorridoEmUtc: OCORRIDO, tipo: 'global', falhas: 50, janelaMinutos: 5 })
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
@@ -301,6 +389,19 @@ describe('AlertaHarborFalhas no hub e na store', () => {
     expect(window.localStorage.length).toBe(0)
     expect(window.sessionStorage.length).toBe(0)
     local.mockRestore()
+  })
+
+  it.each(['..', '../x', 'a/b', 'loc1', `${LOC1}/x`, ' '])(
+    'locutorId %j que não é GUID: o alerta é ignorado',
+    (locutorId) => {
+      montarHub()(alerta({ locutorId }))
+      expect(useAlertasHarbor.getState().alertas).toEqual({})
+    },
+  )
+
+  it('GUID em maiúsculas vale', () => {
+    montarHub()(alerta({ locutorId: LOC1.toUpperCase() }))
+    expect(Object.keys(useAlertasHarbor.getState().alertas)).toHaveLength(1)
   })
 
   it('payload inválido é ignorado', () => {

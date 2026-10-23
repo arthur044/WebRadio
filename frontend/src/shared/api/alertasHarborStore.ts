@@ -28,6 +28,8 @@ export function chaveDoAlerta(alerta: Pick<AlertaHarbor, 'tipo' | 'locutorId'>):
   return `${alerta.tipo}:${alerta.locutorId ?? ''}`
 }
 
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function lerNumero(valor: unknown): number | null {
   return typeof valor === 'number' && Number.isFinite(valor) ? valor : null
 }
@@ -48,8 +50,9 @@ export function lerAlerta(dados: unknown): AlertaHarbor | null {
   if (d.tipo === 'global') return { tipo: 'global', falhas, janelaMinutos, ocorridoEmUtc }
   if (d.tipo !== 'credencial') return null
 
+  // O id vira segmento de URL do DELETE: só GUID passa (um `..` ou `/` mudaria a rota da revogação).
   const locutorId = lerTexto(d.locutorId)
-  if (!locutorId) return null
+  if (!locutorId || !GUID.test(locutorId)) return null
   return {
     tipo: 'credencial',
     falhas,
