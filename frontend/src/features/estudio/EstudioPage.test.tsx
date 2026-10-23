@@ -380,6 +380,28 @@ describe('Credencial de transmissão: o segredo', () => {
     ).toHaveLength(1)
   })
 
+  it('400 de validação mostra o motivo do servidor junto do campo, não só o texto genérico', async () => {
+    entrarComo('Locutor')
+    montarApi({
+      gerar: () =>
+        problema(400, '/erros/validacao', {
+          detail: 'Um ou mais campos são inválidos.',
+          errors: { SenhaAtual: ['Informe a senha atual.'] },
+        }),
+    })
+    const user = userEvent.setup()
+    renderEstudio()
+
+    const dialogo = await gerarCredencial(user, 'x')
+
+    const alerta = await within(dialogo).findByRole('alert')
+    expect(alerta).toHaveTextContent('Informe a senha atual.')
+    expect(alerta).not.toHaveTextContent('Corrija os campos')
+    expect(within(dialogo).getByLabelText('Senha da conta')).toHaveAccessibleDescription(
+      'Informe a senha atual.',
+    )
+  })
+
   it('senha errada mostra o erro, limpa o campo e faz uma única chamada (sem repetir após refresh)', async () => {
     entrarComo('Locutor')
     const { chamadas } = montarApi({ gerar: () => problema(401, '/erros/credenciais') })

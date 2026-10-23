@@ -133,12 +133,15 @@ export function GerarCredencialDialog({ onFechar }: Props) {
                 value={senhaAtual}
                 onChange={(e) => setSenhaAtual(e.target.value)}
                 aria-invalid={erro?.campos.senhaAtual ? true : undefined}
+                aria-describedby={erro?.campos.senhaAtual ? 'erro-senha-conta' : undefined}
                 className="border-border bg-surface rounded-md border px-3 py-2"
               />
             </label>
+            {/* O motivo do 400 (`/erros/validacao`) e o "Senha incorreta." do 401 vêm por campo; o texto genérico fica
+                para o erro sem campo (429, rede, 5xx). */}
             {erro && (
-              <p role="alert" className="text-on-air text-sm">
-                {erro.mensagem}
+              <p id="erro-senha-conta" role="alert" className="text-on-air text-sm">
+                {erro.campos.senhaAtual ?? erro.mensagem}
               </p>
             )}
             <div className="flex justify-end gap-2">
