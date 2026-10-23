@@ -37,7 +37,7 @@ function entrarComo(role: 'Locutor' | 'Admin', id: string) {
   })
 }
 
-function montarApi(criadaEmUtc = '2026-10-20T10:00:00Z') {
+function montarApi(criadaEmUtc = '2026-10-20T10:00:00Z', listaFalha = { falhando: false }) {
   const chamadas: string[] = []
   const ativas = [
     {
@@ -58,7 +58,11 @@ function montarApi(criadaEmUtc = '2026-10-20T10:00:00Z') {
           status: s,
           headers: { 'Content-Type': 'application/json' },
         })
-      if (caminho === '/credenciais-transmissao') return json(200, ativas)
+      if (caminho === '/credenciais-transmissao') {
+        return listaFalha.falhando
+          ? json(500, { type: '/erros/inesperado', title: 'x', status: 500 })
+          : json(200, ativas)
+      }
       if (caminho === '/usuarios/loc1/credencial-transmissao') return json(204)
       return json(500, { type: '/erros/inesperado', title: 'x', status: 500 })
     }),
@@ -182,6 +186,43 @@ describe('AlertasDoHarbor: Admin', () => {
     expect(screen.getByRole('alertdialog')).toHaveTextContent(
       /a credencial ativa foi criada depois deste alerta.*derruba a credencial nova/,
     )
+  })
+
+  it('a confirmação leva o foco ao Manter, liga as descrições e devolve o foco ao Revogar', async () => {
+    montarApi('2026-10-22T12:30:00Z')
+    const user = userEvent.setup()
+    renderar(<AlertasDoHarbor para="Admin" />)
+    receber(alerta())
+
+    await user.click(await screen.findByRole('button', { name: 'Revogar a credencial de Ana' }))
+
+    const dialogo = screen.getByRole('alertdialog')
+    expect(within(dialogo).getByRole('button', { name: 'Manter' })).toHaveFocus()
+    expect(dialogo).toHaveAccessibleDescription(
+      /Revogar a credencial de Ana\?.*criada depois deste alerta/,
+    )
+
+    await user.click(within(dialogo).getByRole('button', { name: 'Manter' }))
+
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Revogar a credencial de Ana' })).toHaveFocus()
+  })
+
+  it('se a lista de credenciais falha, mostra o erro e deixa tentar de novo', async () => {
+    const falha = { falhando: true }
+    montarApi('2026-10-20T10:00:00Z', falha)
+    const user = userEvent.setup()
+    renderar(<AlertasDoHarbor para="Admin" />)
+    receber(alerta())
+
+    const tentar = await screen.findByRole('button', { name: 'Tentar de novo' })
+    expect(screen.getAllByRole('alert')).toHaveLength(2) // o aviso e o erro da lista
+    expect(screen.queryByRole('button', { name: /Revogar a credencial/ })).not.toBeInTheDocument()
+
+    falha.falhando = false
+    await user.click(tentar)
+
+    expect(await screen.findByRole('button', { name: 'Revogar a credencial de Ana' })).toBeEnabled()
   })
 
   it('destaca o locutor na lista de credenciais ativas', async () => {

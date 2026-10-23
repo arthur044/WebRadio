@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { descreverErro, type ErroDescrito } from '../../shared/api/descreverErro'
 import {
@@ -38,6 +38,26 @@ function RevogarDoAlerta({ alerta, chave }: { alerta: AlertaHarbor; chave: strin
   const [confirmando, setConfirmando] = useState(false)
   const [revogando, setRevogando] = useState(false)
   const [erro, setErro] = useState<ErroDescrito | null>(null)
+  const idPergunta = useId()
+  const idAviso = useId()
+  const revogarRef = useRef<HTMLButtonElement>(null)
+  const manterRef = useRef<HTMLButtonElement>(null)
+  const devolverFoco = useRef(false)
+
+  // O botão "Revogar" sai do DOM ao abrir a confirmação: o foco vai para "Manter" (o lado seguro) e, ao fechar sem
+  // revogar, volta para "Revogar" em vez de cair no <body>.
+  useEffect(() => {
+    if (confirmando) manterRef.current?.focus()
+    else if (devolverFoco.current) {
+      devolverFoco.current = false
+      revogarRef.current?.focus()
+    }
+  }, [confirmando])
+
+  function fecharConfirmacao() {
+    devolverFoco.current = true
+    setConfirmando(false)
+  }
 
   const locutorId = alerta.locutorId ?? ''
   const nome = alerta.locutorNome ?? 'o locutor'
@@ -55,12 +75,25 @@ function RevogarDoAlerta({ alerta, chave }: { alerta: AlertaHarbor; chave: strin
       useAlertasHarbor.getState().dispensar(chave)
     } catch (err) {
       setErro(descreverErro(err))
-      setConfirmando(false)
+      fecharConfirmacao()
     } finally {
       setRevogando(false)
       void queryClient.invalidateQueries({ queryKey: ['credenciais-transmissao'] })
       void queryClient.invalidateQueries({ queryKey: ['credencial-transmissao'] })
     }
+  }
+
+  if (lista.isError) {
+    return (
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <p role="alert" className="text-on-air text-sm">
+          {descreverErro(lista.error).mensagem}
+        </p>
+        <button type="button" className={botao} onClick={() => void lista.refetch()}>
+          Tentar de novo
+        </button>
+      </div>
+    )
   }
 
   if (lista.isSuccess && !credencial) {
@@ -76,6 +109,7 @@ function RevogarDoAlerta({ alerta, chave }: { alerta: AlertaHarbor; chave: strin
       )}
       {!confirmando ? (
         <button
+          ref={revogarRef}
           type="button"
           className={botao}
           disabled={!credencial || revogando}
@@ -84,10 +118,17 @@ function RevogarDoAlerta({ alerta, chave }: { alerta: AlertaHarbor; chave: strin
           Revogar a credencial de {nome}
         </button>
       ) : (
-        <div role="alertdialog" aria-label={`Revogar a credencial de ${nome}`} className="text-sm">
-          <p>Revogar a credencial de {nome}? Quem estiver no ar cai em até 15 segundos.</p>
+        <div
+          role="alertdialog"
+          aria-label={`Revogar a credencial de ${nome}`}
+          aria-describedby={criadaDepois ? `${idPergunta} ${idAviso}` : idPergunta}
+          className="text-sm"
+        >
+          <p id={idPergunta}>
+            Revogar a credencial de {nome}? Quem estiver no ar cai em até 15 segundos.
+          </p>
           {criadaDepois && credencial && (
-            <p className="text-on-air mt-1 font-medium">
+            <p id={idAviso} className="text-on-air mt-1 font-medium">
               Atenção: a credencial ativa foi criada depois deste alerta (
               {formatarDataHoraBrasilia(credencial.criadaEmUtc)}). Revogar agora derruba a
               credencial nova, não a que gerou as falhas.
@@ -102,7 +143,7 @@ function RevogarDoAlerta({ alerta, chave }: { alerta: AlertaHarbor; chave: strin
             >
               Confirmar revogação
             </button>
-            <button type="button" className={botao} onClick={() => setConfirmando(false)}>
+            <button ref={manterRef} type="button" className={botao} onClick={fecharConfirmacao}>
               Manter
             </button>
           </span>
