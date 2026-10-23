@@ -29,6 +29,9 @@ public sealed class RedisLoginThrottle(IConnectionMultiplexer redis, IIpHasher p
 
     public async Task<AvaliacaoDeLogin> AvaliarAsync(string emailNormalizado, byte[] ipHash, CancellationToken ct)
     {
+        // Task.WaitAsync devolve a própria task, sem olhar o token, quando ela já terminou: com o Redis rápido as três leituras podem
+        // terminar antes do WaitAsync e um token já cancelado passaria sem lançar (o teste de cancelamento ficava instável).
+        ct.ThrowIfCancellationRequested();
         var db = redis.GetDatabase();
         var bloqueioTask = db.KeyExistsAsync(ChaveBloqueio(emailNormalizado, ipHash));
         var contaTask = db.StringGetAsync(ChaveConta(emailNormalizado));
