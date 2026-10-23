@@ -1,4 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
+import { useAlertasHarbor } from './alertasHarborStore'
 import { useAuthStore } from './authStore'
 
 /** Chaves cujo conteúdo é público (mesma resposta para anônimo e logado): sobrevivem à troca de sessão. */
@@ -29,6 +30,8 @@ export function ligarLimpezaDeCache(queryClient: QueryClient): () => void {
     if (antes && (antes.id !== estado.usuario?.id || antes.role !== estado.usuario?.role)) {
       limparCachePrivado(queryClient)
       queryClient.getMutationCache().clear()
+      // Os avisos do harbor são do papel e do usuário anteriores (nome do locutor, credencial dele).
+      useAlertasHarbor.getState().limpar()
     }
   })
 }

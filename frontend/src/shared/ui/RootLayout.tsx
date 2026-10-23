@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { AlertasDoHarbor } from '../../features/estudio/AlertasDoHarbor'
 import { PlayerBar } from '../../features/player/PlayerBar'
 import { RequireSenhaAtualizada } from '../../features/auth/RequireSenhaAtualizada'
 import { useSessionRestore } from '../../features/auth/useSessionRestore'
@@ -78,6 +79,7 @@ export function RootLayout() {
       </header>
 
       <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-6">
+        <AlertasDoHarbor para="Admin" />
         <RequireSenhaAtualizada>
           <Outlet />
         </RequireSenhaAtualizada>

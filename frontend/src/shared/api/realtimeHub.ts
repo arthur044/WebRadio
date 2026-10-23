@@ -1,6 +1,7 @@
 import { HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr'
 import { useEffect } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useAlertasHarbor } from './alertasHarborStore'
 import { useAuthStore } from './authStore'
 import { getListenerId } from './listenerId'
 
@@ -101,6 +102,11 @@ export function registrarEventos(
   })
   on('MidiaSanitizada', () => {
     queryClient.invalidateQueries({ queryKey: ['midias'] })
+  })
+  // Não é evento de estado (06 §SignalR): o aviso vive só na memória da sessão e o `eventoId` repetido já foi
+  // descartado acima.
+  on('AlertaHarborFalhas', (dados) => {
+    useAlertasHarbor.getState().registrar(dados)
   })
 }
 

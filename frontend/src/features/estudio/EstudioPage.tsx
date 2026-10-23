@@ -1,4 +1,5 @@
 import { useAuthStore } from '../../shared/api/authStore'
+import { AlertasDoHarbor } from './AlertasDoHarbor'
 import { CredenciaisAtivasAdmin } from './CredenciaisAtivasAdmin'
 import { EstadoNoArPainel } from './EstadoNoArPainel'
 import { PainelDeTransmissao } from './PainelDeTransmissao'
@@ -9,6 +10,7 @@ export function EstudioPage() {
   return (
     <section className="flex flex-col gap-4">
       <h1 className="font-display text-2xl font-bold">Estúdio</h1>
+      <AlertasDoHarbor para="Locutor" />
       <EstadoNoArPainel />
       <PainelDeTransmissao />
       {role === 'Admin' && <CredenciaisAtivasAdmin />}

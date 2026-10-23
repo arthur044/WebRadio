@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { useAlertasHarbor } from './alertasHarborStore'
 import { useAuthStore } from './authStore'
 import { ligarLimpezaDeCache, limparCachePrivado } from './limparCacheAoSair'
 import type { UsuarioDto } from './types'
@@ -87,6 +88,26 @@ describe('limparCacheAoSair', () => {
     useAuthStore.getState().setSession('t2', admin)
 
     expect(client.getQueryData(['locutores'])).toBeDefined()
+    parar()
+  })
+})
+
+describe('avisos do harbor na troca de sessão', () => {
+  afterEach(() => useAuthStore.setState({ accessToken: null, usuario: null }))
+
+  it('saem da memória quando o usuário sai', () => {
+    const parar = ligarLimpezaDeCache(new QueryClient())
+    useAuthStore.setState({ accessToken: 't', usuario: admin })
+    useAlertasHarbor.getState().registrar({
+      tipo: 'global',
+      falhas: 50,
+      janelaMinutos: 5,
+      ocorridoEmUtc: '2026-10-22T12:00:00Z',
+    })
+
+    useAuthStore.getState().clearSession()
+
+    expect(useAlertasHarbor.getState().alertas).toEqual({})
     parar()
   })
 })
