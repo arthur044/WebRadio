@@ -196,7 +196,8 @@ confere "o stream segue tocando durante o ao vivo" toca
 echo "== DoD 4: com o Worker PARADO, encerrar o programa derruba o ao vivo em até 30 s e o stream volta para a rotação"
 # O Worker só muda o status por horário (Agendado -> AoVivo -> Finalizado). Parado, quem derruba é a API (o encerrar e a autorização
 # pela janela, em SQL) com o Liquidsoap reconferindo a cada 10 s: o ouvinte contínuo, que já está conectado, não pode notar.
-"${COMPOSE[@]}" stop worker >/dev/null 2>&1 && WORKER_PARADO=1
+WORKER_PARADO=1 # antes do stop: se ele morrer no meio, o trap religa o Worker
+"${COMPOSE[@]}" stop worker >/dev/null 2>&1 || falha "docker compose stop worker"
 confere "o Worker está parado" test -z "$("${COMPOSE[@]}" ps -q --status running worker)"
 DESC0="$(conta_liq 'Source client desconectado')"
 T0=$SECONDS
