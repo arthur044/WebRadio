@@ -50,6 +50,7 @@ public sealed class RedisLoginThrottle(IConnectionMultiplexer redis, IIpHasher p
 
     public async Task RegistrarFalhaAsync(string emailNormalizado, byte[] ipHash, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested(); // o WaitAsync não impede o envio: com o token já cancelado a escrita não pode sair
         var resultado = await ScriptFalha.EvaluateAsync(redis.GetDatabase(), new
         {
             par = (RedisKey)ChavePar(emailNormalizado, ipHash),
@@ -68,9 +69,12 @@ public sealed class RedisLoginThrottle(IConnectionMultiplexer redis, IIpHasher p
         }
     }
 
-    public async Task LimparAsync(string emailNormalizado, byte[] ipHash, CancellationToken ct) =>
+    public async Task LimparAsync(string emailNormalizado, byte[] ipHash, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
         // Só zera o par: o contador por conta continua, para um atacante não zerá-lo logando na própria conta.
         await redis.GetDatabase().KeyDeleteAsync([ChavePar(emailNormalizado, ipHash), ChaveBloqueio(emailNormalizado, ipHash)]).WaitAsync(ct);
+    }
 
     /// <summary>
     /// Os pares são por IP, que o Admin não conhece: acha as chaves da conta com SCAN (nunca KEYS) em cada primário.
@@ -78,6 +82,7 @@ public sealed class RedisLoginThrottle(IConnectionMultiplexer redis, IIpHasher p
     /// </summary>
     public async Task DesbloquearContaAsync(string emailNormalizado, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         var conta = pseudonimizador.ChaveOpaca(emailNormalizado);
         var db = redis.GetDatabase();
         var chaves = new List<RedisKey> { ChaveConta(emailNormalizado) };

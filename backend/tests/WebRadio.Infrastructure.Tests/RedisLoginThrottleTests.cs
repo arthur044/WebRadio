@@ -95,6 +95,21 @@ public class RedisLoginThrottleTests
     }
 
     [RedisFact]
+    public async Task Token_ja_cancelado_nao_chega_a_enviar_a_escrita_ao_Redis()
+    {
+        var t = Novo();
+        var email = Email();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        // Se a escrita saísse (o WaitAsync só deixa de esperar, não desfaz o envio), estas falhas bloqueariam o par.
+        for (var i = 0; i < MemoryLoginThrottle.FalhasParaBloquear; i++)
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => t.RegistrarFalhaAsync(email, Ip1, cts.Token));
+
+        Assert.False((await t.AvaliarAsync(email, Ip1, default)).Bloqueado);
+    }
+
+    [RedisFact]
     public async Task O_script_e_atomico_sob_concorrencia_o_contador_da_conta_nao_perde_incrementos()
     {
         var t = Novo();
