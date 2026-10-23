@@ -57,7 +57,8 @@ export function lerAlerta(dados: unknown): AlertaHarbor | null {
     tipo: 'credencial',
     falhas,
     janelaMinutos,
-    locutorId,
+    // Minúsculas, como o resto da API: a chave, o destaque na lista, o painel do Locutor e o dispensar comparam ids.
+    locutorId: locutorId.toLowerCase(),
     locutorNome: lerTexto(d.locutorNome),
     credencialAtiva: d.credencialAtiva === true,
     ocorridoEmUtc,

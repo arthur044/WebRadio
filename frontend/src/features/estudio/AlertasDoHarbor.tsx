@@ -41,7 +41,8 @@ function RevogarDoAlerta({ alerta, chave }: { alerta: AlertaHarbor; chave: strin
   const [naoConferiu, setNaoConferiu] = useState(false)
   const [erro, setErro] = useState<ErroDescrito | null>(null)
   const idPergunta = useId()
-  const idAviso = useId()
+  const idCredencialNova = useId()
+  const idNaoConferiu = useId()
   const revogarRef = useRef<HTMLButtonElement>(null)
   const manterRef = useRef<HTMLButtonElement>(null)
   const devolverFoco = useRef(false)
@@ -136,21 +137,27 @@ function RevogarDoAlerta({ alerta, chave }: { alerta: AlertaHarbor; chave: strin
         <div
           role="alertdialog"
           aria-label={`Revogar a credencial de ${nome}`}
-          aria-describedby={criadaDepois || naoConferiu ? `${idPergunta} ${idAviso}` : idPergunta}
+          aria-describedby={[
+            idPergunta,
+            criadaDepois && idCredencialNova,
+            naoConferiu && idNaoConferiu,
+          ]
+            .filter(Boolean)
+            .join(' ')}
           className="text-sm"
         >
           <p id={idPergunta}>
             Revogar a credencial de {nome}? Quem estiver no ar cai em até 15 segundos.
           </p>
           {criadaDepois && credencial && (
-            <p id={idAviso} className="text-on-air mt-1 font-medium">
+            <p id={idCredencialNova} className="text-on-air mt-1 font-medium">
               Atenção: a credencial ativa foi criada depois deste alerta (
               {formatarDataHoraBrasilia(credencial.criadaEmUtc)}). Revogar agora derruba a
               credencial nova, não a que gerou as falhas.
             </p>
           )}
           {naoConferiu && (
-            <p id={idAviso} className="text-on-air mt-1 font-medium">
+            <p id={idNaoConferiu} className="text-on-air mt-1 font-medium">
               Não foi possível conferir a credencial ativa agora. Se ela foi criada depois deste
               alerta, revogar derruba a credencial nova, não a que gerou as falhas.
             </p>

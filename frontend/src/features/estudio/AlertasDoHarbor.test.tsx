@@ -298,6 +298,25 @@ describe('AlertasDoHarbor: Admin', () => {
     expect(within(dialogo).getByRole('button', { name: 'Confirmar revogação' })).toBeEnabled()
   })
 
+  it('credencial nova e releitura falha juntas: ids da descrição distintos', async () => {
+    const falha = { falhando: false }
+    montarApi('2026-10-22T12:30:00Z', falha)
+    const user = userEvent.setup()
+    renderar(<AlertasDoHarbor para="Admin" />)
+    receber(alerta())
+    const revogar = await screen.findByRole('button', { name: 'Revogar a credencial de Ana' })
+    await waitFor(() => expect(revogar).toBeEnabled())
+
+    falha.falhando = true
+    await user.click(revogar)
+
+    const dialogo = await screen.findByRole('alertdialog')
+    const ids = dialogo.getAttribute('aria-describedby')!.split(' ')
+    expect(ids).toHaveLength(3)
+    expect(new Set(ids).size).toBe(3)
+    expect(dialogo).toHaveAccessibleDescription(/criada depois.*Não foi possível conferir/)
+  })
+
   it('se a credencial foi revogada entre o aviso e o clique, não abre a confirmação', async () => {
     montarApi()
     const user = userEvent.setup()
@@ -399,9 +418,13 @@ describe('AlertaHarborFalhas no hub e na store', () => {
     },
   )
 
-  it('GUID em maiúsculas vale', () => {
-    montarHub()(alerta({ locutorId: LOC1.toUpperCase() }))
-    expect(Object.keys(useAlertasHarbor.getState().alertas)).toHaveLength(1)
+  it('GUID em maiúsculas vale e é guardado em minúsculas (mesma chave do alerta em minúsculas)', () => {
+    const aoReceber = montarHub()
+    aoReceber(alerta({ locutorId: LOC1.toUpperCase() }))
+    aoReceber(alerta({ locutorId: LOC1 }))
+    const alertas = useAlertasHarbor.getState().alertas
+    expect(Object.keys(alertas)).toEqual([`credencial:${LOC1}`])
+    expect(alertas[`credencial:${LOC1}`].locutorId).toBe(LOC1)
   })
 
   it('payload inválido é ignorado', () => {
