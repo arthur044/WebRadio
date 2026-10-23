@@ -20,3 +20,10 @@ export function useCredenciaisAtivas(habilitado: boolean) {
     enabled: habilitado,
   })
 }
+
+/** Admin: revoga a credencial ativa de um locutor (`DELETE /usuarios/{id}/credencial-transmissao`). */
+export async function revogarCredencialDe(usuarioId: string): Promise<void> {
+  await apiFetch<void>(`/usuarios/${encodeURIComponent(usuarioId)}/credencial-transmissao`, {
+    method: 'DELETE',
+  })
+}

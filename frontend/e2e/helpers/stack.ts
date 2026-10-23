@@ -57,6 +57,35 @@ export async function criarProgramaAgora(
   minutos = 10,
 ): Promise<string> {
   const inicio = new Date(Math.floor(Date.now() / 1000) * 1000)
+  return criarProgramaEm(request, titulo, inicio, minutos)
+}
+
+/**
+ * Cria um programa `Agendado` que só começa daqui a `minutosAteInicio` (o Worker não o toca antes disso), para os
+ * specs que cancelam. Mesma regra de conflito do `criarProgramaAgora`. Devolve também o início, para o spec abrir a
+ * semana certa da grade.
+ */
+export async function criarProgramaAgendado(
+  request: APIRequestContext,
+  titulo: string,
+  minutosAteInicio = 120,
+  minutos = 10,
+): Promise<{ id: string; inicio: Date }> {
+  const inicio = new Date(Math.floor(Date.now() / 1000) * 1000 + minutosAteInicio * 60_000)
+  return { id: await criarProgramaEm(request, titulo, inicio, minutos), inicio }
+}
+
+/** Cancela um programa `Agendado` (Admin). Não falha o teste se já não for cancelável. */
+export async function cancelarPrograma(request: APIRequestContext, id: string): Promise<void> {
+  await request.post(`/api/v1/programas/${id}/cancelar`, { headers: autorizacao() })
+}
+
+async function criarProgramaEm(
+  request: APIRequestContext,
+  titulo: string,
+  inicio: Date,
+  minutos: number,
+): Promise<string> {
   const fim = new Date(inicio.getTime() + minutos * 60_000)
   const iso = (d: Date) => d.toISOString().replace('.000Z', 'Z')
 
