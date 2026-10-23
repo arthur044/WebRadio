@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../shared/api/authStore'
-import { apiFetch, ApiError, refreshSession } from '../../shared/api/httpClient'
+import { descreverErro, type ErroDescrito } from '../../shared/api/descreverErro'
+import { apiFetch, refreshSession } from '../../shared/api/httpClient'
 
 /**
  * Tela obrigatória quando deveTrocarSenha=true (Admin semeado, S-B07). É a única
@@ -13,8 +14,20 @@ export function TrocarSenhaPage() {
   const usuario = useAuthStore((s) => s.usuario)
   const [senhaAtual, setSenhaAtual] = useState('')
   const [novaSenha, setNovaSenha] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
+  const [erro, setErro] = useState<ErroDescrito | null>(null)
   const [enviando, setEnviando] = useState(false)
+
+  // Com o motivo ao lado do campo, o texto genérico do 400 só repetiria o aviso. Mensagem de um campo que a tela não
+  // tem (ou erro sem campo, como 429 e rede) ainda precisa aparecer em algum lugar.
+  const soltas = Object.entries(erro?.campos ?? {})
+    .filter(([campo]) => campo !== 'senhaAtual' && campo !== 'novaSenha')
+    .map(([, mensagem]) => mensagem)
+  const avisoGeral =
+    soltas.length > 0
+      ? soltas.join(' ')
+      : erro && Object.keys(erro.campos).length === 0
+        ? erro.mensagem
+        : null
 
   // Anônimo não tem o que trocar (Guardian L5) — a página exige Bearer no POST.
   if (!usuario) {
@@ -49,11 +62,9 @@ export function TrocarSenhaPage() {
       }
       navigate('/', { replace: true })
     } catch (err) {
-      setErro(
-        err instanceof ApiError
-          ? err.problem.detail || err.message
-          : 'Não foi possível trocar a senha',
-      )
+      // O motivo do 400 (`/erros/validacao`) vem em `problem.errors`, não no `detail` genérico: o descreverErro o
+      // entrega por campo (`campos.novaSenha`, ...).
+      setErro(descreverErro(err))
     } finally {
       setEnviando(false)
     }
@@ -66,33 +77,55 @@ export function TrocarSenhaPage() {
         Por segurança, você precisa definir uma nova senha antes de continuar.
       </p>
       <form onSubmit={onSubmit} className="mt-4 flex flex-col gap-3">
-        <label className="flex flex-col gap-1 text-sm">
-          Senha atual
+        {/* Regra e erro ficam fora do <label>: dentro dele entrariam no nome acessível do campo. */}
+        <div className="flex flex-col gap-1 text-sm">
+          <label htmlFor="senha-atual">Senha atual</label>
           <input
+            id="senha-atual"
             type="password"
             required
             value={senhaAtual}
             onChange={(e) => setSenhaAtual(e.target.value)}
+            aria-invalid={erro?.campos.senhaAtual ? true : undefined}
+            aria-describedby={erro?.campos.senhaAtual ? 'erro-senha-atual' : undefined}
             className="border-border rounded-md border px-3 py-2"
             autoComplete="current-password"
           />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Nova senha (12 a 128 caracteres)
+          {erro?.campos.senhaAtual && (
+            <span id="erro-senha-atual" role="alert" className="text-on-air text-xs">
+              {erro.campos.senhaAtual}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-col gap-1 text-sm">
+          <label htmlFor="nova-senha">Nova senha</label>
           <input
+            id="nova-senha"
             type="password"
             required
             minLength={12}
             maxLength={128}
             value={novaSenha}
             onChange={(e) => setNovaSenha(e.target.value)}
+            aria-invalid={erro?.campos.novaSenha ? true : undefined}
+            aria-describedby={
+              erro?.campos.novaSenha ? 'regra-nova-senha erro-nova-senha' : 'regra-nova-senha'
+            }
             className="border-border rounded-md border px-3 py-2"
             autoComplete="new-password"
           />
-        </label>
-        {erro && (
+          <span id="regra-nova-senha" className="text-text-muted text-xs">
+            A senha precisa ter de 12 a 128 caracteres.
+          </span>
+          {erro?.campos.novaSenha && (
+            <span id="erro-nova-senha" role="alert" className="text-on-air text-xs">
+              {erro.campos.novaSenha}
+            </span>
+          )}
+        </div>
+        {avisoGeral && (
           <p role="alert" className="text-on-air text-sm">
-            {erro}
+            {avisoGeral}
           </p>
         )}
         <button
