@@ -10,7 +10,8 @@
 #   1. um programa criado pela API para "agora" vira AoVivo em até 20 s (o Worker de verdade);
 #   3. com a credencial do locutor dono do programa da janela, um source client de teste conecta pelo harbor-borda e o ao vivo
 #      entra no ar; credencial errada, de outro locutor, revogada ou fora da janela é recusada;
-#   4. ao encerrar o programa o ao vivo cai em até 30 s e o stream volta para a rotação SEM derrubar o ouvinte;
+#   4. ao encerrar o programa o ao vivo cai em até 30 s e o stream volta para a rotação SEM derrubar o ouvinte, com o Worker PARADO
+#      (`docker compose stop worker` antes do encerrar, `start` depois): a derrubada depende só da API e do Liquidsoap;
 #   7. o harbor-borda recusa um IP fora da lista antes de o Liquidsoap ver a conexão. (A base de produção publicar só a 8080 é
 #      conferido pelo smoke-compose.sh, "base de PRODUÇÃO".)
 #
@@ -29,6 +30,7 @@ HARBOR="${SMOKE_HARBOR:-127.0.0.1:8005}"
 TMP="$(mktemp -d)"
 FONTES=()
 CONTINUO=""
+WORKER_PARADO=0
 
 : "${E2E_ADMIN_SENHA_NOVA:?Defina E2E_ADMIN_SENHA_NOVA (a senha que o Admin terá depois deste script; o E2E usa a mesma)}"
 [[ "${GITHUB_ACTIONS:-}" == "true" ]] && echo "::add-mask::$E2E_ADMIN_SENHA_NOVA"
@@ -37,6 +39,8 @@ limpar() {
   [[ -n "$CONTINUO" ]] && kill "$CONTINUO" 2>/dev/null || true
   if ((${#FONTES[@]})); then docker rm -f "${FONTES[@]}" >/dev/null 2>&1 || true; fi
   docker rm -f smoke-borda-restrita >/dev/null 2>&1 || true
+  # O DoD 4 para o Worker: se o script morrer no meio, o stack não pode ficar sem ele para quem vem depois (o E2E do CI).
+  if [[ "$WORKER_PARADO" == 1 ]]; then "${COMPOSE[@]}" start worker >/dev/null 2>&1 || true; fi
   rm -rf "$TMP"
 }
 trap limpar EXIT
@@ -72,6 +76,7 @@ espera_ate() { # $1 segundos, resto = comando
 }
 programa_ao_vivo_e() { [[ "$(curl -s --max-time 10 "$BASE/api/v1/programas/ao-vivo" | json 'd.get("id","") if isinstance(d, dict) else ""' 2>/dev/null || true)" == "$1" ]]; }
 no_ar() { [[ "$(curl -s --max-time 10 "$BASE/api/v1/stream/info" | json 'str(d["aoVivo"]["noAr"]).lower()' 2>/dev/null || true)" == "$1" ]]; }
+worker_saudavel() { [[ "$(docker inspect -f '{{.State.Health.Status}}' "$("${COMPOSE[@]}" ps -q worker)" 2>/dev/null || true)" == healthy ]]; }
 toca() {
   rm -f "$TMP/amostra.mp3" "$TMP/cab"
   curl -s -m 4 -D "$TMP/cab" -o "$TMP/amostra.mp3" "$BASE/stream/radio.mp3" || true
@@ -188,7 +193,12 @@ confere "o source client conecta pelo harbor-borda" espera_mais 'Source client c
 confere "aoVivo.noAr passa a true em /stream/info" espera_ate 30 no_ar true
 confere "o stream segue tocando durante o ao vivo" toca
 
-echo "== DoD 4: encerrar o programa derruba o ao vivo em até 30 s e o stream volta para a rotação"
+echo "== DoD 4: com o Worker PARADO, encerrar o programa derruba o ao vivo em até 30 s e o stream volta para a rotação"
+# O Worker só muda o status por horário (Agendado -> AoVivo -> Finalizado). Parado, quem derruba é a API (o encerrar e a autorização
+# pela janela, em SQL) com o Liquidsoap reconferindo a cada 10 s: o ouvinte contínuo, que já está conectado, não pode notar.
+WORKER_PARADO=1 # antes do stop: se ele morrer no meio, o trap religa o Worker
+"${COMPOSE[@]}" stop worker >/dev/null 2>&1 || falha "docker compose stop worker"
+confere "o Worker está parado" test -z "$("${COMPOSE[@]}" ps -q --status running worker)"
 DESC0="$(conta_liq 'Source client desconectado')"
 T0=$SECONDS
 r="$(api POST "/api/v1/programas/$PROG1/encerrar" "$LOC1")"
@@ -198,6 +208,8 @@ confere "caiu em $((SECONDS - T0)) s (limite de 30 s)" test $((SECONDS - T0)) -l
 confere "aoVivo.noAr volta a false" espera_ate 20 no_ar false
 confere "o stream volta para a rotação" toca
 sem_fonte smoke-fonte
+"${COMPOSE[@]}" start worker >/dev/null 2>&1 && WORKER_PARADO=0
+confere "o Worker volta a ficar healthy" espera_ate 90 worker_saudavel
 
 echo "== DoD 3: fora da janela e credencial revogada"
 CON0="$(conta_liq 'Source client conectado')"
