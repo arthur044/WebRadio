@@ -17,14 +17,14 @@ function descrito(mensagem: string, extras: Partial<ErroDescrito> = {}): ErroDes
 
 function versaoDesatualizada(): ErroDescrito {
   return descrito(
-    'Este programa foi alterado por outra pessoa. Os dados foram recarregados: confira e salve de novo.',
+    'Isto foi alterado por outra pessoa. Os dados foram recarregados: confira e salve de novo.',
     { recarregar: true },
   )
 }
 
-/** O formulário não tem o ETag do programa: sem ele o `PUT` nem sai (evita o 428 e a sobrescrita). */
+/** Sem o ETag do recurso o `PUT` nem sai (evita o 428 e a sobrescrita). O texto serve a qualquer tela. */
 export function semVersao(): ErroDescrito {
-  return descrito('Não foi possível confirmar a versão do programa. Recarregue e tente de novo.', {
+  return descrito('Não foi possível confirmar a versão. Recarregue e tente de novo.', {
     recarregar: true,
   })
 }
@@ -71,7 +71,13 @@ export function descreverErro(err: unknown): ErroDescrito {
       for (const [chave, mensagens] of Object.entries(problem.errors ?? {})) {
         campos[camel(chave)] = mensagens.join(' ')
       }
-      return descrito('Corrija os campos destacados e tente de novo.', { campos })
+      // Sem `errors` não há campo destacado: o texto não pode mandar procurar um.
+      return descrito(
+        Object.keys(campos).length > 0
+          ? 'Corrija os campos destacados e tente de novo.'
+          : 'Os dados enviados não foram aceitos. Confira o que preencheu e tente de novo.',
+        { campos },
+      )
     }
   }
 
@@ -81,7 +87,7 @@ export function descreverErro(err: unknown): ErroDescrito {
     case 403:
       return descrito('Você não tem permissão para esta ação.')
     case 404:
-      return descrito('Programa não encontrado. Ele pode ter sido removido.', { recarregar: true })
+      return descrito('Não encontrado. Pode ter sido removido.', { recarregar: true })
     case 412:
       return versaoDesatualizada()
     case 428:
