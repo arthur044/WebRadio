@@ -35,6 +35,7 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
             TransicaoInvalidaException t => Criar(409, "/erros/transicao-invalida", "Transição inválida.", t.Message),
             AcessoNegadoException a => Criar(403, "/erros/acesso-negado", "Acesso negado.", a.Message),
             NaoEncontradoException n => Criar(404, "/erros/nao-encontrado", "Não encontrado.", n.Message),
+            ImagemEmUsoException i => Criar(409, "/erros/imagem-em-uso", "Imagem em uso.", i.Message),
             VersaoDesatualizadaException d => Criar(412, "/erros/versao-desatualizada", "Versão desatualizada.", d.Message),
             ServidorOcupadoException o => Criar(503, "/erros/servidor-ocupado", "Servidor ocupado.", o.Message),
             LimiteExcedidoException l => Criar(429, "/erros/limite-excedido", "Limite excedido.", l.Message,

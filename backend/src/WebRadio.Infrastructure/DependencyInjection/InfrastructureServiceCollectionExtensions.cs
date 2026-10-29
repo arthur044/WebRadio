@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using StackExchange.Redis;
 using WebRadio.Infrastructure.Armazenamento;
 using WebRadio.Infrastructure.Harbor;
+using WebRadio.Infrastructure.Imagens;
 using WebRadio.Infrastructure.Pedidos;
 using WebRadio.Infrastructure.Triagem;
 using WebRadio.Infrastructure.Persistencia;
@@ -84,6 +85,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ITransacaoComTrava, TransacaoComTrava>();
         services.AddScoped<IConsultasDoHarbor, ConsultasDoHarbor>();
         services.AddScoped<IConsultasDePedidos, ConsultasDePedidos>();
+        // Envio de imagem de divulgação (E3-F06): cabeçalho e recodificação sob SemaphoreSlim(1) (o semáforo é do singleton) e o limite de 30/h.
+        services.AddSingleton<IValidadorDeCabecalhoDeImagem, ValidadorDeCabecalhoSkia>();
+        services.AddSingleton<IRecodificadorDeImagem, RecodificadorSkia>();
+        services.AddSingleton<ILimiteDeUploadDeImagem, LimiteDeUploadDeImagem>();
         services.AddScoped<ISondaDoBanco, SondaDoBanco>();
         services.AddScoped<IOutbox, OutboxEf>();
         services.AddMemoryCache();
@@ -139,7 +144,7 @@ public static class InfrastructureServiceCollectionExtensions
     /// Storage é opcional em Development (sem Storage:Endpoint não há IObjectStorage); fora dele a Api exige a seção
     /// inteira e valida a credencial no boot (S-C02).
     /// </summary>
-    private static void AddStorage(IServiceCollection services, IConfiguration configuration)
+    internal static void AddStorage(IServiceCollection services, IConfiguration configuration)
     {
         if (string.IsNullOrWhiteSpace(configuration["Storage:Endpoint"])) return;
 
