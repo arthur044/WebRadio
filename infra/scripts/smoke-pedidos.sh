@@ -251,6 +251,12 @@ PY
   confere "PNG simples é aceito (201)" status_da_imagem "$TMP/ok.png" 201
   confere "sem token → 401" test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -F "file=@$TMP/gps.jpg" "$BASE/api/v1/divulgacoes/imagens")" = 401
 
+  # --- o caminho em MAIÚSCULAS não chega à API: o location /api/ do nginx diferencia maiúsculas, então ele cai na SPA (location /). Seguro: um corpo
+  # maior que o limite do nginx nunca alcança a API por ali. (O critério do 07, "cai no /api/ e leva 413", estava errado; o comportamento real é este.)
+  leitura="$(curl -s -o /dev/null -w '%{http_code} %{content_type}' --max-time 15 -X POST -H "Authorization: Bearer $ADMIN" -F "file=@$TMP/gps.jpg" "$BASE/API/V1/DIVULGACOES/IMAGENS" || true)"
+  fora_da_api() { [[ "${leitura%% *}" != 2* && "${leitura#* }" != *json* ]]; }
+  confere "POST em /API/V1/DIVULGACOES/IMAGENS não é 2xx nem resposta JSON da API (veio $leitura)" fora_da_api
+
   # --- listagem do bucket público negada (nunca lista, S-A05)
   for caminho in /storage/publico/ /storage/publico/divulgacoes/ '/storage/publico/divulgacoes/?list-type=2' '/storage/publico/?list-type=2'; do
     codigo="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE$caminho")"
@@ -258,7 +264,7 @@ PY
   done
 
   # --- ciclo de vida: a divulgação usa a imagem, aparece nas ativas, e apagá-la apaga a imagem do bucket
-  python3 -I -c 'import json,sys; print(json.dumps({"titulo": "[smoke] imagem", "mensagem": "texto puro", "imagemChave": sys.argv[1], "prioridade": 1}))' "$CHAVE" > "$TMP/div.json"
+  python3 -I -c 'import json,sys; print(json.dumps({"titulo": "[smoke] imagem", "mensagem": "texto puro", "imagemChave": sys.argv[1], "prioridade": 1, "ativo": True}))' "$CHAVE" > "$TMP/div.json"
   codigo="$(curl -s -o "$TMP/div-resp.json" -w '%{http_code}' --max-time 15 -X POST -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' --data-binary "@$TMP/div.json" "$BASE/api/v1/divulgacoes")"
   confere "divulgação com a imagem → 201" test "$codigo" = 201
   DIV_ID="$(json 'd["id"]' < "$TMP/div-resp.json" 2>/dev/null || true)"
@@ -290,6 +296,13 @@ PY
     confere "svc-worker NÃO lista publico/ fora do prefixo divulgacoes/" nega mc_como worker ls svc/publico/
     confere "svc-worker NÃO apaga em publico/ fora de divulgacoes/" nega mc_como worker rm --force svc/publico/fora-politica.bin
     confere "svc-worker apaga em publico/divulgacoes/" mc_como worker rm svc/publico/divulgacoes/politica.bin
+
+    # O código do Worker (SDK .NET: ListObjectsV2 com o prefixo, sob a política real) também funciona: a manutenção roda ao subir o Worker, e se o SDK
+    # fizesse qualquer chamada além do que a política deixa (ex.: HEAD no bucket) a limpeza falharia todo dia só com um aviso, e as órfãs nunca sairiam.
+    logs_worker() { "${COMPOSE[@]}" logs --no-color worker 2>&1 || true; }
+    manutencao_rodou() { grep -F -q 'WORKER_MANUTENCAO:' <<<"$(logs_worker)"; }
+    confere "o Worker rodou a manutenção (que inclui a limpeza das imagens órfãs)" espera_ate 90 manutencao_rodou
+    confere "e a limpeza listou o bucket com a credencial do svc-worker (sem aviso WORKER_MANUTENCAO_IMAGENS)" test -z "$(grep -F -m1 'WORKER_MANUTENCAO_IMAGENS' <<<"$(logs_worker)" || true)"
   fi
 fi
 
