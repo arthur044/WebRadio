@@ -69,7 +69,7 @@ server {
     # limit_conn por IP e um limit_req próprio, bem abaixo do api_geral (o uso legítimo é de no máximo 30 por hora por Admin).
     location = /api/v1/divulgacoes/imagens {
         include /etc/nginx/security-headers.conf;
-        limit_req zone=api_upload burst=5 nodelay;
+        limit_req zone=api_upload burst=20 nodelay;
         limit_conn conn_upload 2;
         client_max_body_size 2112k;
         proxy_request_buffering off;
