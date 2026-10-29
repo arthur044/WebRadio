@@ -50,6 +50,22 @@ public class EnviarImagemDeDivulgacaoTests
         Assert.Empty(_storage.Objetos);
     }
 
+    private sealed class RecodificadorQueNaoLe : IRecodificadorDeImagem
+    {
+        public Task<byte[]> RecodificarParaWebpAsync(byte[] origem, CancellationToken ct) => throw new ImagemIlegivelException("truncada");
+    }
+
+    [Fact]
+    public async Task Arquivo_truncado_que_passou_no_cabecalho_mas_nao_decodifica_e_400_e_nada_vai_para_o_bucket()
+    {
+        var h = new EnviarImagemDeDivulgacaoHandler(new ValidadorFalso(new CabecalhoDaImagem(true, null, 10, 10)), new RecodificadorQueNaoLe(), _storage);
+
+        var erro = await Assert.ThrowsAsync<ValidationException>(() => h.Handle(new EnviarImagemDeDivulgacaoCommand([1, 2, 3]), default));
+
+        Assert.Equal("file", Assert.Single(erro.Errors).PropertyName);
+        Assert.Empty(_storage.Objetos);
+    }
+
     [Fact]
     public async Task Imagem_aceita_vira_WebP_gravado_em_publico_com_chave_nova_e_Content_Type_do_servidor()
     {

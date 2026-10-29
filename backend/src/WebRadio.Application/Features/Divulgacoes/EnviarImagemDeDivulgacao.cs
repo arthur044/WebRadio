@@ -28,7 +28,16 @@ public sealed class EnviarImagemDeDivulgacaoHandler(IValidadorDeCabecalhoDeImage
 
         // Storage é opcional em Development (sem Storage:Endpoint não há IObjectStorage; fora dele a Api exige a seção inteira no boot).
         var destino = storage ?? throw new InvalidOperationException("Storage não configurado.");
-        var webp = await recodificador.RecodificarParaWebpAsync(cmd.Bytes, ct);
+        byte[] webp;
+        try
+        {
+            webp = await recodificador.RecodificarParaWebpAsync(cmd.Bytes, ct);
+        }
+        catch (ImagemIlegivelException)
+        {
+            // Arquivo truncado ou corrompido: erro do arquivo, não do servidor.
+            throw Recusada(MotivoDaImagemRecusada.Ilegivel);
+        }
 
         var chave = ChaveDeImagem.Nova();
         await using var fluxo = new MemoryStream(webp, writable: false);

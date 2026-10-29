@@ -46,5 +46,9 @@ public interface IValidadorDeCabecalhoDeImagem
 /// </summary>
 public interface IRecodificadorDeImagem
 {
+    /// <exception cref="ImagemIlegivelException">O cabeçalho passou mas os pixels não decodificam (arquivo truncado ou corrompido): vira 400.</exception>
     Task<byte[]> RecodificarParaWebpAsync(byte[] origem, CancellationToken ct);
 }
+
+/// <summary>A imagem tem cabeçalho de JPEG/PNG mas não decodifica (truncada ou corrompida). É erro do arquivo, não do servidor: o envio responde 400.</summary>
+public sealed class ImagemIlegivelException(string message, Exception? inner = null) : Exception(message, inner);

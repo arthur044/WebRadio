@@ -142,11 +142,11 @@ public class RecodificadorSkiaTests
     }
 
     [Fact]
-    public async Task Imagem_truncada_nao_vira_WebP_lanca()
+    public async Task Imagem_truncada_nao_vira_WebP_lanca_ImagemIlegivel()
     {
         var jpeg = ImagensDeTeste.Jpeg(200, 200);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Recodificar(jpeg[..(jpeg.Length / 2)]));
+        await Assert.ThrowsAsync<ImagemIlegivelException>(() => Recodificar(jpeg[..(jpeg.Length / 2)]));
     }
 
     [Fact]

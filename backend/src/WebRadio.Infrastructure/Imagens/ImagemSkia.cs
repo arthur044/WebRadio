@@ -131,14 +131,12 @@ public sealed class RecodificadorSkia : IRecodificadorDeImagem
     private static byte[] Converter(byte[] origem)
     {
         using var dados = SKData.CreateCopy(origem);
-        using var codec = SKCodec.Create(dados) ?? throw new InvalidOperationException("Imagem ilegível.");
+        using var codec = SKCodec.Create(dados) ?? throw new ImagemIlegivelException("Imagem ilegível.");
         var info = new SKImageInfo(codec.Info.Width, codec.Info.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul, SKColorSpace.CreateSrgb());
         using var bruto = new SKBitmap(info);
         var resultado = codec.GetPixels(info, bruto.GetPixels());
-        if (resultado is not (SKCodecResult.Success or SKCodecResult.IncompleteInput))
-            throw new InvalidOperationException("Não consegui decodificar a imagem.");
-        if (resultado == SKCodecResult.IncompleteInput)
-            throw new InvalidOperationException("Imagem truncada.");
+        if (resultado is not SKCodecResult.Success)
+            throw new ImagemIlegivelException(resultado == SKCodecResult.IncompleteInput ? "Imagem truncada." : "Não consegui decodificar a imagem.");
 
         // Sem giro (o caso comum) não faz cópia: um decode de 4096×4096 já pesa 64 MB, e o giro de um EXIF é o único motivo de um segundo bitmap.
         var girar = codec.EncodedOrigin is not (SKEncodedOrigin.TopLeft or SKEncodedOrigin.Default);

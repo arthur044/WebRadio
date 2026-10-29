@@ -306,6 +306,20 @@ public class DivulgacoesEndpointsTests
     }
 
     [Fact]
+    public async Task JPEG_truncado_que_passa_no_cabecalho_mas_nao_decodifica_e_400_nao_500()
+    {
+        var c = NovaCena();
+        var admin = await Admin(c);
+        var inteiro = WebRadio.Infrastructure.Tests.Suporte.ImagensDeTeste.Jpeg(300, 300);
+
+        var r = await EnviarImagem(c, admin, inteiro[..(inteiro.Length / 2)]);
+
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        Assert.True((await Json(r)).GetProperty("errors").TryGetProperty("file", out _));
+        Assert.Empty(c.Storage.Objetos);
+    }
+
+    [Fact]
     public async Task Arquivo_acima_de_2_MB_e_413_sem_decodificar()
     {
         var c = NovaCena();
