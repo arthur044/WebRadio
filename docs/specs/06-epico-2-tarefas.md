@@ -4,7 +4,7 @@
 > Donos: **Forge** (backend, Worker, Liquidsoap, contêineres), **Atlas** (banco), **Prism** (frontend), **Sentinel** (revisão de segurança do ao vivo).
 > Escopo decidido pelo dono do produto em 2026-10-15: **inclui o locutor ao vivo**, com credencial de transmissão própria (identificador opaco + segredo aleatório guardado só como hash com salt).
 > O `05` continua **normativo**: cada achado que cita uma tarefa `E2-*` vira critério de aceite dela. A checklist da §8 do `05` é o quality gate de todo PR.
-> **v1.4 (2026-10-29):** fechamento do Épico 2 (seção "Fechamento do Épico 2"): a DoD conferida item a item, com o PR que entrega cada um. O item 8 depende do PR de dependências que zera o `npm audit` e o trivy.
+> **v1.4 (2026-10-29):** fechamento do Épico 2 (seção "Fechamento do Épico 2"): a DoD conferida item a item, com o PR que entrega cada um. O item 8 depende do #76, que zera o `npm audit` e o trivy.
 > **v1.3 (2026-10-15):** os dois riscos aceitos (falha aberta do ao vivo e harbor sem TLS) foram confirmados pelo dono do produto e registrados no `05` §4.
 > **v1.2 (2026-10-15):** re-review do PR #38: encerrar também um `Agendado` com a janela em curso (Worker parado); prazo de queda corrigido para 15 s; throttle atrás do proxy só no proxy; senha errada conta no limite de geração; seed antigo removido.
 > **v1.1 (2026-10-15):** incorpora a revisão do PR #38 (Guardian, Atlas e Sentinel): autorização do harbor pela **janela de horário** calculada no SQL, e não pelo `Status` que o Worker muda; falha aberta com teto; throttle por par (identificador, IP); validação estrita do que vem do source client; proxy na frente do harbor em produção; evento de grade também no encerrar e no cancelar; seed de dev pelo `DevDataSeeder`.
@@ -172,9 +172,9 @@ Conferido pelo Nexus em 2026-10-29 contra a `main`. B1 a B4 mergeados; o B3-13 d
 | 5. Segredo da credencial só como hash, fora dos logs, mostrado uma vez | testes da E2-F04 (varredura dos logs da requisição) e painel do locutor (E2-P03) | #56, #57 |
 | 6. Eventos pelo hub e ressincronização por REST ao reconectar | E2-F02 (`ProgramaStatusAlterado`), E2-F06 (`TransmissaoAoVivoAlterada`) e telas do B3 | #40, #56, #42, #57 |
 | 7. Produção publica só a 8080; porta do ao vivo em compose explícito | E2-F11 | #56 |
-| 8. CI do Épico 1 continua verde (cobertura ≥ 80% em Domain e Application) | CI completo da `main` | PR de dependências (zod 4.6.6 no `npm audit`; digest novo do `minio-client` com `klauspost/compress` 1.18.7 e Go 1.27.3 no trivy) |
+| 8. CI do Épico 1 continua verde (cobertura ≥ 80% em Domain e Application) | CI completo da `main` | #76 (zod 4.6.7 no `npm audit`; `mc` do `minio-init` compilado com `klauspost/compress` 1.18.7 e Go ≥ 1.27.3 até a Chainguard publicar o fix, decisão do dono do produto em 2026-10-29) |
 
-O Épico 2 fica **fechado** quando o run completo do CI na `main`, depois do PR de dependências, estiver verde. Desde o `4c81546` a falha do job de vulnerabilidades faz a `main` pular os demais jobs, então os itens 1, 3, 4 e 7 só rodaram verdes nos PRs; esse run fecha a lacuna. Ficam para depois, no backlog do GitHub: #9 (obrigatória antes do primeiro deploy), #10, #17, #18, #19, #25 e #64. A revisão dos riscos aceitos (seção abaixo e `05` §4) acontece antes do primeiro deploy público.
+O Épico 2 fica **fechado** quando o run completo do CI na `main`, depois do #76, estiver verde. Desde o `4c81546` a falha do job de vulnerabilidades faz a `main` pular os demais jobs, então os itens 1, 3, 4 e 7 só rodaram verdes nos PRs; esse run fecha a lacuna. Ficam para depois, no backlog do GitHub: #9 (obrigatória antes do primeiro deploy), #10, #17, #18, #19 e #25 (o #64 é fechado pelo #66). A revisão dos riscos aceitos (seção abaixo e `05` §4) acontece antes do primeiro deploy público.
 
 ## Riscos
 
