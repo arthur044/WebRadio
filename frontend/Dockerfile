@@ -25,11 +25,6 @@ FROM nginxinc/nginx-unprivileged:1.31.6-alpine3.24@sha256:884e0b7f42f303641b0f4e
 # (nginx 1.31.7) já trazia libexpat e libx11 corrigidos, mas ainda não brotli-libs nem curl.
 USER root
 RUN apk add --no-cache --upgrade 'libexpat>=2.9.0-r0' 'libx11>=1.8.14-r0' 'brotli-libs>=1.2.1-r0' 'curl>=8.23.0-r0' 'libcurl>=8.23.0-r0'
-USER 101 de
-# volta) quando a base fixada acima trouxer as versões corrigidas; num bump da base (Dependabot), se o
-# trivy estiver limpo sem o bloco, ele sai no mesmo PR.
-USER root
-RUN apk add --no-cache --upgrade 'libexpat>=2.9.0-r0' 'libx11>=1.8.14-r0'
 USER 101
 # Hosts públicos válidos (server_name aceita lista espaço-separada) — o compose
 # sobrescreve em outros ambientes; ver comentário de Host header injection em
