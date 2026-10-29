@@ -1,3 +1,4 @@
+import { MeusPedidos } from './MeusPedidos'
 import { PedidoForm } from './PedidoForm'
 
 export function PedidosPage() {
@@ -8,6 +9,7 @@ export function PedidosPage() {
         Peça uma música e, se o locutor aprovar, ela entra na programação. Não precisa de conta.
       </p>
       <PedidoForm />
+      <MeusPedidos />
     </section>
   )
 }
