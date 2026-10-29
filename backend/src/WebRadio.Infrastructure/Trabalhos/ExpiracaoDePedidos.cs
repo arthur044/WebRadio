@@ -38,10 +38,15 @@ public sealed class ExpiracaoDePedidos(RadioDbContext db, IOptions<PedidosOption
         SET XACT_ABORT ON;
         BEGIN TRAN;
         DECLARE @expirados TABLE (Id uniqueidentifier, Hash binary(32) NULL);
+        DECLARE @n int;
 
-        UPDATE TOP (@lote) interacao.PedidoMusica SET Status = {Expirado}
+        -- O hint é do Atlas (E3-A01): sem ele o otimizador varre o clustered inteiro (19.845 leituras por ciclo vazio, 26.880 por lote com
+        -- 25.000 vencidos); com ele são 3 e ~12.400 (os 1.000 key lookups mais a manutenção do índice). Se o índice for renomeado, o teste
+        -- com vários lotes falha.
+        UPDATE TOP (@lote) p SET Status = {Expirado}
         OUTPUT inserted.Id, inserted.ListenerDeviceHash INTO @expirados
-        WHERE Status = {Pendente} AND CriadoEmUtc < DATEADD(MINUTE, -@expiracao, SYSUTCDATETIME());
+        FROM interacao.PedidoMusica AS p WITH (INDEX(IX_PedidoMusica_Fila))
+        WHERE p.Status = {Pendente} AND p.CriadoEmUtc < DATEADD(MINUTE, -@expiracao, SYSUTCDATETIME());
 
         INSERT infra.EventoOutbox (Tipo, Payload)
         SELECT 'PedidoModerado',
@@ -50,8 +55,10 @@ public sealed class ExpiracaoDePedidos(RadioDbContext db, IOptions<PedidosOption
                            'dados': JSON_OBJECT('pedidoId': LOWER(CONVERT(varchar(36), Id)), 'status': '{nameof(StatusPedido.Expirado)}'))
         FROM @expirados;
 
-        SELECT COUNT(*) AS [Value] FROM @expirados;
+        SELECT @n = COUNT(*) FROM @expirados;
         COMMIT;
+        -- Depois do COMMIT: se ele falhar, o laço não conta lote que não existiu.
+        SELECT @n AS [Value];
         """;
 
     public async Task<int> ExecutarAsync(CancellationToken ct)
