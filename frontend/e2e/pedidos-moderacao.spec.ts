@@ -54,6 +54,9 @@ test('o pedido chega à moderação, e a decisão chega ao ouvinte, sem recarreg
     await locutor.getByLabel('E-mail').fill(locutorSeed.email)
     await locutor.getByLabel('Senha').fill(locutorSeed.senha)
     await locutor.getByRole('button', { name: 'Entrar' }).click()
+    // O link "Estúdio" é público: sem esperar a sessão (o "Sair" só aparece depois do login), o clique correria na frente do
+    // login e a rota guardada mandaria de volta para /login.
+    await expect(locutor.getByRole('button', { name: 'Sair' })).toBeVisible()
     await locutor.getByRole('link', { name: 'Estúdio' }).click()
     await expect(locutor.getByRole('heading', { name: 'Pedidos de música' })).toBeVisible()
     await marcarSemRecarregar(locutor)
