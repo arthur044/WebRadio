@@ -7,6 +7,12 @@ namespace WebRadio.Application.Abstracoes;
 public interface ITransacaoComTrava
 {
     Task<T> ExecutarAsync<T>(string recurso, Func<CancellationToken, Task<T>> acao, CancellationToken ct);
+
+    /// <summary>
+    /// Igual, mas esperando a trava no máximo <paramref name="espera"/>; estourou, lança <see cref="Domain.Erros.TravaOcupadaException"/>
+    /// (quem pede uma espera curta decide a resposta). O bloco é reexecutado no retry do EF, como no outro método.
+    /// </summary>
+    Task<T> ExecutarAsync<T>(string recurso, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct);
 }
 
 /// <summary>Sonda de saúde do banco (<c>/health/ready</c>): a Api não conhece o EF.</summary>
@@ -22,6 +28,12 @@ public static class Travas
 
     /// <summary>D7: serializa criar/editar programa. A consulta de interseção só vale sob esta trava (Fluxo A, passo 1).</summary>
     public const string GradePrograma = "grade:programa";
+
+    /// <summary>
+    /// 07 E3-F01: serializa o fallback SQL do throttle de pedido por dispositivo (verifica-e-insere; sem a trava duas requisições
+    /// simultâneas passam). O recurso é derivado do hash do dispositivo: nunca leva o <c>listenerId</c>.
+    /// </summary>
+    public static string PedidoDoDispositivo(byte[] deviceHash) => "pedido:dev:" + Convert.ToHexString(deviceHash);
 }
 
 /// <summary>
@@ -69,6 +81,18 @@ public static class EventosDoOutbox
     /// <c>admins</c> e para <c>usuario:{locutorId}</c>; tipo <c>global</c>: só <c>admins</c>. Nunca leva segredo, identificador nem IP.
     /// </summary>
     public const string AlertaHarborFalhas = "AlertaHarborFalhas";
+
+    /// <summary>Carga <c>PedidoDto</c> (02 §10): só para <c>locutores</c>. Leva nome e dedicatória do ouvinte, por isso nunca vai para todos.</summary>
+    public const string PedidoCriado = "PedidoCriado";
+
+    /// <summary>
+    /// Carga <c>{ pedidoId, status, motivoRejeicao? }</c> (02 §10, 07 E3-D3): para <c>listener:{hash}</c> (quando o hash existe) e
+    /// <c>locutores</c>. <c>status</c> é <c>Aprovado</c>, <c>Rejeitado</c> ou <c>Expirado</c> (o Worker emite o <c>Expirado</c>).
+    /// </summary>
+    public const string PedidoModerado = "PedidoModerado";
+
+    /// <summary>Carga <c>{ pedidoId }</c> (02 §10): para <c>listener:{hash}</c> (quando o hash existe) e <c>locutores</c>.</summary>
+    public const string PedidoTocado = "PedidoTocado";
 }
 
 /// <summary>

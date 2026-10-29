@@ -13,5 +13,5 @@ public sealed class ListenerIdentity(byte[] pepper, IIpHasher ipHasher) : IListe
 
     public byte[] IpHash(IPAddress? ip) => ipHasher.Hash(ip);
 
-    public string GrupoListener(Guid listenerId) => $"listener:{Convert.ToHexString(DeviceHash(listenerId))}";
+    public string GrupoListener(Guid listenerId) => GruposDoHub.Listener(DeviceHash(listenerId));
 }

@@ -13,7 +13,13 @@ public sealed class TransacaoComTrava(RadioDbContext db) : ITransacaoComTrava
 {
     public const int TimeoutDaTravaMs = 15_000;
 
-    public async Task<T> ExecutarAsync<T>(string recurso, Func<CancellationToken, Task<T>> acao, CancellationToken ct)
+    public Task<T> ExecutarAsync<T>(string recurso, Func<CancellationToken, Task<T>> acao, CancellationToken ct) =>
+        ExecutarAsync(recurso, TimeSpan.FromMilliseconds(TimeoutDaTravaMs), acao, ct, lancarSeOcupada: false);
+
+    public Task<T> ExecutarAsync<T>(string recurso, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct) =>
+        ExecutarAsync(recurso, espera, acao, ct, lancarSeOcupada: true);
+
+    private async Task<T> ExecutarAsync<T>(string recurso, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct, bool lancarSeOcupada)
     {
         try
         {
@@ -24,7 +30,7 @@ public sealed class TransacaoComTrava(RadioDbContext db) : ITransacaoComTrava
             {
                 db.ChangeTracker.Clear();
                 await using var tx = await db.Database.BeginTransactionAsync(ct2);
-                await AdquirirAsync(db, recurso, ct2);
+                await AdquirirAsync(db, recurso, (int)espera.TotalMilliseconds, lancarSeOcupada, ct2);
                 var resultado = await acao(ct2);
                 await tx.CommitAsync(ct2);
                 return resultado;
@@ -40,9 +46,21 @@ public sealed class TransacaoComTrava(RadioDbContext db) : ITransacaoComTrava
 
     /// <summary>Exige uma transação aberta em <paramref name="db"/>. O recurso vai como parâmetro, nunca concatenado.</summary>
     internal static Task AdquirirAsync(RadioDbContext db, string recurso, CancellationToken ct) =>
-        db.Database.ExecuteSqlInterpolatedAsync(
-            $"DECLARE @r int; EXEC @r = sp_getapplock @Resource = {recurso}, @LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = {TimeoutDaTravaMs}; IF @r < 0 THROW 50001, N'applock indisponível', 1;",
-            ct);
+        AdquirirAsync(db, recurso, TimeoutDaTravaMs, lancarSeOcupada: false, ct);
+
+    /// <summary>
+    /// <c>sp_getapplock</c> devolve -1 no estouro da espera, -2 se cancelado e -3 se vítima de deadlock. Com <paramref name="lancarSeOcupada"/>,
+    /// o -1 vira <see cref="TravaOcupadaException"/> (a espera curta é decisão de quem chama); os demais continuam erro de SQL.
+    /// </summary>
+    private static async Task AdquirirAsync(RadioDbContext db, string recurso, int esperaMs, bool lancarSeOcupada, CancellationToken ct)
+    {
+        var resultado = (await db.Database.SqlQuery<int>(
+            $"DECLARE @r int; EXEC @r = sp_getapplock @Resource = {recurso}, @LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = {esperaMs}; SELECT @r AS [Value];")
+            .ToListAsync(ct)).Single();
+        if (resultado >= 0) return;
+        if (lancarSeOcupada && resultado == -1) throw new TravaOcupadaException();
+        throw new InvalidOperationException("applock indisponível");
+    }
 }
 
 /// <summary>Sonda do <c>/health/ready</c>: só abre uma conexão; não é responsabilidade da transação com trava.</summary>
