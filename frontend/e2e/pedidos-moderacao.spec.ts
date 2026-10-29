@@ -27,9 +27,9 @@ async function seguiuNaMesmaPagina(page: Page) {
 }
 
 async function pedir(page: Page, musica: string) {
-  await page.getByLabel('Seu nome').fill('Ouvinte E2E')
-  await page.getByLabel('Música').fill(musica)
-  await page.getByLabel('Artista').fill('Artista E2E')
+  await page.getByLabel('Seu nome', { exact: true }).fill('Ouvinte E2E')
+  await page.getByLabel('Música', { exact: true }).fill(musica)
+  await page.getByLabel('Artista', { exact: true }).fill('Artista E2E')
   await page.getByRole('button', { name: 'Enviar pedido' }).click()
   await expect(page.getByRole('status')).toContainText('Pedido enviado')
 }

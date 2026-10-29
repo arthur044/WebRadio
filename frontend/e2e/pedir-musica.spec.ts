@@ -33,9 +33,9 @@ test('o ouvinte pede uma música e o pedido aparece em Meus pedidos', async ({ p
   await page.goto('/pedidos')
   await expect(page.getByText('Você ainda não fez nenhum pedido.')).toBeVisible()
 
-  await page.getByLabel('Seu nome').fill('Ana')
-  await page.getByLabel('Música').fill('Asa Branca')
-  await page.getByLabel('Artista').fill('Luiz Gonzaga')
+  await page.getByLabel('Seu nome', { exact: true }).fill('Ana')
+  await page.getByLabel('Música', { exact: true }).fill('Asa Branca')
+  await page.getByLabel('Artista', { exact: true }).fill('Luiz Gonzaga')
   await page.getByRole('button', { name: 'Enviar pedido' }).click()
 
   await expect(page.getByRole('status')).toContainText('Pedido enviado')
@@ -56,9 +56,9 @@ test('429: o botão mostra a contagem regressiva e volta quando ela zera', async
   )
 
   await page.goto('/pedidos')
-  await page.getByLabel('Seu nome').fill('Ana')
-  await page.getByLabel('Música').fill('Asa Branca')
-  await page.getByLabel('Artista').fill('Luiz Gonzaga')
+  await page.getByLabel('Seu nome', { exact: true }).fill('Ana')
+  await page.getByLabel('Música', { exact: true }).fill('Asa Branca')
+  await page.getByLabel('Artista', { exact: true }).fill('Luiz Gonzaga')
   await page.getByRole('button', { name: 'Enviar pedido' }).click()
 
   await expect(
@@ -66,14 +66,14 @@ test('429: o botão mostra a contagem regressiva e volta quando ela zera', async
   ).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Enviar pedido' })).toBeEnabled({ timeout: 8_000 })
   // O que o ouvinte digitou continua lá: ele só reenvia.
-  await expect(page.getByLabel('Seu nome')).toHaveValue('Ana')
+  await expect(page.getByLabel('Seu nome', { exact: true })).toHaveValue('Ana')
 })
 
 test('o contador usa string.length: um emoji vale 2 unidades', async ({ page }) => {
   await page.route('**/api/v1/pedidos/meus', (rota) => rota.fulfill({ json: [] }))
   await page.goto('/pedidos')
 
-  await page.getByLabel('Seu nome').fill('Ana🎵')
+  await page.getByLabel('Seu nome', { exact: true }).fill('Ana🎵')
 
   await expect(page.getByText('5/60')).toBeVisible()
 })

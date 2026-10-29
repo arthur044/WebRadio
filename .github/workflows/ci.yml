@@ -524,7 +524,8 @@ jobs:
 
       # S-M10 (refresh entre abas): usa a fixture refresh-probe e mocks de rota, que só existem no build e2e (a imagem de produção
       # não os tem, Guardian H2), então roda no vite preview do build e2e e não contra o :8080.
-      - name: E2E do refresh entre abas (build e2e, S-M10)
+      # Pedir Música e Mural (Épico 3) também usam rotas mockadas (a API é simulada, inclusive o 429 com Retry-After), então rodam aqui.
+      - name: E2E no preview (build e2e): refresh entre abas (S-M10), Pedir Música e Mural
         working-directory: frontend
         env:
           CI: "true"
@@ -532,7 +533,7 @@ jobs:
         run: |
           set -euo pipefail
           npm run build:e2e
-          npx playwright test e2e/refresh-cross-tab.spec.ts --reporter=list
+          npx playwright test e2e/refresh-cross-tab.spec.ts e2e/pedir-musica.spec.ts e2e/mural.spec.ts --reporter=list
 
       - name: Estado e logs em caso de falha
         if: failure()
