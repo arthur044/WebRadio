@@ -120,7 +120,7 @@ A regra de dependência é garantida por **teste de arquitetura** (NetArchTest),
 1. O frontend gera `listenerId` (`crypto.randomUUID()`, localStorage) e o envia no header `X-Listener-Id` e na query do hub.
 2. `POST /pedidos` → `CreateSongRequestCommand`. Ordem do pipeline MediatR: `Logging → Validation (FluentValidation, só campos) → Throttle (IThrottledRequest) → Handler`.
 3. `IListenerIdentity` calcula `DeviceHash = HMAC-SHA256(pepper, listenerId)` e `IpHash = HMAC-SHA256(pepper, IP)`. O IP vem de `ForwardedHeaders` **só com o nginx em `KnownProxies`**; IPv6 é normalizado para /64. O banco nunca guarda IP nem listenerId em claro (LGPD).
-4. Regras do throttle (Redis):
+4. Regras do throttle (Redis; o `RedisRequestThrottle` prefixa toda chave com `wr:`, então a chave real é `wr:throttle:pedido:...`):
    - dispositivo: `SET throttle:pedido:dev:{hash} 1 NX EX 300` → falhou = 429;
    - IP: `INCR throttle:pedido:ip:{hash}` + `EXPIRE NX 300` → acima de 3 = 429 (tolera NAT/Wi-Fi compartilhado);
    - usuário logado: `SET throttle:pedido:usr:{id} NX EX 300`.
