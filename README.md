@@ -129,8 +129,8 @@ Jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra 
 
 ## O que vem a seguir
 
-- **Épico 3**: pedidos de música e moderação, e divulgações.
-- **Épico 4**: upload e sanitização de mídia. Antes de liberar upload, atualizar as imagens do SQL Server e do Liquidsoap (pendência do Épico 1 acima).
+- **Épico 3**: pedidos de música e moderação, e divulgações com imagem opcional. O pacote de tarefas está em [`docs/specs/07-epico-3-tarefas.md`](docs/specs/07-epico-3-tarefas.md). O pedido aprovado ainda não toca sozinho: o locutor toca e marca como tocado.
+- **Épico 4**: biblioteca de mídia, upload e sanitização (o pedido aprovado passa a tocar pelo playout). Antes de liberar upload, atualizar as imagens do SQL Server e do Liquidsoap (pendência do Épico 1 acima).
 
 ## Como contribuir
 
@@ -198,6 +198,7 @@ WebRadio é um projeto **público no GitHub**. Nenhum segredo, credencial, e-mai
 | [`04-epico-1-tarefas.md`](docs/specs/04-epico-1-tarefas.md) | Pacote de tarefas do Épico 1 e pendências | Time |
 | [`05-seguranca-auditoria.md`](docs/specs/05-seguranca-auditoria.md) | Auditoria de segurança (normativo) | Backend, DevSecOps |
 | [`06-epico-2-tarefas.md`](docs/specs/06-epico-2-tarefas.md) | Pacote de tarefas do Épico 2 (grade, ao vivo, credencial de transmissão) | Time |
+| [`07-epico-3-tarefas.md`](docs/specs/07-epico-3-tarefas.md) | Pacote de tarefas do Épico 3 (pedidos de música, moderação, divulgações) | Time |
 
 ## Licença
 
