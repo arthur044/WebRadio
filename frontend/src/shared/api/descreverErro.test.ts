@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from './httpClient'
-import { descreverErro } from './descreverErro'
+import { descreverErro, semVersao } from './descreverErro'
 
 function erro(status: number, type: string, extras: object = {}) {
   return new ApiError(status, { type, title: 'x', status, ...extras })
@@ -60,7 +60,22 @@ describe('descreverErro', () => {
   })
 
   it('400 validação sem o mapa de erros ainda dá uma mensagem', () => {
-    expect(descreverErro(erro(400, '/erros/validacao')).mensagem).toMatch(/corrija/i)
+    const d = descreverErro(erro(400, '/erros/validacao'))
+    expect(d.campos).toEqual({})
+    expect(d.mensagem).not.toMatch(/destacados/i)
+    expect(d.mensagem).toMatch(/não foram aceitos/i)
+  })
+
+  it.each([404, 412, 428])(
+    'status %i: o texto não fala de programa (serve a auth e a credencial)',
+    (status) => {
+      const d = descreverErro(erro(status, '/erros/qualquer'))
+      expect(d.mensagem).not.toMatch(/programa/i)
+    },
+  )
+
+  it('semVersao() também é neutro', () => {
+    expect(semVersao().mensagem).not.toMatch(/programa/i)
   })
 
   it.each([
