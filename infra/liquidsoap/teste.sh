@@ -352,18 +352,23 @@ controle modo_autorizacao ""
 confere "reconecta depois" espera_mais "$P-radio" "Source client conectado" "$CON" 60
 
 echo "-- API fora, teto 1: fim do programa + 1 min"
-# O stub devolve um fim 30 s no passado (com a janela "aberta"): o radio.liq aprende o fim na consulta seguinte e o teto vira
-# fim + 60 s = 30 s dali, bem antes do "último 200 + HARBOR_TETO_SEM_RESPOSTA_S".
-controle fim "$(iso_em -30)"
+# O stub devolve um fim 10 s no passado (com a janela "aberta"): o radio.liq aprende o fim na consulta seguinte e o teto vira
+# fim + 60 s = 50 s depois do `controle`, bem antes do "último 200 + HARBOR_TETO_SEM_RESPOSTA_S" (que é de pelo menos 45 s depois do último
+# 200, e o último 200 vem de uma consulta posterior ao `controle`).
+# ATENÇÃO (flake do run do #80): a PRIMEIRA consulta que o log da API mostra depois do `controle` pode ter começado ANTES dele (uma consulta
+# em voo, que leu o fim antigo). Só a SEGUNDA começa depois do `controle` com certeza (as consultas são de 10 em 10 s). Sem esperar a segunda,
+# a API caía com o radio.liq ainda no fim antigo, e o ao vivo caía pelo outro teto ("último 200 + 45 s"), com outro texto no log. Com o teto
+# em 50 s (e não 30 s) a primeira consulta que falha ainda cai antes dele, e o "segue no ar" abaixo não depende de a derrubada atrasar.
+controle fim "$(iso_em -10)"
 AUT="$(conta_liq_api HARBOR_AUTORIZACAO)"
-confere "o radio.liq aprende o novo fim na consulta seguinte" espera_mais "$P-api" HARBOR_AUTORIZACAO "$AUT" 15
+confere "o radio.liq aprende o novo fim: duas consultas depois do controle" espera_mais "$P-api" HARBOR_AUTORIZACAO "$((AUT + 1))" 30
 DESC="$(conta_log "$P-radio" 'Source client desconectado')"
 docker rm -f "$P-api" >/dev/null
 confere "API parada: log.severe da consulta" espera_log "$P-radio" "Consulta de autorização falhou" 30
 sleep 12
 confere "o locutor já autorizado segue no ar" test "$(conta_log "$P-radio" 'Source client desconectado')" = "$DESC"
 confere "o stream segue" toca
-confere "o teto do fim do programa derruba mesmo sem resposta" espera_log "$P-radio" "Derrubando o ao vivo: teto da falha aberta (fim do programa + 1 min)" 60
+confere "o teto do fim do programa derruba mesmo sem resposta" espera_log "$P-radio" "Derrubando o ao vivo: teto da falha aberta (fim do programa + 1 min)" 90
 
 echo "-- API fora, teto 2: último 200 + HARBOR_TETO_SEM_RESPOSTA_S (a janela é longa, só o 200 antigo vale)"
 api vazia
