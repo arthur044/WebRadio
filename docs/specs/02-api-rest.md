@@ -105,7 +105,7 @@ Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin
 |---|---|---|
 | GET | `/divulgacoes/ativas` | público (ordenadas por prioridade desc; cache HTTP `max-age=30`) |
 | GET | `/divulgacoes?pagina=&tamanho=` | Admin |
-| POST | `/divulgacoes` | Admin → 201 |
+| POST | `/divulgacoes` | Admin → 201. O corpo leva `imagemChave?` (a `chave` do `POST /divulgacoes/imagens`), nunca uma URL; vale também para o `PUT` (Épico 3, E3-D5 do `07`) |
 | PUT | `/divulgacoes/{id}` | Admin + `If-Match` |
 | DELETE | `/divulgacoes/{id}` | Admin → 204 |
 | POST | `/divulgacoes/imagens` | Admin; **`multipart/form-data`** com `file` (≤ 2 MB, `RequestSizeLimit`) → **201** `{ chave, imagemUrl }`. A API decodifica e recodifica para WebP, tira os metadados, limita a 4096 px e grava em `publico/` com `Content-Type` do servidor. Arquivo que não é imagem → 400 (S-A05) |
@@ -152,7 +152,7 @@ Eventos servidor → cliente (todos com `eventoId` e `ocorridoEmUtc`; o cliente 
 | `TransmissaoAoVivoAlterada` | todos | `{ noAr, programaId?, locutorNome? }` (Épico 2) |
 | `AlertaHarborFalhas` | `admins` (+ `usuario:{usuarioId}` do dono no tipo `credencial`) | `{ tipo, falhas, janelaMinutos, locutorId?, locutorNome?, credencialAtiva? }` (Épico 2; contrato no `06`, E2-F12) |
 | `PedidoCriado` | `locutores` | `PedidoDto` |
-| `PedidoModerado` | `listener:{hash}` + `locutores` | `{ pedidoId, status, motivoRejeicao? }` |
+| `PedidoModerado` | `listener:{hash}` + `locutores` | `{ pedidoId, status, motivoRejeicao? }`; `status` = `Aprovado`, `Rejeitado` ou `Expirado` (o Worker emite o `Expirado`; Épico 3, E3-D3 do `07`) |
 | `PedidoTocado` | `listener:{hash}` + `locutores` | `{ pedidoId }` |
 | `MidiaSanitizada` | `locutores` | `{ midiaId, statusSanitizacao, motivoRejeicao? }` |
 
