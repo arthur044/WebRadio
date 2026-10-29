@@ -118,4 +118,92 @@ describe('MuralPage', () => {
       'Não foi possível carregar o mural agora.',
     )
   })
+
+  it('mensagem com HTML aparece como texto e as quebras de linha são preservadas', async () => {
+    const mensagem = 'Linha 1\n<img src=x onerror=alert(1)>\nLinha 3'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(200, [
+          {
+            id: '1',
+            titulo: 'Com HTML',
+            mensagem,
+            imagemChave: null,
+            imagemUrl: null,
+            linkDestino: null,
+            prioridade: 1,
+            inicioExibicaoUtc: null,
+            fimExibicaoUtc: null,
+            ativo: true,
+          },
+        ]),
+      ),
+    )
+
+    const { container } = renderMural()
+
+    const texto = await screen.findByText(/Linha 1/)
+    expect(texto.textContent).toBe(mensagem)
+    expect(texto).toHaveClass('whitespace-pre-line')
+    expect(container.querySelector('img')).toBeNull()
+  })
+
+  it('imagem com loading lazy e alt igual ao título; link abre em outra aba com noopener noreferrer', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(200, [
+          {
+            id: '1',
+            titulo: 'Show ao vivo',
+            mensagem: 'x',
+            imagemChave: 'divulgacoes/0123456789abcdef0123456789abcdef.webp',
+            imagemUrl: '/storage/publico/divulgacoes/0123456789abcdef0123456789abcdef.webp',
+            linkDestino: 'https://exemplo.com/show',
+            prioridade: 1,
+            inicioExibicaoUtc: null,
+            fimExibicaoUtc: null,
+            ativo: true,
+          },
+        ]),
+      ),
+    )
+
+    renderMural()
+
+    const imagem = await screen.findByAltText('Show ao vivo')
+    expect(imagem).toHaveAttribute('loading', 'lazy')
+    expect(imagem.getAttribute('src')).toContain('/storage/publico/divulgacoes/')
+    const link = screen.getByRole('link')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('mantém a ordem que o servidor mandou (prioridade e depois id)', async () => {
+    const base = {
+      mensagem: 'm',
+      imagemChave: null,
+      imagemUrl: null,
+      linkDestino: null,
+      inicioExibicaoUtc: null,
+      fimExibicaoUtc: null,
+      ativo: true,
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(200, [
+          { ...base, id: 'b', titulo: 'Alta', prioridade: 90 },
+          { ...base, id: 'a', titulo: 'Média A', prioridade: 50 },
+          { ...base, id: 'c', titulo: 'Média C', prioridade: 50 },
+        ]),
+      ),
+    )
+
+    renderMural()
+
+    const titulos = (await screen.findAllByRole('heading', { level: 2 })).map((h) => h.textContent)
+    expect(titulos).toEqual(['Alta', 'Média A', 'Média C'])
+  })
 })
