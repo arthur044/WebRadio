@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process'
+import { resolve } from 'node:path'
 import type { APIRequestContext } from '@playwright/test'
 
 /** Variável de ambiente obrigatória do modo stack; a mensagem diz qual falta, sem imprimir valor. */
@@ -109,4 +111,35 @@ async function criarProgramaEm(
     await liberarJanela(request, conflitante)
   }
   throw new Error('Não consegui abrir a janela de agora: o conflito persiste.')
+}
+
+/**
+ * Apaga as chaves de throttle de pedidos (`wr:throttle:pedido:*`, prefixo do `RedisRequestThrottle`) no Redis do stack. O
+ * orçamento é de 1 pedido a cada 5 min por dispositivo e 3 por IP: sem isto, os `retries: 2` do CI e o smoke que roda
+ * antes estourariam o limite por IP (E3-F08). A senha do Redis é lida DENTRO do contêiner (`/run/secrets`), nunca em
+ * argv nem em log do host. Só no modo stack; o E2E roda com `frontend/` como diretório, e o compose fica na raiz.
+ */
+export function limparThrottleDePedidos(): void {
+  if (!process.env.E2E_BASE_URL) return
+  const raiz = resolve(process.cwd(), '..')
+  const script =
+    'export REDISCLI_AUTH="$(cat /run/secrets/redis_password)"; ' +
+    'redis-cli --scan --pattern "wr:throttle:pedido:*" | xargs -r redis-cli DEL'
+  execFileSync(
+    'docker',
+    [
+      'compose',
+      '-f',
+      resolve(raiz, 'docker-compose.yml'),
+      '-f',
+      resolve(raiz, 'docker-compose.dev.yml'),
+      'exec',
+      '-T',
+      'redis',
+      'sh',
+      '-c',
+      script,
+    ],
+    { stdio: ['ignore', 'ignore', 'inherit'], cwd: raiz },
+  )
 }
