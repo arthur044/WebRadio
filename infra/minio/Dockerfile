@@ -8,6 +8,7 @@
 # de vulnerabilidades (sem .trivyignore). Aqui o commit do minio/mc é o mesmo, com o compress forçado para >= 1.18.7.
 # TODO: voltar para `FROM cgr.dev/chainguard/minio-client:latest@sha256:<digest> AS mc` + `COPY --from=mc /usr/bin/mc`
 # quando o digest dela trouxer o compress >= 1.18.7 (o Dependabot avisa; conferir com `go version -m` e com o trivy).
+# Última checagem: 2026-10-29, o `latest` da Chainguard (sha256:799a60aa…) ainda tinha o compress v1.18.5.
 #
 # Go >= 1.27.3 fixado por digest (o Dependabot troca). GOTOOLCHAIN=local: nunca baixa outro toolchain no build.
 FROM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS mc
@@ -37,7 +38,10 @@ RUN go mod edit \
     -require=google.golang.org/grpc@v1.83.2 \
     -require=google.golang.org/protobuf@v1.36.11 \
  && go mod tidy \
- && go build -trimpath -ldflags="-s -w" -o /out/mc . \
+ && go build -trimpath -ldflags="-s -w \
+      -X github.com/minio/mc/cmd.Version=2025-08-13T08:35:41Z \
+      -X github.com/minio/mc/cmd.ReleaseTag=RELEASE.2025-08-13T08-35-41Z \
+      -X github.com/minio/mc/cmd.CommitID=7394ce0dd2a80935aded936b09fa12cbb3cb8096" -o /out/mc . \
  && go version -m /out/mc | grep -E '^\s+dep\s+github.com/klauspost/compress\s+v1\.18\.7(\s|$)'
 
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
