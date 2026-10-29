@@ -165,16 +165,16 @@ Conferido pelo Nexus em 2026-10-29 contra a `main`. B1 a B4 mergeados; o B3-13 d
 
 | DoD | Onde é verificado | PR |
 |---|---|---|
-| 1. `AoVivo` em até 20 s e selo sem recarregar; encerrar e cancelar sem refresh | `frontend/e2e/grade-ao-vivo.spec.ts` no `compose-smoke` (selo ao iniciar e ao encerrar; programa cancelado sai da grade pública) | #57, #62 |
+| 1. `AoVivo` em até 20 s e selo sem recarregar; encerrar e cancelar sem refresh | `frontend/e2e/grade-ao-vivo.spec.ts` no `compose-smoke` (selo ao iniciar e ao encerrar; programa cancelado sai da grade pública) | #42, #62 |
 | 2. 409 com `programaConflitanteId`; dois `POST` concorrentes = um 201 e um 409 | `[SqlFact]` da E2-F01 | #40 |
 | 3. Credencial certa na janela toca o ao vivo; errada, revogada, de outro locutor ou fora da janela é recusada | `teste.sh` do Liquidsoap e `infra/scripts/smoke-ao-vivo.sh` | #56 |
 | 4. Encerrar ou `FimUtc` derruba em até 30 s sem cair o stream, também com o Worker parado | `infra/scripts/smoke-ao-vivo.sh` (marca `WORKER_PARADO` antes do `stop`) | #63 |
 | 5. Segredo da credencial só como hash, fora dos logs, mostrado uma vez | testes da E2-F04 (varredura dos logs da requisição) e painel do locutor (E2-P03) | #56, #57 |
-| 6. Eventos pelo hub e ressincronização por REST ao reconectar | E2-F02 e telas do B3 | #40, #42, #57 |
+| 6. Eventos pelo hub e ressincronização por REST ao reconectar | E2-F02 (`ProgramaStatusAlterado`), E2-F06 (`TransmissaoAoVivoAlterada`) e telas do B3 | #40, #56, #42, #57 |
 | 7. Produção publica só a 8080; porta do ao vivo em compose explícito | E2-F11 | #56 |
 | 8. CI do Épico 1 continua verde (cobertura ≥ 80% em Domain e Application) | CI completo da `main` | PR de dependências (zod 4.6.6 no `npm audit`; digest novo do `minio-client` com `klauspost/compress` 1.18.7 e Go 1.27.3 no trivy) |
 
-O Épico 2 fica **fechado** quando o item 8 estiver verde na `main`. Ficam para depois, no backlog do GitHub: #9 (obrigatória antes do primeiro deploy), #10, #17, #18, #19, #25 e #64. A revisão dos riscos aceitos (seção abaixo e `05` §4) acontece antes do primeiro deploy público.
+O Épico 2 fica **fechado** quando o run completo do CI na `main`, depois do PR de dependências, estiver verde. Desde o `4c81546` a falha do job de vulnerabilidades faz a `main` pular os demais jobs, então os itens 1, 3, 4 e 7 só rodaram verdes nos PRs; esse run fecha a lacuna. Ficam para depois, no backlog do GitHub: #9 (obrigatória antes do primeiro deploy), #10, #17, #18, #19, #25 e #64. A revisão dos riscos aceitos (seção abaixo e `05` §4) acontece antes do primeiro deploy público.
 
 ## Riscos
 

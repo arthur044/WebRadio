@@ -12,7 +12,7 @@
          Criação = sem o predicado do Id (o EF o elimina com ignorarId nulo); edição = com "p.Id <> @ignorarId".
      Q2  TransicoesDaGrade.Sql (main), com os valores do enum já interpolados. Os cenários de escrita rodam dentro de uma
          transação que termina em ROLLBACK: o dataset não muda. (A Q3 e a Q4 gravam o preparo do AoVivo, sem rollback.)
-     Q3  ConsultasDoHarbor.JanelaAsync (origin/forge/e2-b2-ao-vivo, @daae154 em diante): @p0 = identificador e @p1 = Programa.DuracaoMaxima
+     Q3  ConsultasDoHarbor.JanelaAsync (main, desde o daae154): @p0 = identificador e @p1 = Programa.DuracaoMaxima
          em minutos (720), como o SqlQuery do EF.
 
    Ordem: Q1, Q3 e Q4 (leituras) antes da Q2 (escritas). O ROLLBACK dos cenários do Worker deixa registros fantasma e
