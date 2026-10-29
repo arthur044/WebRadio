@@ -3,7 +3,7 @@
 #   docker build -f backend/Dockerfile.api -t webradio-api .
 # Imagens fixadas por digest (sdk/aspnet 10.0-alpine); atualizar via Dependabot/PR.
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0.402-alpine3.24@sha256:496914451b05ac5a24592024362ec370c3a2d3c3fe817f864e4aa55c4c194a56 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.403-alpine3.24@sha256:cc02b814237a76c4735fb6eeee87181597b5e56f2ce458a435e527674d91f4d7 AS build
 WORKDIR /src
 COPY backend/ backend/
 RUN dotnet publish backend/src/WebRadio.Api/WebRadio.Api.csproj -c Release -o /out --no-self-contained -r linux-musl-x64 \
