@@ -162,8 +162,8 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
             _proximaTentativaUtc = null;
             var falhas = Interlocked.Exchange(ref _falhasDaManutencao, 0);
             if (falhas > 0) logger.LogInformation("WORKER_MANUTENCAO: voltou a funcionar depois de {Falhas} falha(s) seguida(s).", falhas);
-            logger.LogInformation("WORKER_MANUTENCAO: {Pedidos} pedidos anonimizados, {Eventos} eventos, {Refresh} refresh tokens e {Credenciais} credenciais de transmissão apagados.",
-                r.PedidosAnonimizados, r.EventosApagados, r.RefreshApagados, r.CredenciaisApagadas);
+            logger.LogInformation("WORKER_MANUTENCAO: {Pedidos} pedidos anonimizados, {Ips} hashes de IP e {EventosDePedido} eventos de pedido apagados, {Eventos} eventos, {Refresh} refresh tokens e {Credenciais} credenciais de transmissão apagados.",
+                r.PedidosAnonimizados, r.IpsApagados, r.EventosDePedidoApagados, r.EventosApagados, r.RefreshApagados, r.CredenciaisApagadas);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

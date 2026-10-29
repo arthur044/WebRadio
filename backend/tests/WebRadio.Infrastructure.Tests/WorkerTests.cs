@@ -179,7 +179,7 @@ public class ManutencaoTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
     public async Task Anonimiza_os_hashes_do_ouvinte_depois_de_30_dias_e_preserva_os_recentes()
     {
         var antigo = new PedidoMusica(Guid.CreateVersion7(), null, null, "Zé", "Faixa", "Banda", null, Hash(), Hash(), DateTime.UtcNow.AddDays(-31));
-        var recente = new PedidoMusica(Guid.CreateVersion7(), null, null, "Zé", "Faixa", "Banda", null, Hash(), Hash(), DateTime.UtcNow.AddDays(-29));
+        var recente = new PedidoMusica(Guid.CreateVersion7(), null, null, "Zé", "Faixa", "Banda", null, Hash(), Hash(), DateTime.UtcNow.AddDays(-5));
         await using (var db = banco.CriarContexto())
         {
             db.PedidosMusica.AddRange(antigo, recente);

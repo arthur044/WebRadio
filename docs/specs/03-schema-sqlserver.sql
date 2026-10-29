@@ -396,9 +396,15 @@ GO
    --------------------------------------------------------------------------------------- */
 
 /* ---------- 11. Rotinas de manutenção (Atlas, Épico 1 cria o esqueleto) ----------
-   - LGPD: UPDATE interacao.PedidoMusica SET ListenerDeviceHash = NULL, ListenerIpHash = NULL
-           WHERE CriadoEmUtc < DATEADD(DAY, -30, SYSUTCDATETIME()) AND (ListenerDeviceHash IS NOT NULL OR ListenerIpHash IS NOT NULL);
-           (em lotes de 4.000: o SQL Server escala para lock de tabela a partir de ~5.000 locks num statement, e o DELETE toca o clustered e os índices)
+   - LGPD, retenção do pedido de música (07, E3-D8; em lotes de 4.000: o SQL Server escala para lock de tabela a partir de ~5.000
+     locks num statement, e o DELETE toca o clustered e os índices):
+       1) IP aos 7 dias: UPDATE interacao.PedidoMusica SET ListenerIpHash = NULL
+          WHERE ListenerIpHash IS NOT NULL AND CriadoEmUtc < DATEADD(DAY, -7, SYSUTCDATETIME());
+       2) aos 30 dias, no mesmo lote: ListenerDeviceHash e ListenerIpHash = NULL e, só nos TERMINAIS (Status 3, 4, 5, ou 2 com
+          ModeradoEmUtc há mais de 24 h, E3-D9), UsuarioId = NULL, Mensagem = NULL e NomeOuvinte = N'(anônimo)' (a coluna é NOT NULL).
+          WHERE CriadoEmUtc < DATEADD(DAY, -30, SYSUTCDATETIME()) AND (hash não nulo OR terminal com algo a limpar): idempotente.
+       3) DELETE infra.EventoOutbox WHERE Tipo IN ('PedidoCriado', 'PedidoModerado', 'PedidoTocado')
+          AND CriadoEmUtc < DATEADD(DAY, -30, SYSUTCDATETIME()); entregue ou parado (o payload leva nome e dedicatória).
    - Outbox: DELETE infra.EventoOutbox WHERE ProcessadoEmUtc < DATEADD(DAY, -7, SYSUTCDATETIME());
    - RefreshToken (em dois passos; um DELETE em lotes violaria a FK_RefreshToken_SubstituidoPor,
      que é NO ACTION e checada ao fim de cada statement: o TOP não tem ordem e pode apagar o
