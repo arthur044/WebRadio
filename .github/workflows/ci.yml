@@ -525,7 +525,7 @@ jobs:
       # S-M10 (refresh entre abas): usa a fixture refresh-probe e mocks de rota, que só existem no build e2e (a imagem de produção
       # não os tem, Guardian H2), então roda no vite preview do build e2e e não contra o :8080.
       # Pedir Música e Mural (Épico 3) também usam rotas mockadas (a API é simulada, inclusive o 429 com Retry-After), então rodam aqui.
-      - name: E2E no preview (build e2e): refresh entre abas (S-M10), Pedir Música e Mural
+      - name: E2E no preview (build e2e) - refresh entre abas (S-M10), Pedir Música e Mural
         working-directory: frontend
         env:
           CI: "true"
