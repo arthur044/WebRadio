@@ -45,7 +45,7 @@ public class HostTests
     [Theory]
     [InlineData(typeof(ConflitoDeGradeException), 409, "/erros/conflito-grade")]
     [InlineData(typeof(TransicaoInvalidaException), 409, "/erros/transicao-invalida")]
-    [InlineData(typeof(PedidoJaModeradoException), 409, "/erros/transicao-invalida")]
+    [InlineData(typeof(PedidoJaModeradoException), 409, "/erros/pedido-ja-moderado")]
     public async Task Erro_de_dominio_vira_ProblemDetails(Type tipo, int status, string type)
     {
         Exception Criar() => tipo == typeof(ConflitoDeGradeException) ? new ConflitoDeGradeException(Guid.NewGuid())

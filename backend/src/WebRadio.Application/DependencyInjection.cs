@@ -19,10 +19,16 @@ public static class DependencyInjection
             // A ordem de registro é a ordem de execução: Logging envolve Validation.
             cfg.AddOpenBehavior(typeof(LoggingBehavior<,>));
             cfg.AddOpenBehavior(typeof(ValidationBehavior<,>));
+            // Logging → Validation → Throttle → Handler (Fluxo B): só os requests IThrottledRequest passam pelo Throttle.
+            cfg.AddOpenBehavior(typeof(ThrottleBehavior<,>));
         });
         services.AddValidatorsFromAssembly(typeof(AssemblyMarker).Assembly);
         services.AddScoped<ThrottleDoHarbor>();
         services.AddScoped<AlertaDoHarbor>();
+        services.AddSingleton<WebRadio.Application.Features.Pedidos.DisjuntorDoRedis>();
+        services.AddSingleton<WebRadio.Application.Features.Pedidos.CacheDoTeto>();
+        services.AddScoped<WebRadio.Application.Features.Pedidos.EstadoDoThrottle>();
+        services.AddScoped<WebRadio.Application.Pipeline.IThrottleDoRequest<WebRadio.Application.Features.Pedidos.CriarPedidoCommand>, WebRadio.Application.Features.Pedidos.ThrottleDePedido>();
         services.AddSingleton(sp => new FilaDeAlertasDoHarbor(sp.GetRequiredService<ILogger<FilaDeAlertasDoHarbor>>()));
 
         // D22: reações aos eventos de domínio, despachadas pelo interceptor da Infrastructure antes do commit.

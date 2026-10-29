@@ -82,10 +82,16 @@ public sealed class PedidoMusicaConfiguration : IEntityTypeConfiguration<PedidoM
             .HasFilter("Status = 1")
             .HasDatabaseName("IX_PedidoMusica_Fila");
 
-        builder.HasIndex(p => p.ModeradoEmUtc)
+        // E3-D9: aprovados das últimas 24 h. Chave na data da moderação (um Aprovado não sai do status 2 no Épico 3), para o corte de 24 h
+        // ser seek e não predicado residual; o INCLUDE cobre a projeção da lista do locutor.
+        // Índices NOMEADOS: dois índices na mesma coluna (ModeradoEmUtc) sem nome viram um só para o EF.
+        builder.HasIndex(p => p.ModeradoEmUtc, "IX_PedidoMusica_Aprovados")
+            .IncludeProperties(p => new { p.NomeOuvinte, p.TituloMusica, p.Artista, p.Mensagem, p.ProgramaId, p.CriadoEmUtc })
+            .HasFilter("Status = 2");
+
+        builder.HasIndex(p => p.ModeradoEmUtc, "IX_PedidoMusica_Playout")
             .IncludeProperties(p => p.MidiaId)
-            .HasFilter("Status = 2 AND MidiaId IS NOT NULL AND EnviadoPlayoutEmUtc IS NULL")
-            .HasDatabaseName("IX_PedidoMusica_Playout");
+            .HasFilter("Status = 2 AND MidiaId IS NOT NULL AND EnviadoPlayoutEmUtc IS NULL");
 
         builder.HasIndex(p => new { p.ListenerDeviceHash, p.CriadoEmUtc })
             .IsDescending(false, true)
