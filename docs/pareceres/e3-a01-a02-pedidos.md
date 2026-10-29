@@ -1,7 +1,7 @@
 # Parecer E3-A01 e E3-A02 — planos dos pedidos de música e retenção (LGPD)
 
 > Autor: Atlas (DBA) · tarefas E3-A01 e E3-A02 (`07-epico-3-tarefas.md`), parte do C1 · 2026-10-29
-> Consultas medidas: `origin/forge/e3-c1-pedidos` @ `8b635c0` (PR #81): `ConsultasDePedido.cs`, `ExpiracaoDePedidos.cs`, `ConsultasDePedidos.cs`, `Manutencao.cs` e o índice `IX_PedidoMusica_Aprovados` (migration + `03`). A consulta 5 (`divulgacoes/ativas`) é do C2 e foi medida com o **texto provisório do `07`**; refazer quando o C2 definir o SQL.
+> Consultas medidas: `origin/forge/e3-c1-pedidos` @ `8b635c0` (PR #81): `ConsultasDePedido.cs`, `ExpiracaoDePedidos.cs`, `ConsultasDePedidos.cs`, `Manutencao.cs` e o índice `IX_PedidoMusica_Aprovados` (migration + `03`). A consulta 5 (divulgações) é do C2 e foi medida depois, em `origin/forge/e3-c2-divulgacoes` (PR #82): seção 2, última linha, e seção 5.
 
 ## Veredito
 
@@ -18,7 +18,7 @@
 | 6 | Aprovados das últimas 24 h, página de 20 | *Seek* no `IX_PedidoMusica_Aprovados` | 5 / 4 (controle sem o índice: 19.844 / 20.053) |
 | 7 | `COUNT` do teto sobre `TOP (300)` | varredura parada em 300 linhas | 4 / 16 |
 | 9 | `ProgramaId` da janela | *Seek* no `IX_Programa_Grade` | 4 (`Programa`) |
-| 5 | `divulgacoes/ativas` (provisório) | varredura do `IX_Divulgacao_Ativas` inteiro (18 linhas, 4 páginas) | 4 (`Divulgacao`) |
+| 5 | `divulgacoes/ativas` (C2, #82) | varredura ordenada do `IX_Divulgacao_Ativas` (18 linhas), sem *sort* | 4 (`Divulgacao`) nos dois cenários |
 
 - **A = cenário realista** (40 `Pendente`); **B = acúmulo** (25.000 `Pendente` vencidos, Worker parado). A tabela tem **500.004 linhas** (155 MB o clustered).
 - **Nenhum índice novo além do `IX_PedidoMusica_Aprovados`**, que já está no PR com a chave em `ModeradoEmUtc`, o `INCLUDE` e a migration iguais ao proposto, e no `03`. O índice candidato do A02 (`CriadoEmUtc` filtrado) **não vale**: seção 5.
@@ -40,7 +40,7 @@ Igual ao A02 do Épico 2: contêiner descartável (`infra/perf/rodar-a01.sh <A|B
 - **Fallback do throttle (4)**: 2 a 3 leituras nos três caminhos, inclusive o IP quente com milhares de pedidos em 7 dias (4f: 3 linhas na janela de 5 min) e o dispositivo mais ativo sem pedido na janela (4c). `TOP (@p0)` do IP e o `TOP (1)` dos outros dois param no primeiro registro fora da janela.
 - **Teto (7)**: o `TOP (@p0)` interno para a leitura em 300 linhas: **16 leituras no cenário B** (25.000 pendentes), contra 731 de um `COUNT(*)` sem `TOP`. Ver o ponto 3 da seção 6 sobre o `COUNT` da fila.
 - **`ProgramaId` da janela (9)**: *seek* de faixa no `IX_Programa_Grade`, **4 leituras** com um programa em curso e 7 sem programa (o *seek* lê as 56 linhas da faixa de 12 h de `Programa`, como na Q3 do A02). Não há credencial no meio, é a mesma forma que o A02 aprovou.
-- **Divulgações ativas (5, provisório)**: o `IX_Divulgacao_Ativas` cobre a consulta (4 páginas, 18 linhas, o resto das 10.025 inativas fica fora do índice filtrado), mas o plano é **varredura**, não *seek*: com a ordenação `Prioridade DESC, Id` e os predicados de janela residuais não há chave de busca, e com 18 linhas ativas isso é o certo. O índice filtrado só pareceria necessário com muitas divulgações ativas, e essa tabela não cresce assim.
+- **Divulgações do C2 (5, #82)**: `DivulgacoesAtivasHandler.Ativas` com `Ativo = CAST(1 AS bit)` constante, a janela por `@agora` e `ORDER BY Prioridade DESC, Id`. O plano é uma **varredura** do `IX_Divulgacao_Ativas` (18 linhas, 4 páginas), **sem *sort*** (o índice já entrega `Prioridade DESC, Id`) e sem *key lookup* (só colunas do `INCLUDE`). Os 10.025 inativos do cenário B ficam fora do índice filtrado: **4 leituras nos dois cenários**. `@agora` como `datetime2(0)` ou `datetime2(7)`: mesmo plano. Não há chave de busca porque os predicados de janela são residuais, e com dezenas de ativas isso é o certo. A lista do Admin (`GET /divulgacoes`) faz *clustered scan* + *sort* da tabela inteira: 6 leituras no cenário A (43 linhas), 731 no B (10.043 linhas) mais 67 do `COUNT`; só Admin e só no cenário artificial de 10 mil divulgações, não pede índice. A checagem de imagem em uso (`GarantirUsavelAsync`) e a da `Manutencao` (`AnyAsync` por chave) fazem *seek* de 2 leituras no `UX_Divulgacao_ImagemChave`, também se o parâmetro vier como `nvarchar(4000)`.
 
 ## 3. Consulta 3 — expiração em lote (E3-F04): obrigatório
 
@@ -88,7 +88,7 @@ O `UPDATE TOP (@lote) ... WHERE Status = 1 AND CriadoEmUtc < DATEADD(MINUTE, -@e
 
 - **Entra** (já no PR #81): `IX_PedidoMusica_Aprovados ON (ModeradoEmUtc) INCLUDE (NomeOuvinte, TituloMusica, Artista, Mensagem, ProgramaId, CriadoEmUtc) WHERE Status = 2`. Coberto pela migration `IndicePedidoAprovados`, pelo `HasIndex` nomeado e pelo `03`.
 - **Não entra**: `IX_PedidoMusica_Anonimizar` (A02, seção 4).
-- **C2** (não medido aqui): `UX_Divulgacao_ImagemChave` (único, filtrado em `ImagemChaveStorage IS NOT NULL`) é pequeno e entra no C2 com a migration.
+- **C2** (#82): `UX_Divulgacao_ImagemChave` (único, filtrado em `ImagemChaveStorage IS NOT NULL`), migration `IndiceUnicoImagemDivulgacao` e `03` iguais ao previsto. Medido: a violação dá o erro 2601 com o nome do índice na mensagem (o `catch` do `GerirDivulgacao.SalvarAsync` depende disso para virar 409), e várias divulgações sem imagem (`NULL`) continuam permitidas porque o índice é filtrado.
 
 ## 6. Para o Forge
 

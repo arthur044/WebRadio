@@ -16,7 +16,10 @@
          uma transação que termina em ROLLBACK, com a contagem de locks; o laço inteiro (3z) vem por último e GRAVA.
      Q4  ConsultasDePedidos.EsperaDoFallbackAsync (Infrastructure/Pedidos): dispositivo, usuário e IP. O byte[] do
          SqlQuery interpolado vai como varbinary(8000) (suposição a confirmar com o Forge; o 4h usa binary(32) como controle).
-     Q5  divulgacoes/ativas: texto PROVISÓRIO tirado do 07 (E3-F05), até o C2 definir o SQL.
+     Q5  Divulgações do C2 (forge/e3-c2-divulgacoes, PR #82): DivulgacoesAtivasHandler.Ativas (SQL do EF, Ativo constante, janela por
+         parâmetro @agora datetime2(0), ORDER BY Prioridade DESC, Id), ListarDivulgacoesHandler (Admin: COUNT + OFFSET/FETCH),
+         a checagem de imagem em uso (GarantirUsavelAsync) e a da Manutencao (AnyAsync por chave), as duas contra o
+         UX_Divulgacao_ImagemChave. O 5g prova a violação do índice único (o 409 do E3-D5 depende da mensagem).
      Q6  ListarPedidosHandler.ListaDeAprovados + AprovadosAsync (corte de 24 h em ModeradoEmUtc), mais o CountAsync.
      Q7  ConsultasDePedidos.TetoDePendentesAtingidoAsync: COUNT sobre TOP (@teto).
      Q9  ConsultasDePedidos.ProgramaDaJanelaAsync: o seek de faixa no IX_Programa_Grade, sem a credencial no meio.
@@ -164,16 +167,67 @@ EXEC sp_executesql @sqlJanela, N'@p0 int', @p0 = 720;
 SET STATISTICS XML OFF; SET STATISTICS IO OFF;
 GO
 
-/* =============== Q5: divulgações ativas (texto provisório do 07, E3-F05) =============== */
-DECLARE @sqlAtivas nvarchar(max) = N'SELECT [d].[Id], [d].[Titulo], [d].[Mensagem], [d].[ImagemChaveStorage], [d].[LinkDestino], [d].[Prioridade], [d].[InicioExibicaoUtc], [d].[FimExibicaoUtc]
+/* =============== Q5: divulgações (C2) =============== */
+DECLARE @sqlAtivas nvarchar(max) = N'SELECT [d].[Id], [d].[Prioridade], [d].[Titulo], [d].[Mensagem], [d].[ImagemChaveStorage], [d].[LinkDestino], [d].[InicioExibicaoUtc], [d].[FimExibicaoUtc]
 FROM [interacao].[Divulgacao] AS [d]
-WHERE [d].[Ativo] = CAST(1 AS bit) AND ([d].[InicioExibicaoUtc] IS NULL OR [d].[InicioExibicaoUtc] <= SYSUTCDATETIME()) AND ([d].[FimExibicaoUtc] IS NULL OR [d].[FimExibicaoUtc] > SYSUTCDATETIME())
+WHERE [d].[Ativo] = CAST(1 AS bit) AND ([d].[InicioExibicaoUtc] IS NULL OR [d].[InicioExibicaoUtc] <= @agora) AND ([d].[FimExibicaoUtc] IS NULL OR @agora < [d].[FimExibicaoUtc])
 ORDER BY [d].[Prioridade] DESC, [d].[Id]';
+DECLARE @sqlLista nvarchar(max) = N'SELECT [d].[Id], [d].[AtualizadoEmUtc], [d].[Ativo], [d].[CriadoEmUtc], [d].[CriadoPorUsuarioId], [d].[FimExibicaoUtc], [d].[ImagemChaveStorage], [d].[InicioExibicaoUtc], [d].[LinkDestino], [d].[Mensagem], [d].[Prioridade], [d].[RowVersion], [d].[Titulo]
+FROM [interacao].[Divulgacao] AS [d]
+ORDER BY [d].[Prioridade] DESC, [d].[Id]
+OFFSET @p ROWS FETCH NEXT @p0 ROWS ONLY';
+DECLARE @sqlListaTotal nvarchar(max) = N'SELECT COUNT(*) FROM [interacao].[Divulgacao] AS [d]';
+DECLARE @sqlEmUso nvarchar(max) = N'SELECT CASE WHEN EXISTS (SELECT 1 FROM [interacao].[Divulgacao] AS [d] WHERE [d].[ImagemChaveStorage] = @chave AND [d].[Id] <> @id) THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END';
+DECLARE @sqlManut nvarchar(max) = N'SELECT CASE WHEN EXISTS (SELECT 1 FROM [interacao].[Divulgacao] AS [d] WHERE [d].[ImagemChaveStorage] = @chave) THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END';
+DECLARE @agora0 datetime2(0) = CONVERT(datetime2(0), SYSUTCDATETIME()), @agora7 datetime2(7) = SYSUTCDATETIME();
+DECLARE @chaveUsada varchar(512) = (SELECT TOP (1) ImagemChaveStorage FROM interacao.Divulgacao WHERE ImagemChaveStorage IS NOT NULL ORDER BY Id DESC);
+DECLARE @idDono uniqueidentifier = (SELECT Id FROM interacao.Divulgacao WHERE ImagemChaveStorage = @chaveUsada);
+DECLARE @chaveLivre varchar(512) = CONCAT('divulgacoes/', LOWER(REPLACE(CONVERT(varchar(36), NEWID()), '-', '')), '.webp');
+DECLARE @chaveN nvarchar(4000) = @chaveLivre;
+DECLARE @idNovo uniqueidentifier = NEWID();
 SET STATISTICS IO ON; SET STATISTICS XML ON;
-PRINT '### 5a divulgações ativas (provisório)';
+PRINT '### 5a divulgações ativas (EF, @agora datetime2(0))';
 CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
-EXEC sp_executesql @sqlAtivas;
+EXEC sp_executesql @sqlAtivas, N'@agora datetime2(0)', @agora = @agora0;
+PRINT '### 5b divulgações ativas, controle com @agora datetime2(7)';
+CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
+EXEC sp_executesql @sqlAtivas, N'@agora datetime2(7)', @agora = @agora7;
+PRINT '### 5c lista do Admin, COUNT(*) do total';
+CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
+EXEC sp_executesql @sqlListaTotal;
+PRINT '### 5d lista do Admin, primeira página (20)';
+CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
+EXEC sp_executesql @sqlLista, N'@p int, @p0 int', @p = 0, @p0 = 20;
+PRINT '### 5e imagem em uso por outra divulgação (PUT/POST): chave de outra divulgação';
+CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
+EXEC sp_executesql @sqlEmUso, N'@chave varchar(512), @id uniqueidentifier', @chave = @chaveUsada, @id = @idNovo;
+PRINT '### 5f imagem em uso: chave livre (o caso comum), @chave varchar(512)';
+CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
+EXEC sp_executesql @sqlEmUso, N'@chave varchar(512), @id uniqueidentifier', @chave = @chaveLivre, @id = @idDono;
+PRINT '### 5g controle: chave livre com @chave nvarchar(4000) (o que sairia se o parâmetro perdesse o tipo da coluna)';
+CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
+EXEC sp_executesql @sqlEmUso, N'@chave nvarchar(4000), @id uniqueidentifier', @chave = @chaveN, @id = @idDono;
+PRINT '### 5h Manutencao: a imagem órfã tem referência? (por chave, varchar(512))';
+CHECKPOINT; DBCC DROPCLEANBUFFERS WITH NO_INFOMSGS; DBCC FREEPROCCACHE WITH NO_INFOMSGS;
+EXEC sp_executesql @sqlManut, N'@chave varchar(512)', @chave = @chaveLivre;
 SET STATISTICS XML OFF; SET STATISTICS IO OFF;
+GO
+
+PRINT '### 5i violação do UX_Divulgacao_ImagemChave: a mensagem tem o nome do índice (o catch do GerirDivulgacao depende disso)';
+BEGIN TRAN;
+DECLARE @chaveDup varchar(512) = (SELECT TOP (1) ImagemChaveStorage FROM interacao.Divulgacao WHERE ImagemChaveStorage IS NOT NULL);
+DECLARE @admin uniqueidentifier = (SELECT TOP (1) Id FROM seg.Usuario WHERE Role = 1);
+BEGIN TRY
+    INSERT interacao.Divulgacao (Titulo, Mensagem, ImagemChaveStorage, CriadoPorUsuarioId) VALUES (N'duplicada', N'x', @chaveDup, @admin);
+    SELECT 'ERRO: o índice único deixou passar a chave repetida' AS resultado;
+END TRY
+BEGIN CATCH
+    SELECT ERROR_NUMBER() AS numero, CASE WHEN CHARINDEX('UX_Divulgacao_ImagemChave', ERROR_MESSAGE()) > 0 THEN 'sim' ELSE 'NAO' END AS mensagem_tem_o_nome_do_indice;
+END CATCH;
+-- Várias divulgações sem imagem (NULL) continuam permitidas: o índice é filtrado.
+INSERT interacao.Divulgacao (Titulo, Mensagem, ImagemChaveStorage, CriadoPorUsuarioId) VALUES (N'sem imagem 1', N'x', NULL, @admin), (N'sem imagem 2', N'x', NULL, @admin);
+SELECT 'duas divulgações sem imagem inseridas' AS resultado;
+ROLLBACK;
 GO
 
 /* =============== Q4: fallback do throttle =============== */
