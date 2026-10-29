@@ -41,6 +41,10 @@
     <PackageVersion Include="Microsoft.Extensions.Configuration.KeyPerFile" Version="10.0.13" />
     <PackageVersion Include="StackExchange.Redis" Version="3.4.20" />
     <PackageVersion Include="Minio" Version="7.0.0" />
+    <!-- Recodificação da imagem de divulgação (E3-D4, S-B10): SkiaSharp (MIT). O asset NoDependencies traz o linux-musl-x64 da imagem Alpine
+         da API, sem fontconfig nem pacote de sistema. O job de Vulnerabilidades cobre os pacotes SkiaSharp.NativeAssets.*. -->
+    <PackageVersion Include="SkiaSharp" Version="4.154.0" />
+    <PackageVersion Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.154.0" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.13" />
   </ItemGroup>
 

@@ -21,6 +21,8 @@ public static class WorkerServiceCollectionExtensions
         var connectionString = InfrastructureServiceCollectionExtensions.ConnectionStringDoBanco(configuration, exigirSenhaDeSegredo, NomesDeAplicacao.Worker);
         services.AddRadioDbContext(connectionString);
         services.AddSingleton<IClock, SistemaRelogio>();
+        // Storage opcional (só com Storage:Endpoint): a Manutencao apaga as imagens órfãs de divulgação com a credencial do svc-worker (E3-F07).
+        InfrastructureServiceCollectionExtensions.AddStorage(services, configuration);
 
         var ciclo = new CicloOptions();
         if (!string.IsNullOrWhiteSpace(configuration["Worker:ArquivoDeHeartbeat"]))

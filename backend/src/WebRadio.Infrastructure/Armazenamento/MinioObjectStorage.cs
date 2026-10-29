@@ -147,6 +147,28 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
         await _interno.RemoveObjectAsync(new RemoveObjectArgs().WithBucket(bucketOrigem).WithObject(chaveOrigem), ct);
     }
 
+    public async Task PutAsync(string bucket, string chave, Stream conteudo, long tamanhoBytes, string contentType, CancellationToken ct = default) =>
+        await _interno.PutObjectAsync(new PutObjectArgs().WithBucket(bucket).WithObject(chave).WithStreamData(conteudo)
+            .WithObjectSize(tamanhoBytes).WithContentType(contentType), ct);
+
+    public async Task DeleteAsync(string bucket, string chave, CancellationToken ct = default) =>
+        await _interno.RemoveObjectAsync(new RemoveObjectArgs().WithBucket(bucket).WithObject(chave), ct);
+
+    public async Task<IReadOnlyList<ObjetoListado>> ListarAsync(string bucket, string prefixo, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(prefixo);
+        var itens = new List<ObjetoListado>();
+        await foreach (var item in _interno.ListObjectsEnumAsync(new ListObjectsArgs().WithBucket(bucket).WithPrefix(prefixo).WithRecursive(true), ct))
+        {
+            if (item.IsDir) continue;
+            itens.Add(new ObjetoListado(item.Key, DateTime.SpecifyKind(item.LastModifiedDateTime ?? DateTime.MinValue, DateTimeKind.Utc)));
+        }
+
+        return itens;
+    }
+
+    public string UrlPublica(string bucket, string chave) => new Uri(_publicEndpoint, $"{bucket}/{chave}").ToString();
+
     public async Task<bool> VerificarAsync(CancellationToken ct = default)
     {
         try

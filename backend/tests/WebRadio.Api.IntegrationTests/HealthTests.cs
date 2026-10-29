@@ -26,6 +26,14 @@ public class HealthTests
         public Task<InfoObjeto?> HeadAsync(string bucket, string chave, CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task MoverAsync(string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default) => throw new NotSupportedException();
+
+        public Task PutAsync(string bucket, string chave, Stream conteudo, long tamanhoBytes, string contentType, CancellationToken ct = default) => throw new NotSupportedException();
+
+        public Task DeleteAsync(string bucket, string chave, CancellationToken ct = default) => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<ObjetoListado>> ListarAsync(string bucket, string prefixo, CancellationToken ct = default) => throw new NotSupportedException();
+
+        public string UrlPublica(string bucket, string chave) => throw new NotSupportedException();
     }
 
     private static ApiFactory ComStorage()

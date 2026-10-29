@@ -220,6 +220,11 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
 
                     b.HasIndex("CriadoPorUsuarioId");
 
+                    b.HasIndex("ImagemChaveStorage")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Divulgacao_ImagemChave")
+                        .HasFilter("ImagemChaveStorage IS NOT NULL");
+
                     b.HasIndex("Prioridade")
                         .IsDescending()
                         .HasDatabaseName("IX_Divulgacao_Ativas")
