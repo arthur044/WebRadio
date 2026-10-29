@@ -105,8 +105,9 @@ Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin
 |---|---|---|
 | GET | `/divulgacoes/ativas` | público (ordenadas por `prioridade` desc e depois `id`; cache HTTP `max-age=30`) |
 | GET | `/divulgacoes?pagina=&tamanho=` | Admin |
-| POST | `/divulgacoes` | Admin → 201. O corpo leva `imagemChave?` (a `chave` do `POST /divulgacoes/imagens`), nunca uma URL (Épico 3, E3-D5 do `07`) |
-| PUT | `/divulgacoes/{id}` | Admin + `If-Match`. **Substitui o recurso inteiro**: o corpo é o mesmo do `POST`, e `imagemChave` ausente ou `null` = divulgação sem imagem. Para manter a imagem, o cliente reenvia a `imagemChave` do DTO |
+| GET | `/divulgacoes/{id}` | Admin → **200** + `ETag` (fonte do `If-Match` do `PUT`) |
+| POST | `/divulgacoes` | Admin → 201 + `ETag`. Corpo: `{ titulo, mensagem, imagemChave?, linkDestino?, prioridade, inicioExibicaoUtc?, fimExibicaoUtc?, ativo }`. O corpo leva `imagemChave?` (a `chave` do `POST /divulgacoes/imagens`), nunca uma URL (Épico 3, E3-D5 do `07`) |
+| PUT | `/divulgacoes/{id}` | Admin + `If-Match`. **Substitui o recurso inteiro**: o corpo é o mesmo do `POST`, e `imagemChave` ausente ou `null` = divulgação sem imagem. Para manter a imagem, o cliente reenvia a `imagemChave` do DTO. → 200 + `ETag` novo |
 | DELETE | `/divulgacoes/{id}` | Admin → 204 |
 | POST | `/divulgacoes/imagens` | Admin; **`multipart/form-data`** com `file` (≤ 2 MB, `RequestSizeLimit`) → **201** `{ chave, imagemUrl }`. A API confere formato (JPEG ou PNG; WebP só na saída) e dimensões pelo cabeçalho, **recusa** lado acima de 4096 px, recodifica para WebP, tira os metadados e grava em `publico/` com `Content-Type` do servidor. Corpo acima de 2 MB → **413**; não é imagem aceita ou passa de 4096 px → **400** (S-A05); mais de **30 por hora** por Admin → **429** |
 
