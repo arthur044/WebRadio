@@ -26,6 +26,9 @@ public static class GruposDoHub
 
     /// <summary>Todo JWT autenticado, a partir do <c>sub</c>: eventos que só o próprio usuário recebe (E2-F12).</summary>
     public static string Usuario(Guid usuarioId) => $"usuario:{usuarioId:D}";
+
+    /// <summary>Grupo do dispositivo a partir do <c>DeviceHash</c> já guardado no pedido: <c>listener:{hex}</c>.</summary>
+    public static string Listener(byte[] deviceHash) => $"listener:{Convert.ToHexString(deviceHash)}";
 }
 
 /// <summary>

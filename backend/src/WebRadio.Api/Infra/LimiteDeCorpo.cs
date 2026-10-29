@@ -3,8 +3,9 @@ using Microsoft.AspNetCore.Http.Features;
 namespace WebRadio.Api.Infra;
 
 /// <summary>
-/// Rotas de auth e as internas do playout recebem JSON minúsculo: 8 KB de teto (antes: o padrão do Kestrel, ~30 MB, sobre
-/// PBKDF2/validação).
+/// Rotas de auth, as internas do playout e os pedidos de música recebem JSON minúsculo: 8 KB de teto (antes: o padrão do Kestrel, ~30 MB,
+/// sobre PBKDF2/validação). O pedido é anônimo e o corpo passa pela validação do texto ANTES do throttle; o maior corpo legítimo (quatro
+/// campos de até 280 caracteres, mesmo escapados como \uXXXX) tem uns 5 KB.
 /// </summary>
 public static class LimiteDeCorpo
 {
@@ -14,7 +15,8 @@ public static class LimiteDeCorpo
         => app.Use(async (ctx, next) =>
         {
             if (ctx.Request.Path.StartsWithSegments("/api/v1/auth", StringComparison.OrdinalIgnoreCase)
-                || ctx.Request.Path.StartsWithSegments("/api/v1/internal", StringComparison.OrdinalIgnoreCase))
+                || ctx.Request.Path.StartsWithSegments("/api/v1/internal", StringComparison.OrdinalIgnoreCase)
+                || ctx.Request.Path.StartsWithSegments("/api/v1/pedidos", StringComparison.OrdinalIgnoreCase))
             {
                 if (ctx.Request.ContentLength > BytesDeAuth)
                 {

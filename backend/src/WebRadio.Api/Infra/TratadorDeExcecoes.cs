@@ -29,7 +29,9 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
             EmailJaCadastradoException e => Criar(409, "/erros/conflito-cadastro", "Cadastro duplicado.", e.Message),
             ConflitoDeGradeException c => Criar(409, "/erros/conflito-grade", "Conflito de horário na grade.", c.Message,
                 ("programaConflitanteId", c.ProgramaConflitanteId)),
-            PedidoJaModeradoException p => Criar(409, "/erros/transicao-invalida", "Transição inválida.", p.Message),
+            PedidoJaModeradoException p => Criar(409, "/erros/pedido-ja-moderado", "Pedido já moderado.", p.Message),
+            MuitosPedidosException m => Criar(429, "/erros/muitos-pedidos", "Muitos pedidos.", m.Message,
+                ("retryAfterSeconds", SegundosDeEspera(m.TenteDeNovoEm))),
             TransicaoInvalidaException t => Criar(409, "/erros/transicao-invalida", "Transição inválida.", t.Message),
             AcessoNegadoException a => Criar(403, "/erros/acesso-negado", "Acesso negado.", a.Message),
             NaoEncontradoException n => Criar(404, "/erros/nao-encontrado", "Não encontrado.", n.Message),
@@ -55,11 +57,15 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
         if (ex is ServidorOcupadoException) http.Response.Headers.RetryAfter = "5";
         if (ex is LimiteExcedidoException limite)
             http.Response.Headers.RetryAfter = SegundosDeEspera(limite).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (ex is MuitosPedidosException pedidos)
+            http.Response.Headers.RetryAfter = SegundosDeEspera(pedidos.TenteDeNovoEm).ToString(System.Globalization.CultureInfo.InvariantCulture);
         await http.Response.WriteAsJsonAsync(problema, options: null, contentType: "application/problem+json", ct);
         return true;
     }
 
-    private static int SegundosDeEspera(LimiteExcedidoException l) => Math.Max(1, (int)Math.Ceiling(l.TenteDeNovoEm.TotalSeconds));
+    private static int SegundosDeEspera(LimiteExcedidoException l) => SegundosDeEspera(l.TenteDeNovoEm);
+
+    private static int SegundosDeEspera(TimeSpan espera) => Math.Max(1, (int)Math.Ceiling(espera.TotalSeconds));
 
     /// <summary>Corpo ÚNICO de todo 401 de login (credencial errada, e-mail inexistente, inativo, bloqueado, limite).</summary>
     public static ProblemDetails Credenciais()
