@@ -9,7 +9,7 @@ COPY backend/ backend/
 RUN dotnet publish backend/src/WebRadio.Api/WebRadio.Api.csproj -c Release -o /out --no-self-contained -r linux-musl-x64 \
     -p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.13-alpine3.24@sha256:ecf8dcbaab8ebc4bdfb2322d6fe4217bbb118894310ebb6d53c580874ab4b27d
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.14-alpine3.24@sha256:254fe017495996d3abcc487ffacdcce2b73affb380d3af87af12c8dff41fe0b0
 # InvariantGlobalization está DESLIGADO de propósito (Microsoft.Data.SqlClient quebra, ver Directory.Build.props):
 # a imagem Alpine vem com a variável ligada e sem ICU.
 RUN apk add --no-cache icu-libs
