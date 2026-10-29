@@ -300,6 +300,10 @@ CREATE INDEX IX_PedidoMusica_Fila ON interacao.PedidoMusica (CriadoEmUtc)
 -- Fila do playout: aprovados com mídia ainda não enviados ao Liquidsoap.
 CREATE INDEX IX_PedidoMusica_Playout ON interacao.PedidoMusica (ModeradoEmUtc)
     INCLUDE (MidiaId) WHERE Status = 2 AND MidiaId IS NOT NULL AND EnviadoPlayoutEmUtc IS NULL;
+-- Aprovados das últimas 24 h (07, E3-D9): chave em ModeradoEmUtc (um Aprovado não sai do status 2 no Épico 3), para o corte
+-- de 24 h ser seek; o INCLUDE cobre a lista do locutor (predicado com CONSTANTE Status = 2).
+CREATE INDEX IX_PedidoMusica_Aprovados ON interacao.PedidoMusica (ModeradoEmUtc)
+    INCLUDE (NomeOuvinte, TituloMusica, Artista, Mensagem, ProgramaId, CriadoEmUtc) WHERE Status = 2;
 -- Anti-spam no fallback SQL + "meus pedidos".
 CREATE INDEX IX_PedidoMusica_Device ON interacao.PedidoMusica (ListenerDeviceHash, CriadoEmUtc DESC)
     WHERE ListenerDeviceHash IS NOT NULL;

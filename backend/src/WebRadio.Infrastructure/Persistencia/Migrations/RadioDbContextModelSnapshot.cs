@@ -17,7 +17,7 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.0")
+                .HasAnnotation("ProductVersion", "10.0.13")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -323,12 +323,6 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                         .HasDatabaseName("IX_PedidoMusica_MidiaId")
                         .HasFilter("MidiaId IS NOT NULL");
 
-                    b.HasIndex("ModeradoEmUtc")
-                        .HasDatabaseName("IX_PedidoMusica_Playout")
-                        .HasFilter("Status = 2 AND MidiaId IS NOT NULL AND EnviadoPlayoutEmUtc IS NULL");
-
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("ModeradoEmUtc"), new[] { "MidiaId" });
-
                     b.HasIndex("ModeradoPorUsuarioId");
 
                     b.HasIndex("ProgramaId")
@@ -349,6 +343,16 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                         .IsDescending(false, true)
                         .HasDatabaseName("IX_PedidoMusica_Usuario")
                         .HasFilter("UsuarioId IS NOT NULL");
+
+                    b.HasIndex(new[] { "ModeradoEmUtc" }, "IX_PedidoMusica_Aprovados")
+                        .HasFilter("Status = 2");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "ModeradoEmUtc" }, "IX_PedidoMusica_Aprovados"), new[] { "NomeOuvinte", "TituloMusica", "Artista", "Mensagem", "ProgramaId", "CriadoEmUtc" });
+
+                    b.HasIndex(new[] { "ModeradoEmUtc" }, "IX_PedidoMusica_Playout")
+                        .HasFilter("Status = 2 AND MidiaId IS NOT NULL AND EnviadoPlayoutEmUtc IS NULL");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "ModeradoEmUtc" }, "IX_PedidoMusica_Playout"), new[] { "MidiaId" });
 
                     b.ToTable("PedidoMusica", "interacao", t =>
                         {
