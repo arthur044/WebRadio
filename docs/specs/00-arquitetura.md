@@ -120,14 +120,15 @@ A regra de dependência é garantida por **teste de arquitetura** (NetArchTest),
 1. O frontend gera `listenerId` (`crypto.randomUUID()`, localStorage) e o envia no header `X-Listener-Id` e na query do hub.
 2. `POST /pedidos` → `CreateSongRequestCommand`. Ordem do pipeline MediatR: `Logging → Validation (FluentValidation, só campos) → Throttle (IThrottledRequest) → Handler`.
 3. `IListenerIdentity` calcula `DeviceHash = HMAC-SHA256(pepper, listenerId)` e `IpHash = HMAC-SHA256(pepper, IP)`. O IP vem de `ForwardedHeaders` **só com o nginx em `KnownProxies`**; IPv6 é normalizado para /64. O banco nunca guarda IP nem listenerId em claro (LGPD).
-4. Regras do throttle (Redis):
+4. Regras do throttle (Redis; o `RedisRequestThrottle` prefixa toda chave com `wr:`, então a chave real é `wr:throttle:pedido:...`):
    - dispositivo: `SET throttle:pedido:dev:{hash} 1 NX EX 300` → falhou = 429;
    - IP: `INCR throttle:pedido:ip:{hash}` + `EXPIRE NX 300` → acima de 3 = 429 (tolera NAT/Wi-Fi compartilhado);
    - usuário logado: `SET throttle:pedido:usr:{id} NX EX 300`.
    - O 429 volta como ProblemDetails com `retryAfterSeconds` (TTL restante) e o header `Retry-After`.
-   - **Redis fora do ar**: cai para uma consulta no SQL (`EXISTS` nos últimos 5 min pelos índices de hash), registra um warning e o health fica `Degraded`. Não é atômico, mas é aceitável em modo degradado.
-5. O handler grava `Pendente` (e `ProgramaId` do programa AoVivo, se houver) e escreve no outbox `PedidoCriado`, que vai para o grupo SignalR `locutores`.
-6. O locutor aprova (`midiaId` opcional, que precisa ser uma mídia `Aprovado` do tipo Musica) ou rejeita. O outbox publica `PedidoModerado` para o grupo `listener:{deviceHash}`.
+   - **Redis fora do ar**: cai para uma consulta no SQL nos últimos 5 min (`EXISTS` por dispositivo e por usuário, `COUNT` ≥ 3 por IP), sob `sp_getapplock` pelo hash do dispositivo, registra um warning e o health fica `Degraded` (detalhe no `07`, E3-F01).
+   - **Teto global**: com `Pedidos:TetoPendentes` (padrão 300) pedidos `Pendente`, o próximo recebe 429 (S-M13; `07`, E3-D10).
+5. O handler grava `Pendente` (e `ProgramaId` do programa da janela atual, se houver: a regra do harbor, que não depende do `Status` do Worker; `07`, E3-D1) e escreve no outbox `PedidoCriado`, que vai para o grupo SignalR `locutores`.
+6. O locutor aprova (`midiaId` opcional, que precisa ser uma mídia `Aprovado` do tipo Musica) ou rejeita. O outbox publica `PedidoModerado` para o grupo `listener:{deviceHash}` e para `locutores`.
 7. Pedido aprovado com `midiaId` entra na fila de playout (Fluxo D). Sem mídia, o locutor toca manualmente e marca `Tocado`.
 8. O Worker expira pedidos `Pendente` há mais de `Pedidos:ExpiracaoMinutos` (padrão 120) → `Expirado`.
 
