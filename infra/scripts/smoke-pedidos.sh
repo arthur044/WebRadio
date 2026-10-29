@@ -15,8 +15,8 @@
 #      passo da outra origem falha.
 #   3. Redis parado: o throttle cai para o SQL, o /health/ready fica Degraded e o segundo pedido do mesmo dispositivo continua 429.
 #
-# O `curl` vem da imagem do próprio `web` (--pull never: se ela não existir o smoke falha, nunca baixa imagem de fora) (webradio-web:local, já construída pelo compose; a base é fixada por digest e o bloco apk
-# do Dockerfile mantém curl/libcurl corrigidos): o runner não baixa imagem nenhuma. O orçamento de throttle é dividido com o E2E: o
+# O `curl` vem da imagem do próprio `web` (webradio-web:local, já construída pelo compose; a base é fixada por digest e o bloco apk
+# do Dockerfile mantém curl/libcurl corrigidos). O `docker run` usa --pull never: sem a imagem o smoke falha na hora e nunca baixa nada. O orçamento de throttle é dividido com o E2E: o
 # `trap` de saída apaga wr:throttle:pedido:* e deixa o Redis de pé (o E2E do Playwright faz o mesmo antes de cada teste de pedidos).
 # A senha do Redis é lida DENTRO do contêiner, nunca em argv nem em log do host. Acumula as falhas e sai com 1 se houve alguma.
 # =============================================================================
@@ -79,7 +79,9 @@ WEB_IP="$(docker inspect -f "{{(index .NetworkSettings.Networks \"$REDE\").IPAdd
 [[ -n "$WEB_IP" ]] || { echo "smoke-pedidos: o web não ganhou IP na rede $REDE."; exit 1; }
 # Padrão errado, senha errada ou Redis fora apagariam zero chaves em silêncio e o E2E herdaria o limite por IP: aqui a limpeza inicial
 # tem que funcionar e deixar 0 chaves, senão o script falha.
-if ! limpar_chaves || [[ -n "$(chaves_redis)" ]]; then
+redis_responde() { "${COMPOSE[@]}" exec -T redis sh -c 'export REDISCLI_AUTH="$(cat /run/secrets/redis_password)"; redis-cli ping' 2>/dev/null | grep -q PONG; }
+# Redis recusando (senha errada) não pode passar por "zero chaves": o ping vem antes de contar.
+if ! redis_responde || ! limpar_chaves || [[ -n "$(chaves_redis)" ]]; then
   echo "smoke-pedidos: não consegui limpar as chaves wr:throttle:pedido:* do Redis (Redis fora, senha ou padrão errados)."
   exit 1
 fi
