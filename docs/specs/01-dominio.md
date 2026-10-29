@@ -84,7 +84,7 @@ Agendado ──(worker: Inicio ≤ agora < Fim)──► AoVivo ──(worker: F
 | Campo | Tipo | Regra |
 |---|---|---|
 | Id | Guid | PK |
-| ProgramaId | Guid? | programa AoVivo no momento do pedido, se houver |
+| ProgramaId | Guid? | programa da janela (`InicioUtc <= agora < FimUtc`, fora de `Finalizado`/`Cancelado`) no momento do pedido, se houver (`07`, E3-D1) |
 | UsuarioId | Guid? | preenchido se o ouvinte estiver logado |
 | NomeOuvinte | string(60) | obrigatório; sem controle/HTML (validador) |
 | TituloMusica | string(200) | obrigatório |
@@ -184,7 +184,8 @@ Invariante: `Aprovado ⇒ MimeType, HashSHA256, DuracaoSegundos, SanitizadoEmUtc
 | Não encontrado | 404 | `/erros/nao-encontrado` |
 | `ConflitoDeGrade` | 409 | `/erros/conflito-grade` (+ `programaConflitanteId`) |
 | E-mail já cadastrado (`/auth/registrar`) | 409 | `/erros/conflito-cadastro` (F07a; o registro é aberto e limitado a 3/h por IP, então o 409 é o custo aceito) |
-| `TransicaoInvalida` / `PedidoJaModerado` | 409 | `/erros/transicao-invalida` |
+| `TransicaoInvalida` | 409 | `/erros/transicao-invalida` |
+| `PedidoJaModerado` (também o conflito de `RowVersion` na moderação) | 409 | `/erros/pedido-ja-moderado` (`07`, Épico 3) |
 | `RowVersion` divergente (`If-Match`) | 412 | `/erros/versao-desatualizada` |
 | Throttle de pedido | 429 | `/erros/muitos-pedidos` (+ `retryAfterSeconds`) |
 | Limite por usuário (ex.: 5 gerações de credencial de transmissão por hora, Épico 2) | 429 | `/erros/limite-excedido` (+ `retryAfterSeconds` e `Retry-After`) |
