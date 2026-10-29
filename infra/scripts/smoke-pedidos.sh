@@ -249,6 +249,8 @@ PY
   done
   confere "arquivo acima de 2 MB → 413" status_da_imagem "$TMP/grande.jpg" 413
   confere "PNG simples é aceito (201)" status_da_imagem "$TMP/ok.png" 201
+  head -c 2000000 /dev/zero | tr '\0' 'A' > "$TMP/quase-2mb.jpg"
+  confere "sem token e com ~2 MB → 401 (a Api responde antes de ler o corpo; o nginx não guarda o upload)" test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST -F "file=@$TMP/quase-2mb.jpg;type=image/jpeg" "$BASE/api/v1/divulgacoes/imagens")" = 401
   confere "sem token → 401" test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -F "file=@$TMP/gps.jpg" "$BASE/api/v1/divulgacoes/imagens")" = 401
 
   # --- o caminho em MAIÚSCULAS não chega à API: o location /api/ do nginx diferencia maiúsculas, então ele cai na SPA (location /). Seguro: um corpo
@@ -278,24 +280,49 @@ PY
   if [[ -z "$MINIO_CID" ]] || ! docker image inspect webradio-minio-init:local >/dev/null 2>&1; then
     falha "contêiner do MinIO ou imagem webradio-minio-init:local ausentes para conferir as políticas"
   else
-    for papel in api worker; do
-      printf 'MC_HOST_svc=http://%s:%s@127.0.0.1:9000\n' "$(cat "secrets/minio_${papel}_access_key")" "$(cat "secrets/minio_${papel}_secret_key")" > "$TMP/mc-$papel.env"
+    for papel in api worker root; do
+      if [[ "$papel" == root ]]; then
+        # A credencial root só prepara os objetos dos negativos (e confere que eles continuam lá depois da negativa); nunca serve de resultado.
+        printf 'MC_HOST_svc=http://%s:%s@127.0.0.1:9000\n' "$(cat secrets/minio_root_user)" "$(cat secrets/minio_root_password)" > "$TMP/mc-root.env"
+      else
+        printf 'MC_HOST_svc=http://%s:%s@127.0.0.1:9000\n' "$(cat "secrets/minio_${papel}_access_key")" "$(cat "secrets/minio_${papel}_secret_key")" > "$TMP/mc-$papel.env"
+      fi
       chmod 0600 "$TMP/mc-$papel.env"
     done
-    mc_como() { # $1 papel, demais = argumentos do mc (stdin para `mc pipe`); a credencial vai por --env-file, nunca em argv
+    SAIDA_MC=""
+    mc_como() { # $1 papel, demais = argumentos do mc (stdin para `mc pipe`); a credencial vai por --env-file, nunca em argv; stdout+stderr em $SAIDA_MC
       local papel="$1"; shift
-      docker run --rm -i --pull never --network "container:$MINIO_CID" --user 65532:65532 --read-only --tmpfs /tmp --cap-drop ALL \
+      SAIDA_MC="$(docker run --rm -i --pull never --network "container:$MINIO_CID" --user 65532:65532 --read-only --tmpfs /tmp --cap-drop ALL \
         --security-opt no-new-privileges:true --env-file "$TMP/mc-$papel.env" -e HOME=/tmp -e MC_CONFIG_DIR=/tmp/.mc \
-        --entrypoint mc webradio-minio-init:local "$@" >/dev/null 2>&1
+        --entrypoint mc webradio-minio-init:local "$@" 2>&1)"
     }
-    gravar_como() { echo x | mc_como "$1" pipe "svc/publico/$2"; }
-    nega() { ! "$@"; }
-    confere "svc-api grava em publico/divulgacoes/" gravar_como api divulgacoes/politica.bin
-    confere "svc-api NÃO grava em publico/ fora de divulgacoes/" nega gravar_como api fora-politica.bin
+    # here-string e não pipe: no pipe o mc_como rodaria num subshell e o $SAIDA_MC se perderia.
+    gravar_como() { mc_como "$1" pipe "svc/$2" <<<"x"; }
+    # Um negativo só vale se o MinIO respondeu Access Denied: o `mc` que não conecta (rede, credencial errada) também sai com erro e passaria por engano.
+    # O mc diz "Access Denied" na listagem e "Insufficient permissions" na gravação e na remoção: os dois são a negativa do MinIO.
+    negado() { ! "$@" && [[ "${SAIDA_MC,,}" == *"access denied"* || "${SAIDA_MC,,}" == *"insufficient permissions"* ]]; }
+    sumiu() { ! existe_como_root "$1"; }
+    existe_como_root() { mc_como root stat "svc/$1"; }
+    sumir_como_root() { mc_como root rm --force "svc/$1" || true; }
+
+    # Objetos que os negativos tentam mexer, criados ANTES com a credencial root (apagar o que não existe falharia igual com a permissão concedida).
+    for objeto in publico/fora-politica.bin midia/politica.bin quarentena/politica.bin; do gravar_como root "$objeto" || falha "preparar $objeto com a credencial root"; done
+
+    confere "svc-api grava em publico/divulgacoes/" gravar_como api publico/divulgacoes/politica.bin
+    confere "svc-api NÃO grava em publico/ fora de divulgacoes/ (Access Denied)" negado gravar_como api publico/fora-politica2.bin
     confere "svc-worker lista publico/divulgacoes/" mc_como worker ls svc/publico/divulgacoes/
-    confere "svc-worker NÃO lista publico/ fora do prefixo divulgacoes/" nega mc_como worker ls svc/publico/
-    confere "svc-worker NÃO apaga em publico/ fora de divulgacoes/" nega mc_como worker rm --force svc/publico/fora-politica.bin
-    confere "svc-worker apaga em publico/divulgacoes/" mc_como worker rm svc/publico/divulgacoes/politica.bin
+    confere "svc-worker NÃO lista publico/ fora do prefixo divulgacoes/ (Access Denied)" negado mc_como worker ls svc/publico/
+    confere "svc-worker NÃO apaga em publico/ fora de divulgacoes/ (Access Denied) e o objeto continua lá" negado mc_como worker rm --force svc/publico/fora-politica.bin
+    confere "o objeto de publico/ fora do prefixo continua existindo" existe_como_root publico/fora-politica.bin
+    confere "svc-worker NÃO apaga em midia/ (Access Denied) e o objeto continua lá" negado mc_como worker rm --force svc/midia/politica.bin
+    confere "o objeto de midia/ continua existindo" existe_como_root midia/politica.bin
+    confere "svc-worker NÃO lê nem apaga na quarentena/ (Access Denied)" negado mc_como worker rm --force svc/quarentena/politica.bin
+    confere "svc-worker NÃO grava em publico/ nem em midia/ (Access Denied)" negado gravar_como worker publico/divulgacoes/worker-nao-grava.bin
+    # O `mc rm` de um objeto só consulta o objeto (GetObject/ListBucket com o nome inteiro), que o svc-worker NÃO tem (o SDK .NET do Worker só lista pelo prefixo
+    # e apaga, e isso o teste da limpeza abaixo prova). O que o mc consegue com a política é remover pelo prefixo inteiro; --newer-than limita ao que este smoke criou.
+    confere "svc-worker lista e apaga em publico/divulgacoes/ (rm recursivo pelo prefixo, só o que tem menos de 5 min)" mc_como worker rm --recursive --force --newer-than 5m svc/publico/divulgacoes/
+    confere "e o objeto que a API gravou sumiu" sumiu publico/divulgacoes/politica.bin
+    for objeto in publico/fora-politica.bin publico/divulgacoes/politica.bin midia/politica.bin quarentena/politica.bin; do sumir_como_root "$objeto"; done
 
     # O código do Worker (SDK .NET: ListObjectsV2 com o prefixo, sob a política real) também funciona: a manutenção roda ao subir o Worker, e se o SDK
     # fizesse qualquer chamada além do que a política deixa (ex.: HEAD no bucket) a limpeza falharia todo dia só com um aviso, e as órfãs nunca sairiam.
