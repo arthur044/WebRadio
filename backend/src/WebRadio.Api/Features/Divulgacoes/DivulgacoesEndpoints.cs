@@ -47,8 +47,9 @@ public sealed class DivulgacoesEndpoints : IEndpointModule
         g.MapPost("", async (DivulgacaoRequest req, ClaimsPrincipal user, HttpContext http, IMediator mediator, CancellationToken ct) =>
             {
                 if (!Guid.TryParse(user.FindFirstValue("sub"), out var admin)) return Results.Unauthorized();
+                ExigirPrioridadeEAtivo(req);
                 var criada = await mediator.Send(new CriarDivulgacaoCommand(admin, req.Titulo ?? "", req.Mensagem ?? "", req.ImagemChave, req.LinkDestino,
-                    req.Prioridade ?? 50, req.InicioExibicaoUtc, req.FimExibicaoUtc, req.Ativo ?? true), ct);
+                    req.Prioridade!.Value, req.InicioExibicaoUtc, req.FimExibicaoUtc, req.Ativo!.Value), ct);
                 http.Response.Headers.Location = $"/api/v1/divulgacoes/{criada.Id}";
                 return ComETag(http, criada, StatusCodes.Status201Created);
             })
@@ -58,8 +59,9 @@ public sealed class DivulgacoesEndpoints : IEndpointModule
             {
                 var versao = PreCondicaoIfMatch.Exigir(http, out var faltou);
                 if (faltou is not null) return faltou;
+                ExigirPrioridadeEAtivo(req);
                 return ComETag(http, await mediator.Send(new EditarDivulgacaoCommand(id, versao!, req.Titulo ?? "", req.Mensagem ?? "", req.ImagemChave,
-                    req.LinkDestino, req.Prioridade ?? 50, req.InicioExibicaoUtc, req.FimExibicaoUtc, req.Ativo ?? true), ct), StatusCodes.Status200OK);
+                    req.LinkDestino, req.Prioridade!.Value, req.InicioExibicaoUtc, req.FimExibicaoUtc, req.Ativo!.Value), ct), StatusCodes.Status200OK);
             })
             .RequireAuthorization("SomenteAdmin");
 
@@ -71,6 +73,18 @@ public sealed class DivulgacoesEndpoints : IEndpointModule
             .RequireAuthorization("SomenteAdmin");
 
         g.MapPost("/imagens", EnviarImagem).RequireAuthorization("SomenteAdmin").DisableAntiforgery();
+    }
+
+    /// <summary>
+    /// <c>prioridade</c> e <c>ativo</c> são obrigatórios (02 §7) e o <c>PUT</c> substitui o recurso inteiro: completar o campo ausente com um padrão
+    /// reativaria em silêncio, no Mural público, uma divulgação desativada. Ausente → 400.
+    /// </summary>
+    private static void ExigirPrioridadeEAtivo(DivulgacaoRequest req)
+    {
+        List<FluentValidation.Results.ValidationFailure> faltas = [];
+        if (req.Prioridade is null) faltas.Add(new("Prioridade", "A prioridade é obrigatória."));
+        if (req.Ativo is null) faltas.Add(new("Ativo", "O campo ativo é obrigatório."));
+        if (faltas.Count > 0) throw new FluentValidation.ValidationException(faltas);
     }
 
     private static async Task<IResult> EnviarImagem(HttpContext http, ClaimsPrincipal user, ILimiteDeUploadDeImagem limite, IMediator mediator, CancellationToken ct)

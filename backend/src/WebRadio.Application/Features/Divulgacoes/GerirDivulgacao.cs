@@ -31,7 +31,7 @@ public sealed class CriarDivulgacaoHandler(IRadioDbContext db, IClock clock, IOb
         if (!cmd.Ativo) divulgacao.Desativar(clock.UtcNow);
 
         db.Divulgacoes.Add(divulgacao);
-        await DivulgacoesDb.SalvarAsync(db, ct);
+        await DivulgacoesDb.SalvarAsync(db, cmd.ImagemChave, divulgacao.Id, ct);
         return DivulgacaoDto.De(divulgacao, storage);
     }
 }
@@ -65,8 +65,8 @@ public sealed class EditarDivulgacaoHandler(IRadioDbContext db, IClock clock, IL
         if (cmd.Ativo && !divulgacao.Ativo) divulgacao.Ativar(agora);
         else if (!cmd.Ativo && divulgacao.Ativo) divulgacao.Desativar(agora);
 
-        await DivulgacoesDb.SalvarAsync(db, ct);
-        if (antiga is not null && antiga != cmd.ImagemChave) await DivulgacoesDb.ApagarImagemAsync(storage, antiga, logger);
+        await DivulgacoesDb.SalvarAsync(db, cmd.ImagemChave, divulgacao.Id, ct);
+        if (antiga is not null && antiga != cmd.ImagemChave) await DivulgacoesDb.ApagarImagemAsync(db, storage, antiga, logger);
         return DivulgacaoDto.De(divulgacao, storage);
     }
 }
@@ -84,7 +84,7 @@ public sealed class RemoverDivulgacaoHandler(IRadioDbContext db, ILogger<Remover
 
         db.Divulgacoes.Remove(divulgacao);
         await db.SaveChangesAsync(ct);
-        if (imagem is not null) await DivulgacoesDb.ApagarImagemAsync(storage, imagem, logger);
+        if (imagem is not null) await DivulgacoesDb.ApagarImagemAsync(db, storage, imagem, logger);
     }
 }
 
@@ -92,9 +92,10 @@ internal static class DivulgacoesDb
 {
     /// <summary>
     /// A violação do <c>UX_Divulgacao_ImagemChave</c> (dois <c>PUT</c> com a mesma chave ao mesmo tempo) é o 409 do E3-D5; o <c>RowVersion</c>
-    /// divergente entre a leitura e o UPDATE é o 412.
+    /// divergente entre a leitura e o UPDATE é o 412. A violação do índice é reconhecida pelo FATO (outra divulgação já tem a chave), não pelo
+    /// texto da mensagem do provedor: qualquer outra falha de gravação segue como erro.
     /// </summary>
-    public static async Task SalvarAsync(IRadioDbContext db, CancellationToken ct)
+    public static async Task SalvarAsync(IRadioDbContext db, string? chaveDaImagem, Guid divulgacaoId, CancellationToken ct)
     {
         try
         {
@@ -104,19 +105,27 @@ internal static class DivulgacoesDb
         {
             throw new VersaoDesatualizadaException();
         }
-        catch (DbUpdateException e) when (e.InnerException?.Message.Contains("UX_Divulgacao_ImagemChave", StringComparison.Ordinal) == true)
+        catch (DbUpdateException) when (chaveDaImagem is not null)
         {
-            throw new ImagemEmUsoException();
+            // Não dá para esperar dentro do filtro do catch: confere o fato aqui e, se não for a chave repetida, relança o erro original.
+            if (await db.Divulgacoes.AsNoTracking().AnyAsync(d => d.ImagemChaveStorage == chaveDaImagem && d.Id != divulgacaoId, CancellationToken.None))
+                throw new ImagemEmUsoException();
+            throw;
         }
     }
 
-    /// <summary>Depois do commit: a divulgação já não aponta para a imagem. Falha no storage vira aviso (a Manutencao apaga a órfã em 24 h, E3-D6).</summary>
-    public static async Task ApagarImagemAsync(IObjectStorage? storage, string chave, ILogger logger)
+    /// <summary>
+    /// Depois do commit: a divulgação já não aponta para a imagem. RECONFERE a referência antes de apagar (como a <c>Manutencao</c>): entre o commit e
+    /// o delete, outra divulgação pode ter ligado a mesma chave (o <c>HEAD</c> existe e ela já não estava em uso). Falha no storage vira aviso (a
+    /// Manutencao apaga a órfã em 24 h, E3-D6).
+    /// </summary>
+    public static async Task ApagarImagemAsync(IRadioDbContext db, IObjectStorage? storage, string chave, ILogger logger)
     {
         if (storage is null) return;
         try
         {
             using var prazo = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            if (await db.Divulgacoes.AsNoTracking().AnyAsync(d => d.ImagemChaveStorage == chave, prazo.Token)) return;
             await storage.DeleteAsync(Buckets.Publico, chave, prazo.Token);
         }
         catch (Exception e) when (e is not OutOfMemoryException)

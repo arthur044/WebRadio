@@ -174,6 +174,29 @@ public class DivulgacoesEndpointsTests
     }
 
     [Fact]
+    public async Task PUT_e_POST_sem_ativo_ou_sem_prioridade_sao_400_e_o_PUT_nao_reativa_em_silencio()
+    {
+        var c = NovaCena();
+        var admin = await Admin(c);
+        var id = (await Json(await Enviar(c.C, HttpMethod.Post, Rota, admin, Corpo(ativo: false)))).GetProperty("id").GetGuid();
+
+        var semAtivo = await Enviar(c.C, HttpMethod.Put, $"{Rota}/{id}", admin, new { titulo = "T", mensagem = "M", prioridade = 5 }, "\"\"");
+        var semPrioridade = await Enviar(c.C, HttpMethod.Put, $"{Rota}/{id}", admin, new { titulo = "T", mensagem = "M", ativo = true }, "\"\"");
+        var postSemAtivo = await Enviar(c.C, HttpMethod.Post, Rota, admin, new { titulo = "T", mensagem = "M", prioridade = 5 });
+        var postSemPrioridade = await Enviar(c.C, HttpMethod.Post, Rota, admin, new { titulo = "T", mensagem = "M", ativo = true });
+
+        Assert.Equal(HttpStatusCode.BadRequest, semAtivo.StatusCode);
+        Assert.True((await Json(semAtivo)).GetProperty("errors").TryGetProperty("Ativo", out _));
+        Assert.Equal(HttpStatusCode.BadRequest, semPrioridade.StatusCode);
+        Assert.True((await Json(semPrioridade)).GetProperty("errors").TryGetProperty("Prioridade", out _));
+        Assert.Equal(HttpStatusCode.BadRequest, postSemAtivo.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, postSemPrioridade.StatusCode);
+        // A divulgação desativada continua desativada e fora do Mural público.
+        Assert.False((await Json(await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}", admin))).GetProperty("ativo").GetBoolean());
+        Assert.Empty((await Json(await Enviar(c.C, HttpMethod.Get, Rota + "/ativas", null))).EnumerateArray());
+    }
+
+    [Fact]
     public async Task PUT_ativo_false_some_das_ativas()
     {
         var c = NovaCena();

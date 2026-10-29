@@ -166,6 +166,27 @@ public class GerirDivulgacaoTests
     }
 
     [Fact]
+    public async Task A_imagem_so_e_apagada_se_nenhuma_divulgacao_a_usa_a_referencia_e_reconferida_antes_do_delete()
+    {
+        var chave = _f.NovaImagem();
+        var a = await _f.CriarAsync("A", chave);
+
+        // Entre o commit que desligou a imagem de A e o delete, outra divulgação passou a usar a mesma chave: o delete não pode apagá-la.
+        await _f.Editar.Handle(Edicao(a.Id, imagem: null), default);
+        _f.Db.Divulgacoes.Add(new WebRadio.Domain.Interacao.Divulgacao(Guid.NewGuid(), "B", "M", chave, null, 1, null, null, _f.Admin, Agora));
+        await _f.Db.SaveChangesAsync();
+        _f.Storage.Apagados.Clear();
+
+        await DivulgacoesDb.ApagarImagemAsync(_f.Db, _f.Storage, chave, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+        Assert.Empty(_f.Storage.Apagados);
+
+        _f.Db.Divulgacoes.RemoveRange(_f.Db.Divulgacoes.Where(d => d.ImagemChaveStorage == chave));
+        await _f.Db.SaveChangesAsync();
+        await DivulgacoesDb.ApagarImagemAsync(_f.Db, _f.Storage, chave, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+        Assert.Equal([chave], _f.Storage.Apagados);
+    }
+
+    [Fact]
     public async Task Remover_inexistente_e_404()
     {
         await Assert.ThrowsAsync<NaoEncontradoException>(() => _f.Remover.Handle(new RemoverDivulgacaoCommand(Guid.NewGuid()), default));
