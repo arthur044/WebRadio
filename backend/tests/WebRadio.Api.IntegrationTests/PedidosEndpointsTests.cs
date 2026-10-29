@@ -221,6 +221,29 @@ public class PedidosEndpointsTests
     }
 
     [Fact]
+    public async Task Corpo_acima_de_8_KB_e_413_antes_de_validar_o_texto_e_sem_gastar_vaga()
+    {
+        var c = NovaCena();
+        var ouvinte = Guid.NewGuid();
+
+        var r = await Enviar(c.C, HttpMethod.Post, Rota, Pedido(nome: new string('a', 9 * 1024)), ouvinte);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, r.StatusCode);
+        Assert.Equal("/erros/corpo-grande-demais", await TipoDoErro(r));
+        Assert.Equal(HttpStatusCode.Created, (await Enviar(c.C, HttpMethod.Post, Rota, Pedido(), ouvinte)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Campo_de_texto_acima_do_limite_mas_dentro_dos_8_KB_e_400()
+    {
+        var c = NovaCena();
+
+        var r = await Enviar(c.C, HttpMethod.Post, Rota, Pedido(nome: new string('a', 4000)), Guid.NewGuid());
+
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+    }
+
+    [Fact]
     public async Task Json_vazio_e_400_nao_500()
     {
         var c = NovaCena();

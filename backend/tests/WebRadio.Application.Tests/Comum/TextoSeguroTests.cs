@@ -114,6 +114,26 @@ public class TextoSeguroTests
     }
 
     [Fact]
+    public void Texto_acima_de_4_vezes_o_limite_e_recusado_sem_varrer_nem_normalizar()
+    {
+        // 1 MiB: o corte vem antes do Normalize e do EnumerateRunes (que alocariam ~4 MiB por campo).
+        var enorme = new string('a', 1024 * 1024);
+        Assert.Equal(ProblemaDoTexto.MuitoLongo, TextoSeguro.Analisar(enorme, 60));
+        Assert.Equal(ProblemaDoTexto.MuitoLongo, TextoSeguro.Analisar(new string('a', 60 * 4 + 1), 60));
+        // Mesmo com surrogate solto no meio: já é grande demais, e é a resposta mais barata.
+        Assert.Equal(ProblemaDoTexto.MuitoLongo, TextoSeguro.Analisar(new string('a', 500) + "\uD83C", 60));
+    }
+
+    [Fact]
+    public void O_corte_nao_muda_o_resultado_do_que_o_NFC_encolhe_3_para_1()
+    {
+        // Jamo L+V+T vira uma sílaba: 60 sílabas = 180 unidades antes do NFC, 60 depois. 180 <= 4 * 60, então não é cortado.
+        var jamo = string.Concat(Enumerable.Repeat("\u1112\u1161\u11AB", 60));
+        Assert.Equal(180, jamo.Length);
+        Assert.Equal(ProblemaDoTexto.Nenhum, TextoSeguro.Analisar(jamo, 60));
+    }
+
+    [Fact]
     public void Normaliza_para_NFC_antes_de_medir()
     {
         var decomposto = string.Concat(Enumerable.Repeat("e\u0301", 60)); // e + U+0301: 120 unidades; em NFC são 60

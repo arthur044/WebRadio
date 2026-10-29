@@ -131,7 +131,7 @@ public class PedidosSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         var redis = new MemoryRequestThrottle(_c.Relogio);
         var ouvinte = Guid.NewGuid();
 
-        ThrottleDePedido Novo(PedidosOptions o) => new(redis, Consultas(), Identidade(), new DisjuntorDoRedis(_c.Relogio), new CacheDoTeto(_c.Relogio),
+        ThrottleDePedido Novo(PedidosOptions o) => new(redis, Consultas(), Identidade(), new IpHasher(_c.Pepper), new DisjuntorDoRedis(_c.Relogio), new CacheDoTeto(_c.Relogio),
             new EstadoDoThrottle(), Options.Create(o), NullLogger<ThrottleDePedido>.Instance);
         var comando = new CriarPedidoCommand(ouvinte, IPAddress.Parse("203.0.113.7"), null, "Maria", "Música", "Artista", null);
 
@@ -202,12 +202,12 @@ public class PedidosSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         Assert.True(espera.Dispositivo is { } d ? d >= TimeSpan.FromSeconds(1) : true);
     }
 
-    private CriarPedidoHandler HandlerDeFallback(out EstadoDoThrottle estado)
+    private CriarPedidoHandler HandlerDeFallback(out EstadoDoThrottle estado, int limitePorIp = 3)
     {
         var db = _c.NovoDb();
         estado = new EstadoDoThrottle { UsarFallbackSql = true };
-        return new CriarPedidoHandler(db, new TransacaoComTrava(db), new ConsultasDePedidos(db), Identidade(), new OutboxEf(db), _c.Relogio, estado,
-            Options.Create(new PedidosOptions()));
+        return new CriarPedidoHandler(db, new TransacaoComTrava(db), new ConsultasDePedidos(db), Identidade(), new IpHasher(_c.Pepper), new OutboxEf(db), _c.Relogio, estado,
+            Options.Create(new PedidosOptions { LimitePorIp = limitePorIp }));
     }
 
     [SqlFact]
@@ -226,17 +226,44 @@ public class PedidosSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         Assert.Equal(1, await db.EventosOutbox.CountAsync(e => e.Tipo == "PedidoCriado"));
     }
 
-    private async Task<bool> TentarAsync(CriarPedidoCommand comando)
+    private async Task<bool> TentarAsync(CriarPedidoCommand comando, int limitePorIp = 3)
     {
         try
         {
-            await HandlerDeFallback(out _).Handle(comando, default);
+            await HandlerDeFallback(out _, limitePorIp).Handle(comando, default);
             return true;
         }
         catch (MuitosPedidosException)
         {
             return false;
         }
+    }
+
+    [SqlFact]
+    public async Task Fallback_rajada_do_mesmo_IP_com_listenerIds_diferentes_respeita_o_limite_por_IP()
+    {
+        await LimparAsync();
+        var ip = IPAddress.Parse("203.0.113.9");
+
+        // Limite de 2 por IP e 8 requisições simultâneas, cada uma de um dispositivo diferente: sem a trava do IP todas leriam 0 e passariam.
+        var resultados = await Task.WhenAll(Enumerable.Range(0, 8)
+            .Select(_ => TentarAsync(new CriarPedidoCommand(Guid.NewGuid(), ip, null, "Maria", "Música", "Artista", null), limitePorIp: 2)));
+
+        Assert.Equal(2, resultados.Count(r => r));
+        await using var db = _c.NovoDb();
+        Assert.Equal(2, await db.PedidosMusica.CountAsync());
+    }
+
+    [SqlFact]
+    public async Task Fallback_rajada_do_mesmo_usuario_com_dispositivos_e_IPs_diferentes_so_deixa_passar_um()
+    {
+        await LimparAsync();
+        var usuario = (await _c.CriarUsuarioAsync(Cenario.Email())).Id;
+
+        var resultados = await Task.WhenAll(Enumerable.Range(0, 6)
+            .Select(i => TentarAsync(new CriarPedidoCommand(Guid.NewGuid(), IPAddress.Parse($"203.0.113.{100 + i}"), usuario, "Maria", "Música", "Artista", null))));
+
+        Assert.Equal(1, resultados.Count(r => r));
     }
 
     [SqlFact]

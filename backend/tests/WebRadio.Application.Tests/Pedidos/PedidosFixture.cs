@@ -48,11 +48,15 @@ public sealed class RedisQueCai(IClock clock) : IRequestThrottle
 
     public bool Fora { get; set; }
 
+    /// <summary>A chamada é cancelada (o cliente fechou a conexão) em vez de falhar.</summary>
+    public bool Cancelar { get; set; }
+
     public int Chamadas { get; private set; }
 
     private T Seguir<T>(Func<T> operacao)
     {
         Chamadas++;
+        if (Cancelar) throw new OperationCanceledException();
         return Fora ? throw new InvalidOperationException("Redis fora") : operacao();
     }
 
@@ -73,6 +77,8 @@ public sealed class TransacaoSemTrava : ITransacaoComTrava
 
     public List<string> Recursos { get; } = [];
 
+    public IReadOnlyList<string> ConjuntosDeTravas { get; private set; } = [];
+
     public Task<T> ExecutarAsync<T>(string recurso, Func<CancellationToken, Task<T>> acao, CancellationToken ct)
     {
         Recursos.Add(recurso);
@@ -82,6 +88,13 @@ public sealed class TransacaoSemTrava : ITransacaoComTrava
     public Task<T> ExecutarAsync<T>(string recurso, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct)
     {
         Recursos.Add(recurso);
+        return Ocupada ? throw new WebRadio.Domain.Erros.TravaOcupadaException() : acao(ct);
+    }
+
+    public Task<T> ExecutarAsync<T>(IReadOnlyList<string> recursos, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct)
+    {
+        Recursos.AddRange(recursos);
+        ConjuntosDeTravas = recursos;
         return Ocupada ? throw new WebRadio.Domain.Erros.TravaOcupadaException() : acao(ct);
     }
 }
@@ -97,7 +110,8 @@ public sealed class PedidosFixture
         Relogio = new RelogioFalso(Agora);
         Opcoes = opcoes ?? new PedidosOptions();
         Redis = new RedisQueCai(Relogio);
-        Identidade = new ListenerIdentity(Pepper, new IpHasher(Pepper));
+        Hasher = new IpHasher(Pepper);
+        Identidade = new ListenerIdentity(Pepper, Hasher);
         Disjuntor = new DisjuntorDoRedis(Relogio);
         Cache = new CacheDoTeto(Relogio);
         Estado = new EstadoDoThrottle();
@@ -105,6 +119,8 @@ public sealed class PedidosFixture
     }
 
     public RadioDbContext Db { get; }
+
+    public Guid UsuarioDaChaveDeTeste { get; } = Guid.NewGuid();
 
     public RelogioFalso Relogio { get; }
 
@@ -118,6 +134,8 @@ public sealed class PedidosFixture
 
     public ListenerIdentity Identidade { get; }
 
+    public IpHasher Hasher { get; }
+
     public DisjuntorDoRedis Disjuntor { get; }
 
     public CacheDoTeto Cache { get; }
@@ -126,9 +144,9 @@ public sealed class PedidosFixture
 
     public OutboxEf Outbox { get; }
 
-    public ThrottleDePedido Throttle => new(Redis, Consultas, Identidade, Disjuntor, Cache, Estado, Options.Create(Opcoes), NullLogger<ThrottleDePedido>.Instance);
+    public ThrottleDePedido Throttle => new(Redis, Consultas, Identidade, Hasher, Disjuntor, Cache, Estado, Options.Create(Opcoes), NullLogger<ThrottleDePedido>.Instance);
 
-    public CriarPedidoHandler Criar => new(Db, Transacao, Consultas, Identidade, Outbox, Relogio, Estado, Options.Create(Opcoes));
+    public CriarPedidoHandler Criar => new(Db, Transacao, Consultas, Identidade, Hasher, Outbox, Relogio, Estado, Options.Create(Opcoes));
 
     public AprovarPedidoHandler Aprovar => new(Db, Outbox, Relogio);
 

@@ -49,14 +49,15 @@ public sealed class CriarPedidoValidator : AbstractValidator<CriarPedidoCommand>
 /// <summary>
 /// Fluxo B passo 5: grava <c>Pendente</c> com o <c>ProgramaId</c> da janela (E3-D1) e o <c>PedidoCriado</c> no outbox para
 /// <c>locutores</c>, na mesma transação. Com o Redis fora (<see cref="EstadoDoThrottle"/>), o anti-spam roda aqui, no SQL, dentro da
-/// transação do <c>INSERT</c> e sob <c>sp_getapplock</c> do dispositivo: o fallback é verifica-e-insere e, sem a trava, duas requisições
-/// simultâneas do mesmo dispositivo passariam. Trava ocupada além de 2 s → 429 com <c>Retry-After</c> de 1 s.
+/// transação do <c>INSERT</c> e sob <c>sp_getapplock</c> do dispositivo, do IP e do usuário: o fallback é verifica-e-insere e, sem a trava, duas
+/// requisições simultâneas passariam. Trava ocupada além de 2 s → 429 com <c>Retry-After</c> de 1 s.
 /// </summary>
 public sealed class CriarPedidoHandler(
     IRadioDbContext db,
     ITransacaoComTrava transacao,
     IConsultasDePedidos consultas,
     IListenerIdentity identidade,
+    IIpHasher hasher,
     IOutbox outbox,
     IClock clock,
     EstadoDoThrottle estado,
@@ -75,7 +76,11 @@ public sealed class CriarPedidoHandler(
 
         try
         {
-            return await transacao.ExecutarAsync(Travas.PedidoDoDispositivo(dispositivo), EsperaDaTrava, async ct2 =>
+            // Trava por dispositivo, por IP e por usuário (nessa ordem ordinal, dentro da transação): o X-Listener-Id é do cliente, então uma rajada
+            // do mesmo IP (ou da mesma conta) com ids diferentes pegaria travas diferentes e passaria a contagem ao mesmo tempo.
+            List<string> travas = [Travas.PedidoDoDispositivo(dispositivo), Travas.PedidoDoIp(ip)];
+            if (cmd.UsuarioId is { } usuario) travas.Add(Travas.PedidoDoUsuario(ThrottleDePedido.ChaveOpacaDoUsuario(hasher, usuario)));
+            return await transacao.ExecutarAsync(travas, EsperaDaTrava, async ct2 =>
             {
                 var espera = await consultas.EsperaDoFallbackAsync(dispositivo, ip, cmd.UsuarioId, opcoes.Value.LimitePorIp, ct2);
                 if (espera.Maior() is { } tempo) throw new MuitosPedidosException(tempo);

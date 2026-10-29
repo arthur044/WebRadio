@@ -13,6 +13,12 @@ public interface ITransacaoComTrava
     /// (quem pede uma espera curta decide a resposta). O bloco é reexecutado no retry do EF, como no outro método.
     /// </summary>
     Task<T> ExecutarAsync<T>(string recurso, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct);
+
+    /// <summary>
+    /// Vários recursos na mesma transação, adquiridos SEMPRE em ordem ordinal (duas requisições com os mesmos recursos nunca se travam
+    /// em ordem cruzada). <paramref name="espera"/> vale para cada trava.
+    /// </summary>
+    Task<T> ExecutarAsync<T>(IReadOnlyList<string> recursos, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct);
 }
 
 /// <summary>Sonda de saúde do banco (<c>/health/ready</c>): a Api não conhece o EF.</summary>
@@ -34,6 +40,11 @@ public static class Travas
     /// simultâneas passam). O recurso é derivado do hash do dispositivo: nunca leva o <c>listenerId</c>.
     /// </summary>
     public static string PedidoDoDispositivo(byte[] deviceHash) => "pedido:dev:" + Convert.ToHexString(deviceHash);
+
+    /// <summary>Mesma trava para o IP (rajada com X-Listener-Id diferentes passaria a contagem do IP ao mesmo tempo) e para o usuário logado.</summary>
+    public static string PedidoDoIp(byte[] ipHash) => "pedido:ip:" + Convert.ToHexString(ipHash);
+
+    public static string PedidoDoUsuario(string chaveOpaca) => "pedido:usr:" + chaveOpaca;
 }
 
 /// <summary>

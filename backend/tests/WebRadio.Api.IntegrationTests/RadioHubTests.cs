@@ -416,6 +416,52 @@ public class RadioHubTests
         Assert.Equal(HubConnectionState.Disconnected, doAlvo.State);
     }
 
+    [Theory]
+    [InlineData("role")]
+    [InlineData("ativo")]
+    public async Task Locutor_rebaixado_ou_desativado_perde_a_conexao_e_nao_recebe_mais_o_PedidoCriado(string mudanca)
+    {
+        await using var cena = Cena.Nova();
+        var alvoId = cena.F.CriarUsuario("locutor-alvo@example.com", Role.Locutor);
+        cena.F.CriarUsuario("locutor-fica@example.com", Role.Locutor);
+        cena.F.CriarUsuario("admin@example.com", Role.Admin);
+        var tokenAlvo = await cena.TokenDe("locutor-alvo@example.com");
+        var tokenAdmin = await cena.TokenDe("admin@example.com");
+        var tokenFica = await cena.TokenDe("locutor-fica@example.com");
+
+        var doAlvo = cena.Conexao(Listener(), tokenAlvo);
+        var doQueFica = cena.Conexao(Listener(), tokenFica);
+        var caiu = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        doAlvo.Closed += _ => { caiu.TrySetResult(); return Task.CompletedTask; };
+        var escutaFica = new Escuta(doQueFica, EventosDoOutbox.PedidoCriado);
+        await cena.Iniciar(doAlvo, doQueFica);
+
+        object corpo = mudanca == "role" ? new { role = "Ouvinte" } : new { ativo = false };
+        var patch = new HttpRequestMessage(HttpMethod.Patch, $"/api/v1/usuarios/{alvoId}") { Content = JsonContent.Create(corpo) };
+        patch.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenAdmin);
+        patch.Headers.TryAddWithoutValidation("If-Match", "\"\"");
+        Assert.Equal(HttpStatusCode.OK, (await cena.Http.SendAsync(patch)).StatusCode);
+        await cena.PasseDoOutbox();
+        await caiu.Task.WaitAsync(Prazo);
+        Assert.True(SpinWait.SpinUntil(() => cena.Servicos.GetRequiredService<ConexoesDoHub>().Prontas == 1, Prazo));
+
+        // Quem tenta voltar com o token antigo cai na checagem da `sv`: entra como anônimo, sem o grupo `locutores`.
+        var volta = cena.Conexao(Listener(), tokenAlvo);
+        var escutaVolta = new Escuta(volta, EventosDoOutbox.PedidoCriado);
+        await cena.Iniciar(volta);
+
+        // PedidoCriado leva nome e dedicatória de ouvinte: só o locutor que continua locutor recebe.
+        await cena.Enfileirar(EventosDoOutbox.PedidoCriado, new { id = Guid.NewGuid(), nomeOuvinte = "Maria", status = "Pendente" }, GruposDoHub.Locutores);
+        await cena.Enfileirar("Fim", new { });
+        await cena.PasseDoOutbox();
+        await escutaFica.AteOFim();
+        await escutaVolta.AteOFim();
+
+        Assert.Equal([EventosDoOutbox.PedidoCriado], escutaFica.Nomes());
+        Assert.Empty(escutaVolta.Nomes());
+        Assert.Equal(HubConnectionState.Disconnected, doAlvo.State);
+    }
+
     [Fact]
     public async Task Admin_com_token_vencido_nao_recebe_o_AlertaHarborFalhas_nem_ao_ficar_conectado_nem_ao_reconectar()
     {

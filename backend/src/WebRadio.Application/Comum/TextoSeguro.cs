@@ -46,6 +46,9 @@ public static class TextoSeguro
     public static ProblemaDoTexto Analisar(string? texto, int maximo, bool aceitaQuebraDeLinha = false)
     {
         if (string.IsNullOrEmpty(texto)) return ProblemaDoTexto.SemCaractereVisivel;
+        // Corte barato ANTES de varrer: o campo é anônimo e o corpo pode chegar a centenas de KB. A normalização NFC encolhe o texto no
+        // máximo 3:1 (jamo L+V+T → sílaba), então acima de 4× o limite nada do que sobrar cabe, e a regra não muda para o que sobra.
+        if (texto.Length > (long)maximo * 4) return ProblemaDoTexto.MuitoLongo;
         if (!BemFormado(texto)) return ProblemaDoTexto.MalFormado;
 
         var normalizado = texto.Normalize(NormalizationForm.FormC);
@@ -157,22 +160,29 @@ public static class TextoSeguro
 public static class TextoSeguroExtensions
 {
     /// <summary>
-    /// Regra FluentValidation do <see cref="TextoSeguro"/>: obrigatório, até <paramref name="maximo"/> unidades UTF-16 depois do NFC. A
-    /// mensagem NUNCA repete o valor recebido (sem <c>{PropertyValue}</c>): o texto pode ter bidi ou controle. Campo opcional: o
-    /// chamador envolve a regra em <c>When(x =&gt; x.Campo is { Length: &gt; 0 })</c>.
+    /// Regra FluentValidation do <see cref="TextoSeguro"/>: obrigatório, até <paramref name="maximo"/> unidades UTF-16 depois do NFC. Uma
+    /// única chamada a <c>Analisar</c> por campo. A mensagem NUNCA repete o valor recebido (sem <c>{PropertyValue}</c>): o texto pode ter
+    /// bidi ou controle. Campo opcional: o chamador envolve a regra em <c>When(x =&gt; x.Campo is { Length: &gt; 0 })</c>.
     /// </summary>
-    public static IRuleBuilderOptions<T, string?> TextoSeguro<T>(this IRuleBuilderInitial<T, string?> regra, int maximo, bool aceitaQuebraDeLinha = false) =>
-        regra.Cascade(CascadeMode.Stop)
-            .Must(t => !string.IsNullOrEmpty(t)).WithMessage("{PropertyName} é obrigatório.")
-            .Must(t => Analisar(t, maximo, aceitaQuebraDeLinha) is not ProblemaDoTexto.MalFormado and not ProblemaDoTexto.CaractereProibido)
-                .WithMessage(aceitaQuebraDeLinha
-                    ? "{PropertyName} não pode ter caracteres de controle, de formato nem de direção (a quebra de linha é aceita)."
-                    : "{PropertyName} não pode ter caracteres de controle, de formato nem de direção, nem quebra de linha.")
-            .Must(t => Analisar(t, maximo, aceitaQuebraDeLinha) is not ProblemaDoTexto.SemCaractereVisivel)
-                .WithMessage("{PropertyName} precisa ter ao menos um caractere visível.")
-            .Must(t => Analisar(t, maximo, aceitaQuebraDeLinha) is not ProblemaDoTexto.MuitoLongo)
-                .WithMessage($"{{PropertyName}} pode ter no máximo {maximo} caracteres.");
+    public static IRuleBuilderOptionsConditions<T, string?> TextoSeguro<T>(this IRuleBuilderInitial<T, string?> regra, int maximo, bool aceitaQuebraDeLinha = false) =>
+        regra.Custom((texto, contexto) =>
+        {
+            var nome = contexto.DisplayName;
+            if (string.IsNullOrEmpty(texto))
+            {
+                contexto.AddFailure($"{nome} é obrigatório.");
+                return;
+            }
 
-    private static ProblemaDoTexto Analisar(string? texto, int maximo, bool aceitaQuebraDeLinha) =>
-        global::WebRadio.Application.Comum.TextoSeguro.Analisar(texto, maximo, aceitaQuebraDeLinha);
+            var mensagem = global::WebRadio.Application.Comum.TextoSeguro.Analisar(texto, maximo, aceitaQuebraDeLinha) switch
+            {
+                ProblemaDoTexto.MalFormado or ProblemaDoTexto.CaractereProibido => aceitaQuebraDeLinha
+                    ? $"{nome} não pode ter caracteres de controle, de formato nem de direção (a quebra de linha é aceita)."
+                    : $"{nome} não pode ter caracteres de controle, de formato nem de direção, nem quebra de linha.",
+                ProblemaDoTexto.SemCaractereVisivel => $"{nome} precisa ter ao menos um caractere visível.",
+                ProblemaDoTexto.MuitoLongo => $"{nome} pode ter no máximo {maximo} caracteres.",
+                _ => null,
+            };
+            if (mensagem is not null) contexto.AddFailure(mensagem);
+        });
 }

@@ -14,13 +14,18 @@ public sealed class TransacaoComTrava(RadioDbContext db) : ITransacaoComTrava
     public const int TimeoutDaTravaMs = 15_000;
 
     public Task<T> ExecutarAsync<T>(string recurso, Func<CancellationToken, Task<T>> acao, CancellationToken ct) =>
-        ExecutarAsync(recurso, TimeSpan.FromMilliseconds(TimeoutDaTravaMs), acao, ct, lancarSeOcupada: false);
+        ExecutarAsync([recurso], TimeSpan.FromMilliseconds(TimeoutDaTravaMs), acao, ct, lancarSeOcupada: false);
 
     public Task<T> ExecutarAsync<T>(string recurso, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct) =>
-        ExecutarAsync(recurso, espera, acao, ct, lancarSeOcupada: true);
+        ExecutarAsync([recurso], espera, acao, ct, lancarSeOcupada: true);
 
-    private async Task<T> ExecutarAsync<T>(string recurso, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct, bool lancarSeOcupada)
+    public Task<T> ExecutarAsync<T>(IReadOnlyList<string> recursos, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct) =>
+        ExecutarAsync(recursos, espera, acao, ct, lancarSeOcupada: true);
+
+    private async Task<T> ExecutarAsync<T>(IReadOnlyList<string> recursos, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct, bool lancarSeOcupada)
     {
+        // Ordem ordinal fixa: sem ela, A pede (x, y) e B pede (y, x) e as duas esperariam uma à outra.
+        var ordenados = recursos.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         try
         {
             // Só os testes HTTP usam o provedor em memória, que não tem transação nem applock; lá não há concorrência.
@@ -30,7 +35,8 @@ public sealed class TransacaoComTrava(RadioDbContext db) : ITransacaoComTrava
             {
                 db.ChangeTracker.Clear();
                 await using var tx = await db.Database.BeginTransactionAsync(ct2);
-                await AdquirirAsync(db, recurso, (int)espera.TotalMilliseconds, lancarSeOcupada, ct2);
+                foreach (var recurso in ordenados)
+                    await AdquirirAsync(db, recurso, (int)espera.TotalMilliseconds, lancarSeOcupada, ct2);
                 var resultado = await acao(ct2);
                 await tx.CommitAsync(ct2);
                 return resultado;

@@ -109,6 +109,8 @@ public sealed class ListarPedidosHandler(IRadioDbContext db, IClock clock) : IRe
 
     private async Task<ResultadoPaginado<PedidoDto>> AprovadosAsync(ListarPedidosQuery q, int pular, CancellationToken ct)
     {
+        // Corte de 24 h com o relógio do contêiner (parâmetro do LINQ): uma diferença de segundos para o SQL não muda a lista, e o plano é o mesmo
+        // (seek de faixa no IX_PedidoMusica_Aprovados). Os gates de segurança (janela, expiração, retenção) usam SYSUTCDATETIME().
         var lista = ListaDeAprovados(db, clock.UtcNow - ListarPedidosQuery.JanelaDosAprovados);
         var total = await lista.CountAsync(ct);
         var linhas = await lista.OrderBy(p => p.ModeradoEmUtc).ThenBy(p => p.Id)

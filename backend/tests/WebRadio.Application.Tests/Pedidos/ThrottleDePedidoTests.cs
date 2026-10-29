@@ -130,7 +130,7 @@ public class ThrottleDePedidoTests
         var chamadas = _f.Redis.Chamadas;
 
         var outro = new EstadoDoThrottle();
-        await new ThrottleDePedido(_f.Redis, _f.Consultas, _f.Identidade, _f.Disjuntor, _f.Cache, outro,
+        await new ThrottleDePedido(_f.Redis, _f.Consultas, _f.Identidade, _f.Hasher, _f.Disjuntor, _f.Cache, outro,
             Microsoft.Extensions.Options.Options.Create(_f.Opcoes), Microsoft.Extensions.Logging.Abstractions.NullLogger<ThrottleDePedido>.Instance)
             .AvaliarAsync(Comando(), default);
 
@@ -147,7 +147,7 @@ public class ThrottleDePedidoTests
         _f.Relogio.UtcNow = _f.Relogio.UtcNow.AddSeconds(31);
 
         var estado = new EstadoDoThrottle();
-        await new ThrottleDePedido(_f.Redis, _f.Consultas, _f.Identidade, _f.Disjuntor, _f.Cache, estado,
+        await new ThrottleDePedido(_f.Redis, _f.Consultas, _f.Identidade, _f.Hasher, _f.Disjuntor, _f.Cache, estado,
             Microsoft.Extensions.Options.Options.Create(_f.Opcoes), Microsoft.Extensions.Logging.Abstractions.NullLogger<ThrottleDePedido>.Instance)
             .AvaliarAsync(Comando(), default);
 
@@ -172,6 +172,42 @@ public class ThrottleDePedidoTests
     }
 
     [Fact]
+    public async Task Sonda_cancelada_solta_a_vaga_e_a_proxima_chamada_sonda_de_novo_em_vez_de_travar_o_disjuntor_aberto()
+    {
+        _f.Redis.Fora = true;
+        await _f.Throttle.AvaliarAsync(Comando(), default); // abre o disjuntor
+        _f.Redis.Fora = false;
+        _f.Relogio.UtcNow = _f.Relogio.UtcNow.AddSeconds(31);
+
+        _f.Redis.Cancelar = true; // esta chamada é a sonda e o cliente desiste no meio
+        await Assert.ThrowsAsync<OperationCanceledException>(() => _f.Throttle.AvaliarAsync(Comando(), default));
+        Assert.False(_f.Disjuntor.Fechado); // cancelar não fecha nem reabre por 30 s: continua meio-aberto
+
+        _f.Redis.Cancelar = false;
+        var estado = new EstadoDoThrottle();
+        await new ThrottleDePedido(_f.Redis, _f.Consultas, _f.Identidade, _f.Hasher, _f.Disjuntor, _f.Cache, estado,
+            Microsoft.Extensions.Options.Options.Create(_f.Opcoes), Microsoft.Extensions.Logging.Abstractions.NullLogger<ThrottleDePedido>.Instance)
+            .AvaliarAsync(Comando(), default); // a nova sonda dá certo
+
+        Assert.False(estado.UsarFallbackSql);
+        Assert.True(_f.Disjuntor.Fechado);
+    }
+
+    [Fact]
+    public async Task Com_o_dispositivo_barrado_a_vaga_do_usuario_nao_e_reservada()
+    {
+        var usuario = Guid.NewGuid();
+        var dispositivoA = Guid.NewGuid();
+        await _f.Throttle.AvaliarAsync(Comando(dispositivoA, ip: "203.0.113.20"), default); // o dispositivo A reserva a vaga dele (anônimo)
+
+        // Dispositivo A barrado, agora com o usuário logado: só LÊ a vaga do usuário (que não existe), não a cria.
+        await Barrado(_f.Throttle.AvaliarAsync(Comando(dispositivoA, ip: "203.0.113.20", usuarioId: usuario), default));
+
+        // Se a vaga do usuário tivesse sido criada, este pedido de OUTRO dispositivo levaria 429.
+        await _f.Throttle.AvaliarAsync(Comando(Guid.NewGuid(), ip: "203.0.113.21", usuarioId: usuario), default);
+    }
+
+    [Fact]
     public async Task O_429_do_Redis_nao_abre_o_disjuntor()
     {
         var ouvinte = Guid.NewGuid();
@@ -188,13 +224,16 @@ public class ThrottleDePedidoTests
         var chaves = new List<string>();
         var espiao = new Espiao(_f.Redis, chaves);
         var estado = new EstadoDoThrottle();
-        await new ThrottleDePedido(espiao, _f.Consultas, _f.Identidade, _f.Disjuntor, _f.Cache, estado,
+        await new ThrottleDePedido(espiao, _f.Consultas, _f.Identidade, _f.Hasher, _f.Disjuntor, _f.Cache, estado,
             Microsoft.Extensions.Options.Options.Create(_f.Opcoes), Microsoft.Extensions.Logging.Abstractions.NullLogger<ThrottleDePedido>.Instance)
-            .AvaliarAsync(Comando(ouvinte, ip: "203.0.113.7", usuarioId: Guid.NewGuid()), default);
+            .AvaliarAsync(Comando(ouvinte, ip: "203.0.113.7", usuarioId: _f.UsuarioDaChaveDeTeste), default);
 
         Assert.Equal(3, chaves.Count);
+        var usuario = _f.UsuarioDaChaveDeTeste;
         Assert.All(chaves, c =>
         {
+            Assert.DoesNotContain(usuario.ToString("N"), c, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(usuario.ToString("D"), c, StringComparison.OrdinalIgnoreCase);
             Assert.StartsWith("throttle:pedido:", c);
             Assert.DoesNotContain(ouvinte.ToString("N"), c, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(ouvinte.ToString("D"), c, StringComparison.OrdinalIgnoreCase);

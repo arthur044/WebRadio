@@ -35,6 +35,15 @@ public sealed class DisjuntorDoRedis(IClock clock)
         Volatile.Write(ref _sondaEmVoo, 0);
     }
 
+    /// <summary>
+    /// A requisição que sondava foi cancelada (o cliente fechou a conexão): não é falha do Redis, mas a vaga da sonda precisa ser solta,
+    /// senão o disjuntor ficaria em <see cref="PermissaoDoRedis.Evitar"/> para sempre. Continua meio-aberto: a próxima chamada sonda.
+    /// </summary>
+    public void Cancelada(PermissaoDoRedis permissao)
+    {
+        if (permissao == PermissaoDoRedis.Sondar) Volatile.Write(ref _sondaEmVoo, 0);
+    }
+
     /// <summary>Abre (ou reabre) por <see cref="TempoAberto"/>. Devolve <c>true</c> quando o disjuntor estava fechado: quem chama registra o aviso uma vez.</summary>
     public bool Falha(PermissaoDoRedis permissao)
     {
@@ -57,18 +66,23 @@ public enum PermissaoDoRedis
     Evitar,
 }
 
-/// <summary>Teto global de <c>Pendente</c> com cache de 5 s: a contagem roda em todo <c>POST</c> e não precisa ser exata (07, E3-D10).</summary>
+/// <summary>
+/// Teto global de <c>Pendente</c> com cache de 5 s: a contagem roda em todo <c>POST</c> e não precisa ser exata (07, E3-D10). O valor é um
+/// registro imutável trocado por referência (<c>Volatile</c>): uma leitura nunca mistura a validade de um com o resultado de outro.
+/// </summary>
 public sealed class CacheDoTeto(IClock clock)
 {
     public static readonly TimeSpan Validade = TimeSpan.FromSeconds(5);
 
-    private (DateTime ValidoAte, bool Atingido)? _ultimo;
+    private sealed record Leitura(DateTime ValidoAte, bool Atingido);
+
+    private Leitura? _ultima;
 
     public async Task<bool> AtingidoAsync(Func<Task<bool>> consultar)
     {
-        if (_ultimo is { } u && clock.UtcNow < u.ValidoAte) return u.Atingido;
+        if (Volatile.Read(ref _ultima) is { } u && clock.UtcNow < u.ValidoAte) return u.Atingido;
         var atingido = await consultar();
-        _ultimo = (clock.UtcNow + Validade, atingido);
+        Volatile.Write(ref _ultima, new Leitura(clock.UtcNow + Validade, atingido));
         return atingido;
     }
 }
@@ -90,6 +104,7 @@ public sealed class ThrottleDePedido(
     IRequestThrottle contadores,
     IConsultasDePedidos consultas,
     IListenerIdentity identidade,
+    IIpHasher hasher,
     DisjuntorDoRedis disjuntor,
     CacheDoTeto cacheDoTeto,
     EstadoDoThrottle estado,
@@ -117,7 +132,13 @@ public sealed class ThrottleDePedido(
         {
             espera = await NoRedisAsync(request, o.LimitePorIp, ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            // Cliente desistiu no meio da sonda: solta a vaga dela sem contar falha do Redis.
+            disjuntor.Cancelada(permissao);
+            throw;
+        }
+        catch (Exception ex)
         {
             if (disjuntor.Falha(permissao))
                 logger.LogWarning("PEDIDO_THROTTLE_REDIS_INDISPONIVEL ({Tipo}): anti-spam no SQL por {Segundos}s (modo degradado)",
@@ -136,11 +157,25 @@ public sealed class ThrottleDePedido(
         var dispositivo = identidade.DeviceHash(request.ListenerId);
         TimeSpan? espera = null;
 
-        if (!await contadores.TentarReservarAsync(ChaveDoDispositivo(dispositivo), Janela, ct))
+        var dispositivoLivre = await contadores.TentarReservarAsync(ChaveDoDispositivo(dispositivo), Janela, ct);
+        if (!dispositivoLivre)
             espera = Maior(espera, await contadores.TempoRestanteAsync(ChaveDoDispositivo(dispositivo), ct));
 
-        if (request.UsuarioId is { } usuario && !await contadores.TentarReservarAsync(ChaveDoUsuario(usuario), Janela, ct))
-            espera = Maior(espera, await contadores.TempoRestanteAsync(ChaveDoUsuario(usuario), ct));
+        if (request.UsuarioId is { } usuario)
+        {
+            var chave = ChaveDoUsuario(usuario);
+            if (dispositivoLivre)
+            {
+                if (!await contadores.TentarReservarAsync(chave, Janela, ct))
+                    espera = Maior(espera, await contadores.TempoRestanteAsync(chave, ct));
+            }
+            else if (await contadores.TempoRestanteAsync(chave, ct) is { } ttl)
+            {
+                // Dispositivo já barrado: só LÊ a vaga do usuário (para o maior TTL). Reservá-la deixaria o usuário 5 min sem pedir de outro
+                // dispositivo sem ter feito pedido nenhum; o E3-D2 aceita a reserva que sobra antes de um 429 por IP, não esta.
+                espera = Maior(espera, ttl);
+            }
+        }
 
         if (espera is not null) return espera;
 
@@ -161,5 +196,8 @@ public sealed class ThrottleDePedido(
 
     internal static string ChaveDoIp(byte[] hash) => $"throttle:pedido:ip:{Convert.ToHexString(hash)}";
 
-    internal static string ChaveDoUsuario(Guid id) => $"throttle:pedido:usr:{id:N}";
+    internal string ChaveDoUsuario(Guid id) => $"throttle:pedido:usr:{ChaveOpacaDoUsuario(hasher, id)}";
+
+    /// <summary>HMAC com o pepper: o Redis não guarda o id da conta nem por 5 min.</summary>
+    public static string ChaveOpacaDoUsuario(IIpHasher hasher, Guid id) => hasher.ChaveOpaca("pedido-usr:" + id.ToString("N"));
 }

@@ -98,7 +98,7 @@ public class CriarPedidoTests
         await _f.Criar.Handle(Comando(ouvinte), default);
 
         Assert.Equal(1, _f.Consultas.ConsultasDoFallback);
-        Assert.Equal(Travas.PedidoDoDispositivo(_f.Identidade.DeviceHash(ouvinte)), Assert.Single(_f.Transacao.Recursos));
+        Assert.Contains(Travas.PedidoDoDispositivo(_f.Identidade.DeviceHash(ouvinte)), _f.Transacao.Recursos);
         Assert.Single(_f.Db.PedidosMusica);
     }
 
@@ -110,9 +110,40 @@ public class CriarPedidoTests
 
         await _f.Criar.Handle(Comando(ouvinte), default);
 
-        var recurso = Assert.Single(_f.Transacao.Recursos);
-        Assert.DoesNotContain(ouvinte.ToString("N"), recurso, StringComparison.OrdinalIgnoreCase);
-        Assert.StartsWith("pedido:dev:", recurso);
+        Assert.All(_f.Transacao.Recursos, r => Assert.DoesNotContain(ouvinte.ToString("N"), r, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(_f.Transacao.Recursos, r => r.StartsWith("pedido:dev:"));
+    }
+
+    [Fact]
+    public async Task O_fallback_trava_por_dispositivo_por_IP_e_por_usuario_sem_expor_nenhum_dado_em_claro()
+    {
+        _f.Estado.UsarFallbackSql = true;
+        var ouvinte = Guid.NewGuid();
+        var usuario = Guid.NewGuid();
+
+        await _f.Criar.Handle(Comando(ouvinte, ip: "203.0.113.7", usuarioId: usuario), default);
+
+        var travas = _f.Transacao.ConjuntosDeTravas;
+        Assert.Equal(3, travas.Count);
+        Assert.Contains(travas, t => t.StartsWith("pedido:dev:"));
+        Assert.Contains(travas, t => t.StartsWith("pedido:ip:"));
+        Assert.Contains(travas, t => t.StartsWith("pedido:usr:"));
+        Assert.All(travas, t =>
+        {
+            Assert.DoesNotContain(usuario.ToString("N"), t, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(ouvinte.ToString("N"), t, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("203.0.113", t);
+        });
+    }
+
+    [Fact]
+    public async Task Anonimo_trava_so_por_dispositivo_e_por_IP()
+    {
+        _f.Estado.UsarFallbackSql = true;
+
+        await _f.Criar.Handle(Comando(), default);
+
+        Assert.Equal(2, _f.Transacao.ConjuntosDeTravas.Count);
     }
 
     [Fact]
