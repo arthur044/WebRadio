@@ -14,6 +14,37 @@ describe('descreverErro', () => {
     expect(d.recarregar).toBe(false)
   })
 
+  it('409 pedido já moderado: diz que outro locutor moderou e pede para recarregar', () => {
+    const d = descreverErro(erro(409, '/erros/pedido-ja-moderado'))
+    expect(d.mensagem).toBe('Outro locutor já moderou este pedido.')
+    expect(d.recarregar).toBe(true)
+  })
+
+  it('429 com retryAfterSeconds: devolve a espera, arredondada para cima', () => {
+    expect(
+      descreverErro(erro(429, '/erros/muitos-pedidos', { retryAfterSeconds: 61.2 }))
+        .esperarSegundos,
+    ).toBe(62)
+  })
+
+  it.each([undefined, 0, -3, Number.NaN, 'x'])(
+    '429 com retryAfterSeconds %s: sem espera',
+    (valor) => {
+      const d = descreverErro(erro(429, '/erros/muitos-pedidos', { retryAfterSeconds: valor }))
+      expect(d.esperarSegundos).toBeNull()
+    },
+  )
+
+  it('429 com espera absurda: limita a 1 hora', () => {
+    expect(descreverErro(erro(429, '/x', { retryAfterSeconds: 999_999 })).esperarSegundos).toBe(
+      3600,
+    )
+  })
+
+  it('413: o arquivo passa do limite', () => {
+    expect(descreverErro(erro(413, '/erros/x')).mensagem).toMatch(/maior do que o limite/i)
+  })
+
   it('412 versão desatualizada: pede para recarregar, sem culpar o usuário', () => {
     const d = descreverErro(erro(412, '/erros/versao-desatualizada'))
     expect(d.mensagem).toMatch(/alterado por outra pessoa/i)

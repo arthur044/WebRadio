@@ -94,11 +94,14 @@ export function registrarEventos(
   on('PedidoCriado', () => {
     queryClient.invalidateQueries({ queryKey: ['pedidos-moderacao'] })
   })
+  // Os dois vão para o `listener:{hash}` (Meus pedidos) e para `locutores` (a fila de moderação): cada tela relê a sua.
   on('PedidoModerado', () => {
     queryClient.invalidateQueries({ queryKey: ['pedidos-meus'] })
+    queryClient.invalidateQueries({ queryKey: ['pedidos-moderacao'] })
   })
   on('PedidoTocado', () => {
     queryClient.invalidateQueries({ queryKey: ['pedidos-meus'] })
+    queryClient.invalidateQueries({ queryKey: ['pedidos-moderacao'] })
   })
   on('MidiaSanitizada', () => {
     queryClient.invalidateQueries({ queryKey: ['midias'] })
@@ -118,6 +121,9 @@ export function invalidarEstadoDaRadio(queryClient: Pick<QueryClient, 'invalidat
   queryClient.invalidateQueries({ queryKey: ['programa-ao-vivo'] })
   queryClient.invalidateQueries({ queryKey: ['grade-semana'] })
   queryClient.invalidateQueries({ queryKey: ['stream-info'] })
+  // Pedidos criados e moderados durante a queda (E3-P02, E3-P03).
+  queryClient.invalidateQueries({ queryKey: ['pedidos-meus'] })
+  queryClient.invalidateQueries({ queryKey: ['pedidos-moderacao'] })
 }
 
 /**

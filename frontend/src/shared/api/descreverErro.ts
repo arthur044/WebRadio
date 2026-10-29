@@ -9,10 +9,27 @@ export interface ErroDescrito {
   conflitoComId: string | null
   /** O que a tela mostra está velho: vale recarregar antes de tentar de novo. */
   recarregar: boolean
+  /** Segundos até o 429 deixar tentar de novo (`retryAfterSeconds` do ProblemDetails); `null` se não veio. */
+  esperarSegundos: number | null
+}
+
+/** Teto da espera mostrada: o servidor manda no máximo 300 s, e um valor absurdo não pode travar a tela. */
+const ESPERA_MAXIMA_S = 3600
+
+function segundosDeEspera(valor: unknown): number | null {
+  if (typeof valor !== 'number' || !Number.isFinite(valor) || valor <= 0) return null
+  return Math.min(Math.ceil(valor), ESPERA_MAXIMA_S)
 }
 
 function descrito(mensagem: string, extras: Partial<ErroDescrito> = {}): ErroDescrito {
-  return { mensagem, campos: {}, conflitoComId: null, recarregar: false, ...extras }
+  return {
+    mensagem,
+    campos: {},
+    conflitoComId: null,
+    recarregar: false,
+    esperarSegundos: null,
+    ...extras,
+  }
 }
 
 function versaoDesatualizada(): ErroDescrito {
@@ -59,6 +76,8 @@ export function descreverErro(err: unknown): ErroDescrito {
         'O programa mudou de estado (já começou, terminou ou foi cancelado) e não aceita mais esta ação.',
         { recarregar: true },
       )
+    case '/erros/pedido-ja-moderado':
+      return descrito('Outro locutor já moderou este pedido.', { recarregar: true })
     case '/erros/credenciais':
       return descrito('Senha incorreta.', { campos: { senhaAtual: 'Senha incorreta.' } })
     case '/erros/conflito-credencial':
@@ -92,8 +111,12 @@ export function descreverErro(err: unknown): ErroDescrito {
       return versaoDesatualizada()
     case 428:
       return semVersao()
+    case 413:
+      return descrito('O arquivo é maior do que o limite aceito.')
     case 429:
-      return descrito('Muitas tentativas em pouco tempo. Aguarde um instante e tente de novo.')
+      return descrito('Muitas tentativas em pouco tempo. Aguarde um instante e tente de novo.', {
+        esperarSegundos: segundosDeEspera(problem.retryAfterSeconds),
+      })
     case 503:
       return descrito('O servidor está ocupado. Tente de novo em instantes.')
     default:
