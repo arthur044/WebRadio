@@ -37,7 +37,27 @@ public interface IObjectStorage
 
     /// <summary>Sonda de saúde: o servidor de storage está de pé? Não valida a credencial de serviço.</summary>
     Task<bool> VerificarAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Grava o objeto (E3-F06: a imagem de divulgação já recodificada). O <c>Content-Type</c> é o do SERVIDOR, nunca o do cliente. Sobrescreve
+    /// quem já existe na chave; quem chama usa chave nova (GUID).
+    /// </summary>
+    Task PutAsync(string bucket, string chave, Stream conteudo, long tamanhoBytes, string contentType, CancellationToken ct = default);
+
+    /// <summary>Apaga o objeto. Chave inexistente não é erro (o S3 também não reclama).</summary>
+    Task DeleteAsync(string bucket, string chave, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lista por prefixo (recursivo), com a data da última modificação. Usada pela limpeza das imagens órfãs (E3-D6): o prefixo é
+    /// obrigatório, para a credencial do serviço poder ter <c>ListBucket</c> só com <c>s3:prefix</c>.
+    /// </summary>
+    Task<IReadOnlyList<ObjetoListado>> ListarAsync(string bucket, string prefixo, CancellationToken ct = default);
+
+    /// <summary>URL pública do objeto de um bucket de leitura anônima (<c>publico</c>): <c>&lt;origem&gt;/storage/&lt;bucket&gt;/&lt;chave&gt;</c>, sem assinatura.</summary>
+    string UrlPublica(string bucket, string chave);
 }
+
+public sealed record ObjetoListado(string Chave, DateTime UltimaModificacaoUtc);
 
 public sealed record PostPolicyAssinada(string Url, IReadOnlyDictionary<string, string> Campos, DateTime ExpiraEmUtc);
 

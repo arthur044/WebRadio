@@ -37,5 +37,6 @@ COPY --from=build /app/dist /usr/share/nginx/html
 COPY infra/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY infra/nginx/security-headers.conf /etc/nginx/security-headers.conf
 COPY infra/nginx/default.conf.template /etc/nginx/templates/default.conf.template
+COPY infra/nginx/proxy-api.inc.template /etc/nginx/templates/proxy-api.inc.template
 
 EXPOSE 8080

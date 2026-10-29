@@ -58,6 +58,49 @@ public sealed class MinioObjectStorageRealTests : IAsyncLifetime
             .WithStreamData(new MemoryStream(Enumerable.Repeat(conteudo, tamanho).ToArray())).WithObjectSize(tamanho).WithContentType("audio/mpeg"));
 
     [MinioFact]
+    public async Task Put_grava_com_o_Content_Type_dado_e_Delete_apaga_e_apagar_o_que_nao_existe_nao_e_erro()
+    {
+        var bytes = Enumerable.Repeat((byte)7, 321).ToArray();
+
+        await _storage!.PutAsync(_origem, "divulgacoes/a.webp", new MemoryStream(bytes), bytes.Length, "image/webp");
+
+        var info = (await _storage.HeadAsync(_origem, "divulgacoes/a.webp"))!;
+        Assert.Equal(321, info.TamanhoBytes);
+        Assert.Equal("image/webp", info.ContentType);
+
+        await _storage.DeleteAsync(_origem, "divulgacoes/a.webp");
+        Assert.Null(await _storage.HeadAsync(_origem, "divulgacoes/a.webp"));
+        await _storage.DeleteAsync(_origem, "divulgacoes/a.webp"); // de novo: sem erro
+    }
+
+    [MinioFact]
+    public async Task Listar_traz_so_o_prefixo_com_a_data_de_modificacao_em_UTC()
+    {
+        foreach (var chave in new[] { "divulgacoes/a.webp", "divulgacoes/b.webp", "midia/x.mp3" })
+            await _storage!.PutAsync(_origem, chave, new MemoryStream([1, 2, 3]), 3, "application/octet-stream");
+
+        var lista = await _storage!.ListarAsync(_origem, "divulgacoes/");
+
+        Assert.Equal(["divulgacoes/a.webp", "divulgacoes/b.webp"], lista.Select(o => o.Chave).Order());
+        Assert.All(lista, o =>
+        {
+            Assert.Equal(DateTimeKind.Utc, o.UltimaModificacaoUtc.Kind);
+            Assert.InRange(o.UltimaModificacaoUtc, DateTime.UtcNow.AddMinutes(-5), DateTime.UtcNow.AddMinutes(5));
+        });
+        Assert.Empty(await _storage.ListarAsync(_origem, "nada/"));
+        await Assert.ThrowsAsync<ArgumentException>(() => _storage.ListarAsync(_origem, " "));
+    }
+
+    [Fact]
+    public void UrlPublica_junta_a_origem_do_storage_o_bucket_e_a_chave_sem_assinatura()
+    {
+        using var storage = new MinioObjectStorage(
+            new StorageOptions("minio:9000", "http://localhost:8080/storage", "a", "b"), new RelogioFalso(DateTime.UtcNow));
+
+        Assert.Equal("http://localhost:8080/storage/publico/divulgacoes/abc.webp", storage.UrlPublica("publico", "divulgacoes/abc.webp"));
+    }
+
+    [MinioFact]
     public async Task Mover_com_o_etag_certo_copia_confere_o_destino_e_apaga_a_origem()
     {
         await EnviarAsync("faixa", 1);

@@ -2,49 +2,31 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "LerEApagarDaQuarentena",
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:DeleteObject"
-      ],
-      "Resource": [
-        "arn:aws:s3:::quarentena/*"
-      ]
-    },
-    {
-      "Sid": "GravarELerMidiaEPublico",
-      "Effect": "Allow",
-      "Action": [
-        "s3:PutObject",
-        "s3:GetObject"
-      ],
-      "Resource": [
-        "arn:aws:s3:::midia/*",
-        "arn:aws:s3:::publico/*"
-      ]
-    },
-    {
-      "Sid": "ApagarMidia",
+      "Sid": "ApagarImagensDeDivulgacao",
       "Effect": "Allow",
       "Action": [
         "s3:DeleteObject"
       ],
       "Resource": [
-        "arn:aws:s3:::midia/*"
+        "arn:aws:s3:::publico/divulgacoes/*"
       ]
     },
     {
-      "Sid": "HeadBucketExigidoPeloSdk",
+      "Sid": "ListarImagensDeDivulgacao",
       "Effect": "Allow",
       "Action": [
         "s3:ListBucket"
       ],
       "Resource": [
-        "arn:aws:s3:::quarentena",
-        "arn:aws:s3:::midia",
         "arn:aws:s3:::publico"
-      ]
+      ],
+      "Condition": {
+        "StringEquals": {
+          "s3:prefix": [
+            "divulgacoes/"
+          ]
+        }
+      }
     }
   ]
 }

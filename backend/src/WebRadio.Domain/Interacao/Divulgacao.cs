@@ -50,13 +50,13 @@ public sealed class Divulgacao : Entidade
         ArgumentException.ThrowIfNullOrWhiteSpace(mensagem);
         UtcGuard.Exigir(agora, nameof(agora));
         ValidarPrioridade(prioridade);
-        ValidarLink(linkDestino);
+        var link = NormalizarLink(linkDestino);
         ValidarJanela(inicioExibicaoUtc, fimExibicaoUtc);
 
         Titulo = titulo;
         Mensagem = mensagem;
         ImagemChaveStorage = imagemChaveStorage;
-        LinkDestino = linkDestino;
+        LinkDestino = link;
         Prioridade = prioridade;
         InicioExibicaoUtc = inicioExibicaoUtc;
         FimExibicaoUtc = fimExibicaoUtc;
@@ -89,13 +89,13 @@ public sealed class Divulgacao : Entidade
         ArgumentException.ThrowIfNullOrWhiteSpace(mensagem);
         UtcGuard.Exigir(agora, nameof(agora));
         ValidarPrioridade(prioridade);
-        ValidarLink(linkDestino);
+        var link = NormalizarLink(linkDestino);
         ValidarJanela(inicioExibicaoUtc, fimExibicaoUtc);
 
         Titulo = titulo;
         Mensagem = mensagem;
         ImagemChaveStorage = imagemChaveStorage;
-        LinkDestino = linkDestino;
+        LinkDestino = link;
         Prioridade = prioridade;
         InicioExibicaoUtc = inicioExibicaoUtc;
         FimExibicaoUtc = fimExibicaoUtc;
@@ -124,18 +124,12 @@ public sealed class Divulgacao : Entidade
         }
     }
 
-    private static void ValidarLink(string? link)
-    {
-        if (link is null)
-        {
-            return;
-        }
-
-        if (!Uri.TryCreate(link, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
-        {
-            throw new ArgumentException("LinkDestino precisa ser uma URL absoluta https://.", nameof(link));
-        }
-    }
+    /// <summary>S-B03 (<see cref="LinkDeDivulgacao"/>): grava a forma canônica. <c>null</c> = sem link.</summary>
+    private static string? NormalizarLink(string? link) =>
+        link is null
+            ? null
+            : LinkDeDivulgacao.Normalizar(link)
+              ?? throw new ArgumentException("LinkDestino precisa ser uma URL https:// com host DNS público (sem IP, localhost, .local, .internal, usuário ou espaço).", nameof(link));
 
     private static void ValidarJanela(DateTime? inicioUtc, DateTime? fimUtc)
     {

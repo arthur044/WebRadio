@@ -35,3 +35,13 @@ public sealed class MinioFactAttribute : FactAttribute
         }
     }
 }
+
+/// <summary>[Fact] que precisa de SQL Server E de MinIO reais (a limpeza das imagens órfãs cruza o banco e o bucket); senão aparece como ignorado.</summary>
+public sealed class SqlEMinioFactAttribute : FactAttribute
+{
+    public SqlEMinioFactAttribute()
+    {
+        if (!BancoDeTeste.Disponivel) Skip = "SQL Server indisponível (defina WEBRADIO_TEST_SQL ou instale o LocalDB).";
+        else if (!MinioDeTeste.Disponivel) Skip = "MinIO indisponível (defina WEBRADIO_TEST_MINIO, WEBRADIO_TEST_MINIO_ACCESS e WEBRADIO_TEST_MINIO_SECRET).";
+    }
+}
