@@ -53,8 +53,15 @@ export function RootLayout() {
   useSessionRestore()
   useRealtimeHub()
   const role = useAuthStore((s) => s.usuario?.role)
-  // A administração da grade só aparece no menu para quem pode usá-la (a rota também é guardada).
-  const itens = role === 'Admin' ? [...navItems, { to: '/admin/grade', label: 'Admin' }] : navItems
+  // A administração só aparece no menu para quem pode usá-la (as rotas também são guardadas).
+  const itens =
+    role === 'Admin'
+      ? [
+          ...navItems,
+          { to: '/admin/grade', label: 'Admin' },
+          { to: '/admin/divulgacoes', label: 'Divulgações' },
+        ]
+      : navItems
 
   return (
     <div className="bg-surface text-text flex min-h-svh flex-col">
