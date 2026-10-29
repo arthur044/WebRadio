@@ -30,11 +30,12 @@ Arquitetura detalhada: [`docs/specs/00-arquitetura.md`](docs/specs/00-arquitetur
 | Serviço | Função | Tecnologia |
 |---------|--------|-----------|
 | **API** | REST endpoints + SignalR hub (pedidos, grade, auth) | ASP.NET Core 10 |
-| **Worker** | Eleição de líder e manutenção diária; transições de grade e sanitização entram nos Épicos 2 e 4 | .NET 10 background service |
+| **Worker** | Eleição de líder, manutenção diária e transições de grade (`Agendado → AoVivo → Finalizado`); a sanitização entra no Épico 4 | .NET 10 background service |
 | **db-init** | Criação do schema, logins SQL | one-shot sqlcmd |
 | **migrator** | Aplicação de migrations EF | one-shot efbundle |
 | **Icecast** | Distribuição do stream HTTP | Icecast 2 |
 | **Liquidsoap** | Motor de playout, fallback, ao vivo | Liquidsoap 2.x |
+| **harbor-borda** | Proxy na frente do harbor do Liquidsoap: lista de IPs (`HARBOR_PERMITIDOS`) e limite de conexões simultâneas para o locutor ao vivo | nginx unprivileged |
 | **MinIO** | Armazenamento S3 (mídia, uploads) | MinIO |
 | **Redis** | Throttle de pedidos, backplane SignalR | Redis 7 |
 | **nginx** | Gateway, reverse proxy, segurança | nginx unprivileged |
@@ -44,7 +45,7 @@ Arquitetura detalhada: [`docs/specs/00-arquitetura.md`](docs/specs/00-arquitetur
 ```
 webradio/
 ├── docs/
-│   ├── specs/                     # Especificações (arquitetura, domínio, API, schema, tarefas, segurança)
+│   ├── specs/                     # Especificações (arquitetura, domínio, API, schema, tarefas por épico, segurança)
 │   ├── runbooks/                  # Procedimentos operacionais
 │   ├── conexao-sql-server.md      # Connection string, pool e identificação de sessão
 │   └── processo-de-desenvolvimento.md
@@ -66,7 +67,7 @@ webradio/
 ├── frontend/
 │   ├── package.json               # Vite, React, Tailwind, Playwright
 │   ├── src/
-│   │   ├── features/              # Por feature: auth, player, grade, pedidos, mural, estudio
+│   │   ├── features/              # Por feature: admin, auth, player, grade, pedidos, mural, estudio
 │   │   ├── shared/                # API, lib, componentes reutilizáveis
 │   │   └── assets/
 │   └── e2e/                       # Testes Playwright
@@ -77,7 +78,9 @@ webradio/
 │   ├── sql/                       # init-db.sql, logins.sql
 │   ├── nginx/                     # default.conf.template (gateway)
 │   ├── icecast/                   # Dockerfile, icecast.xml.template
-│   ├── liquidsoap/                # radio.liq, playlist de teste
+│   ├── liquidsoap/                # radio.liq, playlist de teste, teste.sh
+│   ├── harbor-borda/              # proxy do harbor (ao vivo), entrypoint e teste.sh
+│   ├── perf/                      # medição dos planos da grade (E2-A02)
 │   ├── minio/                     # init-buckets.sh, políticas S3
 │   └── redis/                     # entrypoint de configuração
 ├── docker-compose.yml             # Base de produção (segredos em arquivo, só a 8080 publicada)
@@ -85,7 +88,7 @@ webradio/
 ├── .env.example                   # Configuração NÃO secreta; os segredos ficam em secrets/ (fora do git)
 ├── .gitattributes                 # Scripts shell com LF em Windows
 ├── .gitignore                     # .env, .maestri/, node_modules/
-├── SECURITY.md                    # Política de segurança e divulgação (entra com o PR #31)
+├── SECURITY.md                    # Política de segurança e divulgação
 └── LICENSE
 ```
 
@@ -103,15 +106,31 @@ O Épico 1 entrega a fundação rodando de ponta a ponta; as regras de negócio 
 - **Frontend**: shell com player global, autenticação, Mural e Grade com atualização em tempo real, gateway nginx.
 - **CI**: gitleaks, build e testes do backend, smoke do stack inteiro no Docker Compose.
 
-### Em PR
+### Entregue depois (B3, PR #31)
 
-- **B3 (PR #31)**: jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra e varredura de vulnerabilidades; pendências dos reviews do B2; imagens-base atualizadas; `SECURITY.md`.
+Jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra e varredura de vulnerabilidades; pendências dos reviews do B2; imagens-base atualizadas; `SECURITY.md`. Os testes Playwright rodam no `compose-smoke`.
 
 ### Pendente
 
-- Testes Playwright no CI, execução do `gerar-segredos.ps1` em Windows real e subida da base de produção num job.
+- Execução do `gerar-segredos.ps1` em Windows real e subida da base de produção num job.
 - Atualização das imagens do SQL Server e do Liquidsoap, antes de o Épico 4 liberar upload.
 - Reescrita do runbook de rotação de segredos (ver o aviso no topo dele).
+
+## Status do Épico 2
+
+**Fechado em 2026-10-29.** O Épico 2 entrega o motor de transmissão: grade de programas, locutor ao vivo e estado da rádio em tempo real. A DoD conferida item a item, com o PR que entrega cada um, está na seção "Fechamento do Épico 2" de [`docs/specs/06-epico-2-tarefas.md`](docs/specs/06-epico-2-tarefas.md).
+
+- **Grade**: o Admin cria, edita e cancela programas sem sobreposição (409 com `programaConflitanteId`). O Worker muda o status sozinho (`Agendado → AoVivo → Finalizado`), e o selo "Ao Vivo" troca na tela sem recarregar.
+- **Ao vivo com credencial de transmissão**: o locutor gera, no painel dele, uma credencial própria (identificador + segredo, mostrado uma vez e guardado só como hash) e conecta o source client (BUTT, Mixxx) no harbor do Liquidsoap. Só o locutor dono do programa na janela de horário entra; o ao vivo cai quando o programa termina ou é encerrado, sem derrubar o stream.
+- **Alerta do harbor**: tentativas de credencial inválida geram o `AlertaHarborFalhas`, exibido no painel do Admin e do locutor; ele é de melhor esforço (ver os riscos aceitos no `06`).
+- **Produção**: só a `8080` é publicada; a porta do ao vivo fica atrás do `harbor-borda`, em compose explícito, e o `HARBOR_PERMITIDOS` em produção deve ter só o IP do locutor.
+
+**Fora do Épico 2:** a fila de pedidos (`GET /internal/playout/proxima` segue respondendo 204) e a biblioteca de mídia; a rotação ainda usa a playlist local.
+
+## O que vem a seguir
+
+- **Épico 3**: pedidos de música e moderação, e divulgações.
+- **Épico 4**: upload e sanitização de mídia. Antes de liberar upload, atualizar as imagens do SQL Server e do Liquidsoap (pendência do Épico 1 acima).
 
 ## Como contribuir
 
@@ -164,7 +183,7 @@ Para rodar só o backend ou só o frontend fora do Docker, veja `backend/` (`dot
 
 WebRadio é um projeto **público no GitHub**. Nenhum segredo, credencial, e-mail pessoal ou IP pode ser commitado.
 
-- 🔒 Política de segurança: [`SECURITY.md`](SECURITY.md) (o arquivo entra com o PR #31)
+- 🔒 Política de segurança: [`SECURITY.md`](SECURITY.md)
 - 🔍 Auditoria de segurança: [`docs/specs/05-seguranca-auditoria.md`](docs/specs/05-seguranca-auditoria.md)
 - 🚨 Relatar vulnerabilidade: pelo *private vulnerability reporting* do GitHub, na aba Security do repositório
 
@@ -186,6 +205,6 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 
 ---
 
-**Versão**: Épico 1  
-**Última atualização**: 2026-10-14  
+**Versão**: Épico 2  
+**Última atualização**: 2026-10-29  
 **Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend)
