@@ -355,10 +355,25 @@ public class CicloDoWorkerTests : IDisposable
         }
     }
 
+    private sealed class ExpiracaoFalsa : IExpiracaoDePedidos
+    {
+        private int _execucoes;
+
+        public int Execucoes => Volatile.Read(ref _execucoes);
+        public volatile bool Falhar;
+
+        public Task<int> ExecutarAsync(CancellationToken ct)
+        {
+            Interlocked.Increment(ref _execucoes);
+            return Falhar ? throw new InvalidOperationException("banco fora do ar (simulado)") : Task.FromResult(0);
+        }
+    }
+
     private readonly string _pasta = Directory.CreateTempSubdirectory("webradio-worker-").FullName;
     private readonly LiderancaFalsa _lideranca = new();
     private readonly ManutencaoFalsa _manutencao = new();
     private readonly TransicoesFalsas _transicoes = new();
+    private readonly ExpiracaoFalsa _expiracao = new();
     private readonly RelogioFalso _relogio = new(new DateTime(2026, 10, 13, 12, 0, 0, DateTimeKind.Utc));
 
     private string Heartbeat => Path.Combine(_pasta, "heartbeat");
@@ -373,7 +388,8 @@ public class CicloDoWorkerTests : IDisposable
 
     private CicloDoWorker Novo(string? arquivo = null, Microsoft.Extensions.Logging.ILogger<CicloDoWorker>? log = null)
     {
-        var servicos = new ServiceCollection().AddScoped<IManutencao>(_ => _manutencao).AddScoped<ITransicoesDaGrade>(_ => _transicoes).BuildServiceProvider();
+        var servicos = new ServiceCollection().AddScoped<IManutencao>(_ => _manutencao).AddScoped<ITransicoesDaGrade>(_ => _transicoes)
+            .AddScoped<IExpiracaoDePedidos>(_ => _expiracao).BuildServiceProvider();
         var opcoes = new CicloOptions
         {
             Intervalo = TimeSpan.FromMilliseconds(40),
@@ -382,6 +398,45 @@ public class CicloDoWorkerTests : IDisposable
             RecuoMaximoDaManutencao = TimeSpan.FromHours(1),
         };
         return new CicloDoWorker(_lideranca, servicos.GetRequiredService<IServiceScopeFactory>(), _relogio, opcoes, log ?? NullLogger<CicloDoWorker>.Instance);
+    }
+
+    [Fact]
+    public async Task Lider_roda_a_expiracao_dos_pedidos_a_cada_60_segundos_e_quem_nao_e_lider_nao()
+    {
+        using var ciclo = Novo();
+        await ciclo.StartAsync(default);
+
+        Assert.True(await Espera.Ate(() => ciclo.Ciclos >= 4, TimeSpan.FromSeconds(10)));
+        Assert.Equal(0, _expiracao.Execucoes); // não é líder
+
+        _lideranca.Lider = true;
+        Assert.True(await Espera.Ate(() => _expiracao.Execucoes == 1, TimeSpan.FromSeconds(10)));
+        var ciclos = ciclo.Ciclos;
+        Assert.True(await Espera.Ate(() => ciclo.Ciclos >= ciclos + 5, TimeSpan.FromSeconds(10)));
+        Assert.Equal(1, _expiracao.Execucoes); // ainda não passaram 60 s
+
+        _relogio.Avancar(TimeSpan.FromSeconds(61));
+        Assert.True(await Espera.Ate(() => _expiracao.Execucoes == 2, TimeSpan.FromSeconds(10)));
+        await ciclo.StopAsync(default);
+    }
+
+    [Fact]
+    public async Task Falha_na_expiracao_dos_pedidos_nao_derruba_o_laco_e_tenta_de_novo_no_proximo_intervalo()
+    {
+        _expiracao.Falhar = true;
+        _lideranca.Lider = true;
+        using var ciclo = Novo();
+        await ciclo.StartAsync(default);
+
+        Assert.True(await Espera.Ate(() => _expiracao.Execucoes == 1, TimeSpan.FromSeconds(10)));
+        var ciclos = ciclo.Ciclos;
+        Assert.True(await Espera.Ate(() => ciclo.Ciclos >= ciclos + 5, TimeSpan.FromSeconds(10)));
+        Assert.Equal(1, _expiracao.Execucoes); // sem recuo de 10 s: só no próximo intervalo de 60 s
+
+        _expiracao.Falhar = false;
+        _relogio.Avancar(TimeSpan.FromSeconds(61));
+        Assert.True(await Espera.Ate(() => _expiracao.Execucoes == 2, TimeSpan.FromSeconds(10)));
+        await ciclo.StopAsync(default);
     }
 
     [Fact]
@@ -675,5 +730,21 @@ public class ConexaoDoBancoTests
         using var escopo = provedor.CreateScope();
         Assert.IsType<Manutencao>(escopo.ServiceProvider.GetRequiredService<IManutencao>());
         Assert.IsType<TransicoesDaGrade>(escopo.ServiceProvider.GetRequiredService<ITransicoesDaGrade>());
+        Assert.IsType<ExpiracaoDePedidos>(escopo.ServiceProvider.GetRequiredService<IExpiracaoDePedidos>());
+    }
+
+    [Theory]
+    [InlineData("4", false)]
+    [InlineData("0", false)]
+    [InlineData("10081", false)]
+    [InlineData("abc", false)]
+    [InlineData("120", true)]
+    public void Pedidos_ExpiracaoMinutos_fora_da_faixa_ou_nao_numerica_recusa_o_boot_do_Worker(string valor, bool aceito)
+    {
+        var servicos = new ServiceCollection().AddLogging();
+        Action registrar = () => servicos.AddWorkerInfrastructure(Config(("ConnectionStrings:RadioDb", "Server=x;Database=WebRadio;User Id=u;Password=local"), ("Pedidos:ExpiracaoMinutos", valor)));
+
+        if (aceito) registrar();
+        else Assert.Throws<InvalidOperationException>(registrar);
     }
 }

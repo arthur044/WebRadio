@@ -31,6 +31,17 @@ public static class WorkerServiceCollectionExtensions
         services.AddSingleton(sp => ActivatorUtilities.CreateInstance<LiderancaDoWorker>(sp, connectionString));
         services.AddSingleton<ILideranca>(sp => sp.GetRequiredService<LiderancaDoWorker>());
         services.AddHostedService(sp => sp.GetRequiredService<LiderancaDoWorker>());
+        // Pedidos__ExpiracaoMinutos (07, E3-F04): valor fora da faixa recusa o boot do Worker, como na Api.
+        var pedidos = new WebRadio.Application.Features.Pedidos.PedidosOptions();
+        var textoDaExpiracao = configuration["Pedidos:ExpiracaoMinutos"];
+        if (!string.IsNullOrWhiteSpace(textoDaExpiracao))
+            pedidos.ExpiracaoMinutos = int.TryParse(textoDaExpiracao, out var expiracao)
+                ? expiracao
+                : throw new InvalidOperationException("Pedidos:ExpiracaoMinutos precisa ser um número inteiro.");
+        if (new WebRadio.Application.Features.Pedidos.PedidosOptionsValidator().Validate(null, pedidos) is { Failed: true } invalido)
+            throw new InvalidOperationException(string.Join(" ", invalido.Failures));
+        services.AddSingleton(Microsoft.Extensions.Options.Options.Create(pedidos));
+        services.AddScoped<IExpiracaoDePedidos, ExpiracaoDePedidos>();
         services.AddScoped<IManutencao, Manutencao>();
         services.AddScoped<ITransicoesDaGrade, TransicoesDaGrade>();
         services.AddHostedService<CicloDoWorker>();

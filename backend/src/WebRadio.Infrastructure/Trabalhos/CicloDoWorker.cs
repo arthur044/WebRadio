@@ -11,6 +11,9 @@ public sealed class CicloOptions
 
     public TimeSpan IntervaloDaManutencao { get; set; } = TimeSpan.FromHours(24);
 
+    /// <summary>07 E3-F04: a expiração dos pedidos pendentes roda a cada 60 s (o tick do laço é de 10 s).</summary>
+    public TimeSpan IntervaloDaExpiracao { get; set; } = TimeSpan.FromSeconds(60);
+
     /// <summary>
     /// Manutenção que falha (banco fora, por exemplo) não é refeita a cada ciclo de 10 s: espera este tempo, que dobra a
     /// cada falha seguida até <see cref="RecuoMaximoDaManutencao"/> (B3-07).
@@ -37,6 +40,8 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
     ILogger<CicloDoWorker> logger) : BackgroundService
 {
     private int _falhasDasTransicoes;
+    private int _falhasDaExpiracao;
+    private DateTime? _ultimaExpiracaoUtc;
     private DateTime? _ultimaManutencaoUtc;
     private DateTime? _proximaTentativaUtc;
     private int _falhasDaManutencao;
@@ -52,6 +57,7 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
     {
         var job = Task.CompletedTask;
         var transicoes = Task.CompletedTask;
+        var expiracao = Task.CompletedTask;
         using var timer = new PeriodicTimer(opcoes.Intervalo);
         try
         {
@@ -63,6 +69,8 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
                     job = ManterAsync(stoppingToken);
                 if (lideranca.EhLider && transicoes.IsCompleted)
                     transicoes = TransicionarAsync(stoppingToken);
+                if (lideranca.EhLider && expiracao.IsCompleted && ExpiracaoDevida())
+                    expiracao = ExpirarPedidosAsync(stoppingToken);
             } while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -73,6 +81,7 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
         {
             await job; // ManterAsync nunca lança: só espera o lote em curso perceber o cancelamento
             await transicoes; // idem
+            await expiracao; // idem
         }
     }
 
@@ -102,6 +111,38 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
             else
                 logger.LogWarning("WORKER_TRANSICOES: segue falhando ({Tipo}).", e.GetType().Name);
             Interlocked.Increment(ref _falhasDasTransicoes);
+        }
+    }
+
+    private bool ExpiracaoDevida() =>
+        _ultimaExpiracaoUtc is not { } ultima || clock.UtcNow - ultima >= opcoes.IntervaloDaExpiracao;
+
+    /// <summary>
+    /// E3-F04. A cada 60 s do líder: <c>Pendente → Expirado</c> em lotes, com o <c>PedidoModerado</c> no outbox. Falha não derruba o laço; o
+    /// erro (com a stack) sai UMA vez por sequência de falhas, as seguintes saem como aviso curto. Tenta de novo no próximo intervalo.
+    /// </summary>
+    private async Task ExpirarPedidosAsync(CancellationToken ct)
+    {
+        _ultimaExpiracaoUtc = clock.UtcNow;
+        try
+        {
+            await using var escopo = escopos.CreateAsyncScope();
+            var expirados = await escopo.ServiceProvider.GetRequiredService<IExpiracaoDePedidos>().ExecutarAsync(ct);
+            var falhas = Interlocked.Exchange(ref _falhasDaExpiracao, 0);
+            if (falhas > 0) logger.LogInformation("WORKER_EXPIRACAO_PEDIDOS: voltou a funcionar depois de {Falhas} falha(s) seguida(s).", falhas);
+            if (expirados > 0) logger.LogInformation("WORKER_EXPIRACAO_PEDIDOS: {Pedidos} pedido(s) pendente(s) expirado(s).", expirados);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // parada normal do host
+        }
+        catch (Exception e)
+        {
+            if (_falhasDaExpiracao == 0)
+                logger.LogError(e, "WORKER_EXPIRACAO_PEDIDOS: falhou; tenta de novo no próximo intervalo e só repete o erro depois que voltar a funcionar.");
+            else
+                logger.LogWarning("WORKER_EXPIRACAO_PEDIDOS: segue falhando ({Tipo}).", e.GetType().Name);
+            Interlocked.Increment(ref _falhasDaExpiracao);
         }
     }
 
