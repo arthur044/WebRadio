@@ -3,7 +3,7 @@ import { ApiError } from '../../shared/api/httpClient'
 import { descreverErro, semVersao, type ErroDescrito } from '../../shared/api/descreverErro'
 import type { DivulgacaoDto, DivulgacaoRequest } from '../../shared/api/types'
 import { campoLocalBrasiliaParaUtc, utcParaCampoLocalBrasilia } from '../../shared/lib/timezone'
-import { imagemSegura } from '../../shared/lib/urlSegura'
+import { imagemSegura, previaLocalSegura } from '../../shared/lib/urlSegura'
 import { tamanhoDoTexto } from '../pedidos/limites'
 import { enviarImagem, salvarDivulgacao } from './useDivulgacoes'
 
@@ -246,7 +246,7 @@ export function DivulgacaoForm({
   const titulos = divulgacao ? 'Editar divulgação' : 'Nova divulgação'
   const previa =
     imagem.tipo === 'nova'
-      ? imagem.previa
+      ? previaLocalSegura(imagem.previa)
       : imagem.tipo === 'mantida'
         ? imagemSegura(imagem.url)
         : null

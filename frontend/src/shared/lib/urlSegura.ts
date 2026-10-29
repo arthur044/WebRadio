@@ -38,6 +38,10 @@ export function urlSegura(
 export const linkSeguro = (valor: string | null | undefined) =>
   urlSegura(valor, { permitidos: ['https:'] })
 
+/** Prévia local de um arquivo escolhido (`URL.createObjectURL`): só `blob:`, nunca uma URL de rede. */
+export const previaLocalSegura = (valor: string | null | undefined) =>
+  urlSegura(valor, { permitidos: ['blob:'] })
+
 /** `imagemUrl`: https absoluto ou caminho same-origin; nunca `data:`. */
 export const imagemSegura = (valor: string | null | undefined) =>
   urlSegura(valor, { permitidos: ['https:'], aceitaCaminhoRelativo: true })
