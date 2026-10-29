@@ -196,7 +196,8 @@ services:
     # R1 (Sentinel): o PBKDF2 tem semáforo global (uma vaga por CPU visível); o teto de CPU e memória
     # impede que um pico de login derrube o resto do host (o streaming roda na mesma máquina).
     cpus: 2
-    mem_limit: 512m
+    # Revisto no E3-F06: o decode de uma imagem de 4096×4096 pesa 64 MB, mais o WebP de saída, sob SemaphoreSlim(1).
+    mem_limit: 768m
     pids_limit: 200
     secrets:
       - { source: jwt_signing_key, target: Jwt__SigningKey }
@@ -233,10 +234,16 @@ services:
       DOTNET_ENVIRONMENT: Production
       DOTNET_gcServer: "0"
       ConnectionStrings__RadioDb: "Server=sqlserver;Database=WebRadio;User Id=webradio_app;Encrypt=True;TrustServerCertificate=True;Max Pool Size=20;Min Pool Size=0;Connect Timeout=10"
-    # Só o segredo que o código lê hoje (B3-11): o banco. Sem JWT, pepper, Redis nem MinIO; esses voltam quando um job do
-    # Worker precisar deles (Épico 4: sanitização no MinIO, locks no Redis).
+      # Limpeza das imagens órfãs de divulgação (E3-F07): o Worker fala com o MinIO interno com a credencial do svc-worker, que só lista e
+      # apaga em publico/divulgacoes/ (política em infra/minio/policies/svc-worker.json). O PublicEndpoint só existe porque o cliente o exige.
+      Storage__Endpoint: "minio:9000"
+      Storage__PublicEndpoint: "${PUBLIC_ORIGIN:?Defina PUBLIC_ORIGIN no .env (rode infra/scripts/gerar-segredos.sh)}/storage"
+    # O banco e a credencial do svc-worker no MinIO (E3-F07). Sem JWT, pepper nem Redis; esses voltam quando um job do Worker precisar deles
+    # (Épico 4: sanitização no MinIO, locks no Redis).
     secrets:
       - { source: db_app_password, target: Banco__Senha }
+      - { source: minio_worker_access_key, target: Storage__AccessKey }
+      - { source: minio_worker_secret_key, target: Storage__SecretKey }
     tmpfs: [/tmp]
     networks: [dados]
     cpus: 1
@@ -244,6 +251,7 @@ services:
     pids_limit: 100
     depends_on:
       migrator: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
     healthcheck:
       # O worker não tem HTTP: o ciclo de 10 s grava /tmp/worker-heartbeat; parado há mais de ~30 s (3 ciclos) = unhealthy
       # (04, F11). Com retries 3 o contêiner é marcado unhealthy ~30 s depois do limite, não ~2 min.

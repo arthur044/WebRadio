@@ -18,6 +18,8 @@
     <PackageReference Include="Microsoft.Extensions.Identity.Core" />
     <PackageReference Include="StackExchange.Redis" />
     <PackageReference Include="Minio" />
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
   </ItemGroup>

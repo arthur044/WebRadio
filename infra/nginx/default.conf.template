@@ -54,11 +54,27 @@ server {
         limit_req zone=api_auth burst=10 nodelay;
         client_max_body_size 1m;
 
-        proxy_http_version 1.1;
-        proxy_set_header Host "${PUBLIC_AUTHORITY}";
-        proxy_set_header X-Forwarded-Host "${PUBLIC_AUTHORITY}";
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        include /etc/nginx/conf.d/proxy-api.inc;
+        set $api_upstream http://api:8080;
+        proxy_pass $api_upstream;
+    }
+
+    # Upload de imagem de divulgação (E3-F06): location EXATO, que repete tudo o que um `location` não herda (cabeçalhos de segurança, limites e os
+    # proxy_set_header do snippet) e é o único que aceita corpo acima de 1 MB: 2 MiB do arquivo + 64 KiB de cabeçalhos do multipart (a Api recusa
+    # acima de 2 MiB de arquivo e confere a autorização e o limite de 30/h ANTES de ler o corpo).
+    #
+    # proxy_request_buffering off: o corpo segue para a Api em fluxo, em vez de o nginx guardar os 2 MiB no tmpfs (/var/cache/nginx, que conta no
+    # mem_limit do web). Sem isso, algumas dezenas de conexões paradas no último byte (client_body_timeout é por intervalo de leitura) encheriam
+    # os 128 MB e derrubariam o web, que serve também o /stream/. A rota não exige autenticação no nginx: a Api responde 401/403 antes de ler.
+    # limit_conn por IP e um limit_req próprio, bem abaixo do api_geral (o uso legítimo é de no máximo 30 por hora por Admin).
+    location = /api/v1/divulgacoes/imagens {
+        include /etc/nginx/security-headers.conf;
+        limit_req zone=api_upload burst=20 nodelay;
+        limit_conn conn_upload 2;
+        client_max_body_size 2112k;
+        proxy_request_buffering off;
+
+        include /etc/nginx/conf.d/proxy-api.inc;
         set $api_upstream http://api:8080;
         proxy_pass $api_upstream;
     }
@@ -68,11 +84,7 @@ server {
         limit_req zone=api_geral burst=40 nodelay;
         client_max_body_size 1m;
 
-        proxy_http_version 1.1;
-        proxy_set_header Host "${PUBLIC_AUTHORITY}";
-        proxy_set_header X-Forwarded-Host "${PUBLIC_AUTHORITY}";
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        include /etc/nginx/conf.d/proxy-api.inc;
         set $api_upstream http://api:8080;
         proxy_pass $api_upstream;
     }

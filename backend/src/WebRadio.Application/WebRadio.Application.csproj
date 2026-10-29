@@ -16,4 +16,9 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Os testes conferem as rotinas internas do ciclo de vida da imagem (DivulgacoesDb). -->
+    <InternalsVisibleTo Include="WebRadio.Application.Tests" />
+  </ItemGroup>
+
 </Project>

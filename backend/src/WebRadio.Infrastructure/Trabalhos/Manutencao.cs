@@ -1,10 +1,13 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using WebRadio.Application.Abstracoes;
+using WebRadio.Application.Features.Divulgacoes;
 using WebRadio.Infrastructure.Persistencia;
 
 namespace WebRadio.Infrastructure.Trabalhos;
 
 public sealed record ResultadoDaManutencao(int PedidosAnonimizados, int EventosApagados, int RefreshApagados, int CredenciaisApagadas,
-    int IpsApagados = 0, int EventosDePedidoApagados = 0);
+    int IpsApagados = 0, int EventosDePedidoApagados = 0, int ImagensApagadas = 0);
 
 public interface IManutencao
 {
@@ -16,7 +19,7 @@ public interface IManutencao
 /// O "agora" é o do SQL (<c>SYSUTCDATETIME()</c>), não o do contêiner. Tudo é idempotente: rodar duas vezes, ou em
 /// dois workers ao mesmo tempo, não muda o resultado (a liderança só evita trabalho dobrado).
 /// </summary>
-public sealed class Manutencao(RadioDbContext db) : IManutencao
+public sealed class Manutencao(RadioDbContext db, IObjectStorage? storage = null, IClock? relogio = null, ILogger<Manutencao>? logger = null) : IManutencao
 {
     public const int LotePadrao = 4000;
 
@@ -24,6 +27,12 @@ public sealed class Manutencao(RadioDbContext db) : IManutencao
     public const string NomeAnonimo = "(anônimo)";
 
     public int Lote { get; init; } = LotePadrao;
+
+    /// <summary>07 E3-D6: imagem de divulgação com mais de 24 h (pelo <c>LastModified</c> da listagem) e sem divulgação ligada é apagada.</summary>
+    public static readonly TimeSpan IdadeMinimaDaImagemOrfa = TimeSpan.FromHours(24);
+
+    /// <summary>Teto por rodada: a imagem tem até 2 MB e a rodada é diária; o resto fica para o dia seguinte.</summary>
+    public const int MaximoDeImagensPorRodada = 1000;
 
     public async Task<ResultadoDaManutencao> ExecutarAsync(CancellationToken ct)
     {
@@ -80,7 +89,42 @@ public sealed class Manutencao(RadioDbContext db) : IManutencao
             DELETE TOP ({Lote}) FROM seg.CredencialTransmissao WHERE RevogadaEmUtc < DATEADD(DAY, -90, SYSUTCDATETIME());
             """, ct));
 
-        return new ResultadoDaManutencao(anonimizados, eventos, refresh, credenciais, ips, eventosDePedido);
+        // E3-F07: imagens de divulgação que ninguém usa mais (enviadas e nunca ligadas, ou de divulgação removida ou editada). Falha do storage não
+        // derruba o resto da manutenção: o banco já foi limpo e a imagem sobra para a rodada seguinte.
+        var imagens = await LimparImagensOrfasAsync(ct);
+
+        return new ResultadoDaManutencao(anonimizados, eventos, refresh, credenciais, ips, eventosDePedido, imagens);
+    }
+
+    /// <summary>
+    /// Lista <c>publico/divulgacoes/</c> e apaga o que tem mais de 24 h, RECONFERINDO a referência no banco imediatamente antes de cada
+    /// <c>DeleteObject</c> (uma divulgação criada depois da listagem não perde a imagem). Só mexe em chave no formato do E3-D5; nunca em outro prefixo.
+    /// O bucket é público: uma imagem não publicada fica acessível só por uma chave impossível de adivinhar, e por no máximo um dia.
+    /// </summary>
+    private async Task<int> LimparImagensOrfasAsync(CancellationToken ct)
+    {
+        if (storage is null) return 0;
+        try
+        {
+            var corte = (relogio?.UtcNow ?? DateTime.UtcNow) - IdadeMinimaDaImagemOrfa;
+            var apagadas = 0;
+            foreach (var objeto in await storage.ListarAsync(Buckets.Publico, ChaveDeImagem.Prefixo, ct))
+            {
+                if (apagadas >= MaximoDeImagensPorRodada) break;
+                if (objeto.UltimaModificacaoUtc >= corte || !ChaveDeImagem.Valida().IsMatch(objeto.Chave)) continue;
+                if (await db.Divulgacoes.AsNoTracking().AnyAsync(d => d.ImagemChaveStorage == objeto.Chave, ct)) continue;
+
+                await storage.DeleteAsync(Buckets.Publico, objeto.Chave, ct);
+                apagadas++;
+            }
+
+            return apagadas;
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            logger?.LogWarning("WORKER_MANUTENCAO_IMAGENS ({Tipo}): a limpeza das imagens órfãs falhou; tenta de novo na próxima rodada.", e.GetType().Name);
+            return 0;
+        }
     }
 
     private async Task<int> EmLotes(Func<Task<int>> passo)

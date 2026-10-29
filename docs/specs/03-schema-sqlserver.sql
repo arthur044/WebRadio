@@ -340,6 +340,9 @@ CREATE TABLE interacao.Divulgacao (
 );
 CREATE INDEX IX_Divulgacao_Ativas ON interacao.Divulgacao (Prioridade DESC)
     INCLUDE (Titulo, Mensagem, ImagemChaveStorage, LinkDestino, InicioExibicaoUtc, FimExibicaoUtc) WHERE Ativo = 1;
+-- Uma imagem pertence a uma divulgação só (07, E3-D5): o DELETE de uma não apaga a imagem da outra. Fecha a corrida do 409 (dois PUT
+-- simultâneos com a mesma chave); a violação vira 409.
+CREATE UNIQUE INDEX UX_Divulgacao_ImagemChave ON interacao.Divulgacao (ImagemChaveStorage) WHERE ImagemChaveStorage IS NOT NULL;
 -- [Atlas] EF ForeignKeyIndexConvention (E1-A03, 2026-09-28): aceito, mesmo motivo do
 -- IX_RefreshToken_SubstituidoPorId acima.
 CREATE INDEX IX_Divulgacao_CriadoPorUsuarioId ON interacao.Divulgacao (CriadoPorUsuarioId);

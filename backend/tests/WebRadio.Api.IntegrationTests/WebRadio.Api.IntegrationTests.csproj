@@ -22,6 +22,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
     <ProjectReference Include="..\..\src\WebRadio.Api\WebRadio.Api.csproj" />
+    <!-- As imagens de fixture (JPEG com GPS, APNG, bomba de pixel...) são montadas em bytes e valem para os dois projetos de teste. -->
+    <Compile Include="..\WebRadio.Infrastructure.Tests\Suporte\ImagensDeTeste.cs" Link="Suporte\ImagensDeTeste.cs" />
   </ItemGroup>
 
 </Project>

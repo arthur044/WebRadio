@@ -376,12 +376,17 @@ controle fim "$(iso_em 3600)"
 CON="$(conta_log "$P-radio" 'Source client conectado')"
 fonte_ao_vivo fonte2 "$USR" "$TMP/senha-ok"
 confere "um source client novo entra" espera_mais "$P-radio" "Source client conectado" "$CON" 90
-sleep 12 # alguns 200 de reconferência
+# ATENÇÃO (flake do #83, mesma classe do teto 1): o radio.liq guarda o ÚLTIMO 200 e o fim do programa do teto anterior. Se a API cair antes de uma
+# consulta que começou DEPOIS do `controle` e depois da reconexão, o teto sai de um valor velho: o ao vivo cai na hora ("20 s sem resposta: segue
+# no ar" falha), ou cai pelo outro teto, com outro texto no log. Só a SEGUNDA linha HARBOR_AUTORIZACAO da API nova começa depois do `controle`
+# com certeza (as consultas são de 10 em 10 s e só existem com um locutor no ar): com ela o último 200 é de menos de 10 s atrás e o fim é o de +1 h.
+AUT="$(conta_liq_api HARBOR_AUTORIZACAO)"
+confere "duas consultas de autorização depois do controle: o 200 recente e o fim novo" espera_mais "$P-api" HARBOR_AUTORIZACAO "$((AUT + 1))" 60
 DESC="$(conta_log "$P-radio" 'Source client desconectado')"
 docker rm -f "$P-api" >/dev/null
 sleep 20
 confere "20 s sem resposta: segue no ar (o teto é de 45 s)" test "$(conta_log "$P-radio" 'Source client desconectado')" = "$DESC"
-confere "o teto do último 200 derruba, com o fim do programa a 1 h" espera_log "$P-radio" "Derrubando o ao vivo: teto da falha aberta (último 200 + 45 s)" 60
+confere "o teto do último 200 derruba, com o fim do programa a 1 h" espera_log "$P-radio" "Derrubando o ao vivo: teto da falha aberta (último 200 + 45 s)" 90
 docker rm -f "$P-fonte2" >/dev/null
 
 echo "-- API fora: conexão nova é recusada"
