@@ -66,14 +66,13 @@ describe('descreverErro', () => {
     expect(d.mensagem).toMatch(/não foram aceitos/i)
   })
 
-  it.each([
-    [404, 'Programa'],
-    [412, 'programa'],
-    [428, 'programa'],
-  ])('status %i: o texto não fala de programa (serve a auth e a credencial)', (status, palavra) => {
-    const d = descreverErro(erro(status, '/erros/qualquer'))
-    expect(d.mensagem).not.toContain(palavra)
-  })
+  it.each([404, 412, 428])(
+    'status %i: o texto não fala de programa (serve a auth e a credencial)',
+    (status) => {
+      const d = descreverErro(erro(status, '/erros/qualquer'))
+      expect(d.mensagem).not.toMatch(/programa/i)
+    },
+  )
 
   it('semVersao() também é neutro', () => {
     expect(semVersao().mensagem).not.toMatch(/programa/i)
