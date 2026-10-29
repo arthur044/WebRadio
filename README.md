@@ -208,4 +208,4 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 
 **Versão**: Épico 2  
 **Última atualização**: 2026-10-29  
-**Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend)
+**Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend), Lore (Documentação)
