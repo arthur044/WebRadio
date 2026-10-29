@@ -78,6 +78,8 @@ export function descreverErro(err: unknown): ErroDescrito {
       )
     case '/erros/pedido-ja-moderado':
       return descrito('Outro locutor já moderou este pedido.', { recarregar: true })
+    case '/erros/imagem-em-uso':
+      return descrito('Esta imagem já está em uso por outra divulgação. Escolha outra.')
     case '/erros/credenciais':
       return descrito('Senha incorreta.', { campos: { senhaAtual: 'Senha incorreta.' } })
     case '/erros/conflito-credencial':

@@ -20,6 +20,11 @@ describe('descreverErro', () => {
     expect(d.recarregar).toBe(true)
   })
 
+  it('409 imagem em uso: pede outra imagem', () => {
+    const d = descreverErro(erro(409, '/erros/imagem-em-uso'))
+    expect(d.mensagem).toMatch(/já está em uso/i)
+  })
+
   it('429 com retryAfterSeconds: devolve a espera, arredondada para cima', () => {
     expect(
       descreverErro(erro(429, '/erros/muitos-pedidos', { retryAfterSeconds: 61.2 }))
