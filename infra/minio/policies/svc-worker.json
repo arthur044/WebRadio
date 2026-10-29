@@ -35,6 +35,16 @@
       ]
     },
     {
+      "Sid": "ApagarImagensDeDivulgacao",
+      "Effect": "Allow",
+      "Action": [
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::publico/divulgacoes/*"
+      ]
+    },
+    {
       "Sid": "HeadBucketExigidoPeloSdk",
       "Effect": "Allow",
       "Action": [
@@ -42,9 +52,25 @@
       ],
       "Resource": [
         "arn:aws:s3:::quarentena",
-        "arn:aws:s3:::midia",
-        "arn:aws:s3:::publico"
+        "arn:aws:s3:::midia"
       ]
+    },
+    {
+      "Sid": "ListarImagensDeDivulgacao",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::publico"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "s3:prefix": [
+            "divulgacoes/"
+          ]
+        }
+      }
     }
   ]
 }

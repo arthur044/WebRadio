@@ -227,8 +227,8 @@ confere("api: ASPNETCORE_ENVIRONMENT=Production na base e Development com o dev.
 
 # --- B3-11: o Worker só recebe o segredo que o código lê
 alvos = sorted(x["target"] for x in servicos["worker"].get("secrets", []))
-confere("worker: só o segredo Banco__Senha", alvos == ["Banco__Senha"], str(alvos))
-confere("worker: depende só do migrator", set(servicos["worker"].get("depends_on", {})) == {"migrator"})
+confere("worker: só o banco e a credencial do svc-worker no MinIO (sem JWT, pepper nem Redis)", alvos == ["Banco__Senha", "Storage__AccessKey", "Storage__SecretKey"], str(alvos))
+confere("worker: depende só do migrator e do minio-init", set(servicos["worker"].get("depends_on", {})) == {"migrator", "minio-init"})
 
 print("\n".join(saida))
 PY

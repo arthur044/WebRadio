@@ -2,14 +2,13 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "AssinarUploadDaQuarentenaEDoPublico",
+      "Sid": "AssinarUploadDaQuarentena",
       "Effect": "Allow",
       "Action": [
         "s3:PutObject"
       ],
       "Resource": [
-        "arn:aws:s3:::quarentena/*",
-        "arn:aws:s3:::publico/*"
+        "arn:aws:s3:::quarentena/*"
       ]
     },
     {
@@ -33,6 +32,18 @@
       ]
     },
     {
+      "Sid": "ImagensDeDivulgacao",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::publico/divulgacoes/*"
+      ]
+    },
+    {
       "Sid": "HeadBucketExigidoPeloSdk",
       "Effect": "Allow",
       "Action": [
@@ -40,7 +51,8 @@
       ],
       "Resource": [
         "arn:aws:s3:::quarentena",
-        "arn:aws:s3:::midia"
+        "arn:aws:s3:::midia",
+        "arn:aws:s3:::publico"
       ]
     }
   ]
