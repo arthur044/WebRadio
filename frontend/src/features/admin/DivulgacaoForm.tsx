@@ -104,7 +104,9 @@ export function DivulgacaoForm({
   const [enviando, setEnviando] = useState(false)
 
   // O arquivo novo só sobe ao salvar (a `Manutencao` apaga imagem sem divulgação depois de 24 h). Se o upload deu certo
-  // e o salvar falhou (412, rede), a tentativa seguinte reusa a chave: o limite é de 30 envios por hora.
+  // e o salvar falhou por rede ou validação, a tentativa seguinte reusa a chave: o limite é de 30 envios por hora.
+  // No 412 o formulário é remontado e este ref se perde: o Admin escolhe o arquivo de novo, e a imagem já enviada fica
+  // órfã até a `Manutencao` apagá-la.
   const jaEnviada = useRef<{ arquivo: File; chave: string } | null>(null)
   const previaAtual = useRef<string | null>(null)
   useEffect(

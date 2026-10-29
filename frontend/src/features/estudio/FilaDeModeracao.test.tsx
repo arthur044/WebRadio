@@ -265,6 +265,29 @@ describe('Fila de moderação (E3-P03)', () => {
     expect(screen.getByText('Música b')).toBeInTheDocument()
   })
 
+  it('409 pedido-ja-moderado: o aviso some sozinho depois de alguns segundos', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const api = montarApi({ pendentes: [pedido('a')] })
+      api.estado.proximaAcao = () => {
+        api.estado.pendentes = []
+        return json(409, { type: '/erros/pedido-ja-moderado', title: 'x', status: 409 })
+      }
+      renderFila()
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      await user.click(await screen.findByRole('button', { name: 'Aprovar Música a' }))
+      expect(await screen.findByRole('status')).toBeInTheDocument()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8000)
+      })
+
+      expect(screen.queryByText('Outro locutor já moderou este pedido.')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('outro erro (403) fica no item e o pedido continua na fila', async () => {
     const api = montarApi({ pendentes: [pedido('a')] })
     api.estado.proximaAcao = () => json(403, undefined)

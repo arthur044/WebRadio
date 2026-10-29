@@ -7,9 +7,10 @@ export const LIMITES_DO_PEDIDO = {
 } as const
 
 /**
- * Tamanho como o servidor mede (E3-D7): depois de normalizar para NFC, em unidades UTF-16. Sem o NFC, um texto
- * decomposto (`e` + acento combinante) contaria mais aqui do que lá e seria recusado à toa.
+ * Tamanho como o servidor mede (E3-D7): depois de normalizar para NFC e tirar as pontas, em unidades UTF-16. Sem o NFC,
+ * um texto decomposto (`e` + acento combinante) contaria mais aqui do que lá; sem o `trim`, um espaço no fim faria o
+ * texto ser recusado aqui e aceito lá.
  */
 export function tamanhoDoTexto(valor: string): number {
-  return valor.normalize('NFC').length
+  return valor.normalize('NFC').trim().length
 }

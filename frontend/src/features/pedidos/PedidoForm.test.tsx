@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -112,6 +112,20 @@ describe('Pedir Música (E3-P01)', () => {
     await user.type(screen.getByLabelText('Seu nome'), 'José')
 
     expect(screen.getByText('4/60')).toBeInTheDocument()
+  })
+
+  it('o contador ignora o espaço nas pontas, como o servidor (Trim antes de medir)', async () => {
+    const api = montarApi()
+    renderPagina()
+    const user = userEvent.setup()
+
+    await preencher(user, { nome: `${'a'.repeat(60)} ` })
+    expect(screen.getByText('60/60')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Enviar pedido' }))
+
+    expect(screen.queryByText(/aceita no máximo 60 caracteres/i)).toBeNull()
+    await waitFor(() => expect(api.pedidos()).toHaveLength(1))
   })
 
   it('texto acima do limite não é enviado e o campo diz o limite', async () => {

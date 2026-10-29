@@ -255,6 +255,8 @@ function Lista({
   )
 }
 
+const AVISO_JA_MODERADO_MS = 8000
+
 /**
  * E3-P03: a fila de moderação (Locutor e Admin). Os pendentes chegam por `PedidoCriado` e saem por `PedidoModerado`
  * (o hub invalida `pedidos-moderacao`), mais antigos primeiro, como o servidor ordena. Os aprovados são os das últimas
@@ -262,6 +264,13 @@ function Lista({
  */
 export function FilaDeModeracao() {
   const [jaModerado, setJaModerado] = useState<string | null>(null)
+
+  // O aviso é informativo: some sozinho, e um novo aviso reinicia a contagem.
+  useEffect(() => {
+    if (jaModerado === null) return
+    const id = window.setTimeout(() => setJaModerado(null), AVISO_JA_MODERADO_MS)
+    return () => window.clearTimeout(id)
+  }, [jaModerado])
 
   return (
     <section aria-labelledby="titulo-pedidos" className="border-border rounded-lg border p-4">
