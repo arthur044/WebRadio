@@ -65,6 +65,12 @@ public sealed class DivulgacaoConfiguration : IEntityTypeConfiguration<Divulgaca
             .HasFilter("Ativo = 1")
             .HasDatabaseName("IX_Divulgacao_Ativas");
 
+        // Uma imagem pertence a uma divulgação só (07, E3-D5): fecha a corrida do 409 quando dois PUT apontam para a mesma chave.
+        builder.HasIndex(d => d.ImagemChaveStorage)
+            .IsUnique()
+            .HasFilter("ImagemChaveStorage IS NOT NULL")
+            .HasDatabaseName("UX_Divulgacao_ImagemChave");
+
         builder.IgnorarEventosDominio();
     }
 }
