@@ -14,6 +14,10 @@
 #      serve: chega sempre com o IP do gateway da bridge. Com o KnownIPNetworks errado as duas origens viram o IP do nginx e o
 #      passo da outra origem falha.
 #   3. Redis parado: o throttle cai para o SQL, o /health/ready fica Degraded e o segundo pedido do mesmo dispositivo continua 429.
+#   7. Imagem de divulgação (precisa de E2E_ADMIN_SENHA_NOVA, a senha que o smoke do ao vivo deixou no Admin): um JPEG com EXIF de GPS volta WebP sem
+#      metadado; WebP, PNG animado, SVG, GIF, HTML renomeado, lado acima de 4096 px e arquivo acima de 2 MB são recusados; a imagem é servida por
+#      /storage/publico/ com image/webp, nosniff e CSP com sandbox; a listagem do bucket é negada; apagar a divulgação apaga a imagem; e as
+#      políticas do MinIO valem (a API só escreve em publico/divulgacoes/, o Worker só lista e apaga lá).
 #
 # O `curl` vem da imagem do próprio `web` (webradio-web:local, já construída pelo compose; a base é fixada por digest e o bloco apk
 # do Dockerfile mantém curl/libcurl corrigidos). O `docker run` usa --pull never: sem a imagem o smoke falha na hora e nunca baixa nada. O orçamento de throttle é dividido com o E2E: o
@@ -37,19 +41,28 @@ AUTORIDADE="${SMOKE_AUTORIDADE:-$(grep -m1 '^PUBLIC_AUTHORITY=' .env 2>/dev/null
 AUTORIDADE="${AUTORIDADE:-localhost:8080}"
 CORPO='{"nomeOuvinte":"Smoke","tituloMusica":"Garota de Ipanema","artista":"Tom Jobim","mensagem":"smoke do Epico 3"}'
 
+BASE="${SMOKE_BASE:-http://localhost:8080}"
+TMP="$(mktemp -d)"
+: "${E2E_ADMIN_SENHA_NOVA:?Defina E2E_ADMIN_SENHA_NOVA (a senha do Admin depois do smoke do ao vivo; o DoD 7 loga com ela)}"
+[[ "${GITHUB_ACTIONS:-}" == "true" ]] && echo "::add-mask::$E2E_ADMIN_SENHA_NOVA"
+
 WEB_CID=""
 REDE_CRIADA=0
 REDIS_PARADO=0
 
 # A senha do Redis é lida DENTRO do contêiner. O padrão é o do RedisRequestThrottle (prefixo wr: + throttle:pedido:).
 limpar_chaves() {
-  "${COMPOSE[@]}" exec -T redis sh -c 'export REDISCLI_AUTH="$(cat /run/secrets/redis_password)"; redis-cli --scan --pattern "wr:throttle:pedido:*" | xargs -r redis-cli DEL' >/dev/null 2>&1
+  "${COMPOSE[@]}" exec -T redis sh -c 'export REDISCLI_AUTH="$(cat /run/secrets/redis_password)"; redis-cli --scan --pattern "wr:throttle:pedido:*" | xargs -r redis-cli DEL; redis-cli --scan --pattern "wr:throttle:divimg:*" | xargs -r redis-cli DEL' >/dev/null 2>&1
 }
 chaves_redis() {
   "${COMPOSE[@]}" exec -T redis sh -c 'export REDISCLI_AUTH="$(cat /run/secrets/redis_password)"; redis-cli --scan --pattern "wr:throttle:pedido:*"' 2>/dev/null | tr -d '\r'
 }
+chaves_do_upload() {
+  "${COMPOSE[@]}" exec -T redis sh -c 'export REDISCLI_AUTH="$(cat /run/secrets/redis_password)"; redis-cli --scan --pattern "wr:throttle:divimg:*"' 2>/dev/null | tr -d '\r'
+}
 
 limpar() {
+  rm -rf "$TMP"
   # O DoD 3 para o Redis: se o script morrer no meio, o stack não pode ficar sem ele para quem vem depois (o E2E do CI).
   if [[ "$REDIS_PARADO" == 1 ]]; then "${COMPOSE[@]}" start redis >/dev/null 2>&1 || true; fi
   limpar_chaves || true # no trap é tolerante: o Redis pode nem estar de pé
@@ -166,6 +179,119 @@ logs="$("${COMPOSE[@]}" logs --no-color web api 2>&1 || true)"
 for valor in "$LA" "$LB" "$LC" "$LE" "$LG" "$LH" "$SUBREDE.$ORIGEM_A" "$SUBREDE.$ORIGEM_B" "$SUBREDE.$ORIGEM_C"; do
   confere "ausente nos logs: ${valor:0:8}…" test -z "$(grep -F -m1 -e "$valor" <<<"$logs" || true)"
 done
+
+
+echo "== DoD 7: imagem de divulgação (recodificação, recusas, headers, ciclo de vida, políticas do MinIO)"
+EMAIL_ADMIN="$(cat secrets/seed_admin_email)"
+python3 -I -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "senha": sys.argv[2]}))' "$EMAIL_ADMIN" "$E2E_ADMIN_SENHA_NOVA" > "$TMP/login.json"
+ADMIN="$(curl -s --max-time 15 -X POST -H 'Content-Type: application/json' --data-binary "@$TMP/login.json" "$BASE/api/v1/auth/login" | python3 -I -c 'import json,sys; print(json.loads(sys.stdin.read()).get("accessToken",""))' 2>/dev/null || true)"
+if [[ -z "$ADMIN" ]]; then
+  falha "login do Admin com a senha nova (o smoke do ao vivo rodou antes?)"
+else
+  [[ "${GITHUB_ACTIONS:-}" == "true" ]] && echo "::add-mask::$ADMIN"
+  ok "Admin autenticado"
+
+  # Arquivos de fixture: o JPEG com GPS vem do repositório (bytes de um JPEG de verdade); o resto é montado aqui, em bytes.
+  cp infra/scripts/fixtures/jpeg-com-gps.jpg "$TMP/gps.jpg"
+  python3 -I - "$TMP" <<'PY'
+import struct, sys, zlib
+d = sys.argv[1]
+def chunk(t, b): return struct.pack(">I", len(b)) + t + b + struct.pack(">I", zlib.crc32(t + b) & 0xFFFFFFFF)
+def ihdr(w, h): return chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+sig = b"\x89PNG\r\n\x1a\n"
+raw = b"".join(b"\x00" + b"\xff\x00\x00" * 4 for _ in range(4))
+idat = zlib.compress(raw)
+fctl = lambda n: chunk(b"fcTL", struct.pack(">IIIIIHHBB", n, 4, 4, 0, 0, 1, 10, 0, 0))
+open(d + "/ok.png", "wb").write(sig + ihdr(4, 4) + chunk(b"IDAT", idat) + chunk(b"IEND", b""))
+open(d + "/animado.png", "wb").write(sig + ihdr(4, 4) + chunk(b"acTL", struct.pack(">II", 2, 0)) + fctl(0) + chunk(b"IDAT", idat)
+    + fctl(1) + chunk(b"fdAT", struct.pack(">I", 2) + idat) + chunk(b"IEND", b""))
+open(d + "/bomba.png", "wb").write(sig + ihdr(10000, 10000) + chunk(b"IDAT", idat) + chunk(b"IEND", b""))
+open(d + "/lado-4097.png", "wb").write(sig + ihdr(4097, 8) + chunk(b"IDAT", idat) + chunk(b"IEND", b""))
+open(d + "/webp.bin", "wb").write(b"RIFF\x1a\x00\x00\x00WEBPVP8 \x0e\x00\x00\x00" + b"\x00" * 14)
+open(d + "/gif.bin", "wb").write(b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00;")
+open(d + "/svg.bin", "wb").write(b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')
+open(d + "/html.jpg", "wb").write(b"<html><script>alert(1)</script></html>")
+open(d + "/grande.jpg", "wb").write(b"\xff\xd8\xff" + b"\x00" * (2 * 1024 * 1024 + 200 * 1024))
+PY
+
+  imagem() { # $1 arquivo; deixa o corpo em $TMP/resp.json e imprime o status ("000" se a conexão caiu)
+    curl -s --max-time 30 -o "$TMP/resp.json" -w '%{http_code}' -X POST -H "Authorization: Bearer $ADMIN" \
+      -F "file=@$1;type=image/jpeg;filename=foto.jpg" "$BASE/api/v1/divulgacoes/imagens" || true
+  }
+  status_da_imagem() { [[ "$(imagem "$1")" == "$2" ]]; }
+
+  # --- o envio que dá certo: JPEG com GPS (orientação 6 no EXIF) volta WebP sem metadado
+  [[ "$(imagem "$TMP/gps.jpg")" == 201 ]] && ok "JPEG com EXIF de GPS → 201" || falha "JPEG com EXIF de GPS → 201"
+  CHAVE="$(json 'd["chave"]' < "$TMP/resp.json" 2>/dev/null || true)"
+  URL_IMG="$(json 'd["imagemUrl"]' < "$TMP/resp.json" 2>/dev/null || true)"
+  confere "a chave tem o formato divulgacoes/{guid}.webp" test -n "$(grep -E -m1 '^divulgacoes/[0-9a-f]{32}\.webp$' <<<"$CHAVE" || true)"
+  curl -s --max-time 15 -D "$TMP/cab.txt" -o "$TMP/saida.webp" "$BASE/storage/publico/$CHAVE" || true
+  CAB="$(tr -d '\r' < "$TMP/cab.txt" 2>/dev/null || true)"
+  confere "a imagem é servida por /storage/publico/ com 200" test "$(head -n1 <<<"$CAB" | cut -d' ' -f2)" = 200
+  confere "Content-Type: image/webp" test -n "$(grep -i -m1 '^content-type: image/webp' <<<"$CAB" || true)"
+  confere "X-Content-Type-Options: nosniff" test -n "$(grep -i -m1 '^x-content-type-options: nosniff' <<<"$CAB" || true)"
+  confere "algum Content-Security-Policy contém sandbox" test -n "$(grep -i '^content-security-policy:' <<<"$CAB" | grep -i -m1 sandbox || true)"
+  confere "a URL devolvida aponta para o mesmo objeto" test "${URL_IMG##*/storage/publico/}" = "$CHAVE"
+  python3 -I - "$TMP/saida.webp" <<'PY' && ok "bytes de saída: RIFF/WEBP sem chunk EXIF, XMP ou ICCP e sem o EXIF de origem" || falha "bytes de saída: RIFF/WEBP sem chunk EXIF, XMP ou ICCP e sem o EXIF de origem"
+import struct, sys
+b = open(sys.argv[1], "rb").read()
+assert b[:4] == b"RIFF" and b[8:12] == b"WEBP", "não é WebP"
+p, tipos = 12, []
+while p + 8 <= len(b):
+    tipos.append(b[p:p + 4]); p += 8 + struct.unpack("<I", b[p + 4:p + 8])[0] + (struct.unpack("<I", b[p + 4:p + 8])[0] & 1)
+assert not ({b"EXIF", b"XMP ", b"ICCP"} & set(tipos)), tipos
+assert b"Exif" not in b
+PY
+
+  # --- as recusas (400 antes de qualquer decode; 413 acima de 2 MB)
+  for caso in animado.png bomba.png lado-4097.png webp.bin gif.bin svg.bin html.jpg; do
+    confere "recusado com 400: $caso" status_da_imagem "$TMP/$caso" 400
+  done
+  confere "arquivo acima de 2 MB → 413" status_da_imagem "$TMP/grande.jpg" 413
+  confere "PNG simples é aceito (201)" status_da_imagem "$TMP/ok.png" 201
+  confere "sem token → 401" test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -F "file=@$TMP/gps.jpg" "$BASE/api/v1/divulgacoes/imagens")" = 401
+
+  # --- listagem do bucket público negada (nunca lista, S-A05)
+  for caminho in /storage/publico/ /storage/publico/divulgacoes/ '/storage/publico/divulgacoes/?list-type=2' '/storage/publico/?list-type=2'; do
+    codigo="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE$caminho")"
+    confere "GET $caminho → 403/404 (veio $codigo)" test "$codigo" = 403 -o "$codigo" = 404
+  done
+
+  # --- ciclo de vida: a divulgação usa a imagem, aparece nas ativas, e apagá-la apaga a imagem do bucket
+  python3 -I -c 'import json,sys; print(json.dumps({"titulo": "[smoke] imagem", "mensagem": "texto puro", "imagemChave": sys.argv[1], "prioridade": 1}))' "$CHAVE" > "$TMP/div.json"
+  codigo="$(curl -s -o "$TMP/div-resp.json" -w '%{http_code}' --max-time 15 -X POST -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' --data-binary "@$TMP/div.json" "$BASE/api/v1/divulgacoes")"
+  confere "divulgação com a imagem → 201" test "$codigo" = 201
+  DIV_ID="$(json 'd["id"]' < "$TMP/div-resp.json" 2>/dev/null || true)"
+  confere "a mesma imagem em outra divulgação → 409" test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X POST -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' --data-binary "@$TMP/div.json" "$BASE/api/v1/divulgacoes")" = 409
+  confere "/divulgacoes/ativas lista a imagem com imagemUrl" test -n "$(curl -s --max-time 10 "$BASE/api/v1/divulgacoes/ativas" | grep -F -m1 "$CHAVE" || true)"
+  [[ -n "$DIV_ID" ]] && confere "DELETE da divulgação → 204" test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X DELETE -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/divulgacoes/$DIV_ID")" = 204
+  confere "a imagem some do bucket depois do DELETE" test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE/storage/publico/$CHAVE")" = 404
+
+  # --- políticas do MinIO (svc-api e svc-worker), com a credencial de cada um, pelo namespace de rede do próprio MinIO
+  MINIO_CID="$("${COMPOSE[@]}" ps -q minio)"
+  if [[ -z "$MINIO_CID" ]] || ! docker image inspect webradio-minio-init:local >/dev/null 2>&1; then
+    falha "contêiner do MinIO ou imagem webradio-minio-init:local ausentes para conferir as políticas"
+  else
+    for papel in api worker; do
+      printf 'MC_HOST_svc=http://%s:%s@127.0.0.1:9000\n' "$(cat "secrets/minio_${papel}_access_key")" "$(cat "secrets/minio_${papel}_secret_key")" > "$TMP/mc-$papel.env"
+      chmod 0600 "$TMP/mc-$papel.env"
+    done
+    mc_como() { # $1 papel, demais = argumentos do mc (stdin para `mc pipe`); a credencial vai por --env-file, nunca em argv
+      local papel="$1"; shift
+      docker run --rm -i --pull never --network "container:$MINIO_CID" --user 65532:65532 --read-only --tmpfs /tmp --cap-drop ALL \
+        --security-opt no-new-privileges:true --env-file "$TMP/mc-$papel.env" -e HOME=/tmp -e MC_CONFIG_DIR=/tmp/.mc \
+        --entrypoint mc webradio-minio-init:local "$@" >/dev/null 2>&1
+    }
+    gravar_como() { echo x | mc_como "$1" pipe "svc/publico/$2"; }
+    nega() { ! "$@"; }
+    confere "svc-api grava em publico/divulgacoes/" gravar_como api divulgacoes/politica.bin
+    confere "svc-api NÃO grava em publico/ fora de divulgacoes/" nega gravar_como api fora-politica.bin
+    confere "svc-worker lista publico/divulgacoes/" mc_como worker ls svc/publico/divulgacoes/
+    confere "svc-worker NÃO lista publico/ fora do prefixo divulgacoes/" nega mc_como worker ls svc/publico/
+    confere "svc-worker NÃO apaga em publico/ fora de divulgacoes/" nega mc_como worker rm --force svc/publico/fora-politica.bin
+    confere "svc-worker apaga em publico/divulgacoes/" mc_como worker rm svc/publico/divulgacoes/politica.bin
+  fi
+fi
 
 echo
 if ((falhas > 0)); then
