@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { dadosDoAdmin, limparThrottleDePedidos } from './helpers/stack'
+import { dadosDoLocutor, limparThrottleDePedidos } from './helpers/stack'
 
 /**
  * DoD 1 do Épico 3, contra o stack real (hub, Worker e banco de verdade). O ouvinte A pede uma música e a tela de
@@ -9,6 +9,10 @@ import { dadosDoAdmin, limparThrottleDePedidos } from './helpers/stack'
  *
  * São 2 pedidos por tentativa: o limite por IP é 3 em 5 min, então as chaves `wr:throttle:pedido:*` são apagadas antes de
  * cada teste (E3-F08) para os `retries: 2` do CI não estourarem.
+ *
+ * Quem modera é o Locutor semeado (`locutor1@example.com`), não o Admin: assim a policy `PodeModerar`, o grupo `locutores`
+ * do hub e o link "Estúdio" do papel Locutor passam pelo stack real. É um login só, o mesmo número de antes: o `/auth/login`
+ * aceita 5 por minuto por IP e os outros specs de stack já usam parte do limite.
  */
 async function marcarSemRecarregar(page: Page) {
   await page.evaluate(() => {
@@ -35,7 +39,7 @@ test('o pedido chega à moderação, e a decisão chega ao ouvinte, sem recarreg
 }) => {
   test.setTimeout(120_000)
   limparThrottleDePedidos()
-  const admin = dadosDoAdmin()
+  const locutorSeed = dadosDoLocutor()
   const sufixo = Date.now()
   const musicaA = `E2E aprovada ${sufixo}`
   const musicaB = `E2E rejeitada ${sufixo}`
@@ -47,8 +51,8 @@ test('o pedido chega à moderação, e a decisão chega ao ouvinte, sem recarreg
     // --- locutor: entra e deixa a fila aberta antes de qualquer pedido
     const locutor = await locutorCtx.newPage()
     await locutor.goto('/login')
-    await locutor.getByLabel('E-mail').fill(admin.email)
-    await locutor.getByLabel('Senha').fill(admin.senha)
+    await locutor.getByLabel('E-mail').fill(locutorSeed.email)
+    await locutor.getByLabel('Senha').fill(locutorSeed.senha)
     await locutor.getByRole('button', { name: 'Entrar' }).click()
     await locutor.getByRole('link', { name: 'Estúdio' }).click()
     await expect(locutor.getByRole('heading', { name: 'Pedidos de música' })).toBeVisible()

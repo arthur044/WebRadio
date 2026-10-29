@@ -517,7 +517,9 @@ jobs:
           E2E_ADMIN_EMAIL="$(cat ../secrets/seed_admin_email)"
           E2E_ADMIN_SENHA="$(cat ../secrets/seed_admin_senha)"
           echo "::add-mask::${E2E_ADMIN_SENHA}"
-          export E2E_ADMIN_EMAIL E2E_ADMIN_SENHA E2E_ADMIN_SENHA_NOVA
+          E2E_LOCUTOR_SENHA="$(cat ../secrets/seed_dev_senha)"
+          echo "::add-mask::${E2E_LOCUTOR_SENHA}"
+          export E2E_ADMIN_EMAIL E2E_ADMIN_SENHA E2E_ADMIN_SENHA_NOVA E2E_LOCUTOR_SENHA
           npx playwright test --reporter=list
 
       # S-M10 (refresh entre abas): usa a fixture refresh-probe e mocks de rota, que só existem no build e2e (a imagem de produção

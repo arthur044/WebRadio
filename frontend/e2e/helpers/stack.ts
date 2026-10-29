@@ -22,6 +22,18 @@ export function dadosDoAdmin() {
   }
 }
 
+/**
+ * Locutor fictício do seed de dev (`DevDataSeeder`, e-mail fixo; a senha vem do arquivo de segredo `seed_dev_senha`, que o
+ * CI repassa em `E2E_LOCUTOR_SENHA`). Exercita o papel `Locutor` de verdade: policy `PodeModerar`, grupo `locutores` do hub
+ * e o link "Estúdio" do menu.
+ */
+export function dadosDoLocutor() {
+  return {
+    email: process.env.E2E_LOCUTOR_EMAIL ?? 'locutor1@example.com',
+    senha: exigirVariavel('E2E_LOCUTOR_SENHA'),
+  }
+}
+
 function autorizacao() {
   return { Authorization: `Bearer ${dadosDoAdmin().token}` }
 }
