@@ -85,13 +85,13 @@ Agendado ──(worker: Inicio ≤ agora < Fim)──► AoVivo ──(worker: F
 |---|---|---|
 | Id | Guid | PK |
 | ProgramaId | Guid? | programa da janela (`InicioUtc <= agora < FimUtc`, fora de `Finalizado`/`Cancelado`) no momento do pedido, se houver (`07`, E3-D1) |
-| UsuarioId | Guid? | preenchido se o ouvinte estiver logado |
-| NomeOuvinte | string(60) | obrigatório; sem controle/HTML (validador) |
+| UsuarioId | Guid? | preenchido se o ouvinte estiver logado; `NULL` aos 30 dias nos terminais (`07`, E3-D8) |
+| NomeOuvinte | string(60) | obrigatório; validado pelo `TextoSeguro` (`07`, E3-D7); vira `(anônimo)` aos 30 dias nos terminais (E3-D8) |
 | TituloMusica | string(200) | obrigatório |
 | Artista | string(200) | obrigatório |
-| Mensagem | string(280)? | dedicatória opcional |
+| Mensagem | string(280)? | dedicatória opcional, de uma linha; `NULL` aos 30 dias nos terminais (`07`, E3-D8) |
 | ListenerDeviceHash | byte[32]? | HMAC do `X-Listener-Id`; zerado (NULL) após 30 dias (LGPD) |
-| ListenerIpHash | byte[32]? | HMAC do IP; mesma retenção |
+| ListenerIpHash | byte[32]? | HMAC do IP; zerado (NULL) após **7 dias** (`07`, E3-D8) |
 | Status | StatusPedido | |
 | MidiaId | Guid? | FK ArquivoMidia `Aprovado` do tipo `Musica`, definida na aprovação |
 | ModeradoPorUsuarioId | Guid? | |
