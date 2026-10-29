@@ -110,7 +110,7 @@ A spec não diz com que credencial a API e o Worker falam com o MinIO. Se for `M
 | Principal | Permissões |
 |---|---|
 | `svc-api` | `s3:PutObject` em `quarentena/*` e `publico/*` (quem assina a POST policy precisa desse direito); `s3:GetObject` em `midia/*` (preview); `s3:GetObject`/`s3:HeadObject` em `quarentena/*` (o `HEAD` do `concluir`) |
-| `svc-worker` | `s3:GetObject` e `s3:DeleteObject` em `quarentena/*`; `s3:PutObject` e `s3:GetObject` em `midia/*` e `publico/*`; `s3:DeleteObject` em `midia/*` |
+| `svc-worker` | Até o Épico 3: `s3:DeleteObject` em `publico/divulgacoes/*` e `s3:ListBucket` com `s3:prefix = divulgacoes/` (limpeza de órfãs, `07` E3-F07). O Épico 4 acrescenta, com revisão do Sentinel: `s3:GetObject` e `s3:DeleteObject` em `quarentena/*`; `s3:PutObject` e `s3:GetObject` em `midia/*`; `s3:DeleteObject` em `midia/*` |
 | root | só no `minio-init` e na operação manual; nunca no `.env` da API ou do Worker |
 
 O Liquidsoap **não** recebe credencial: ele só consome URLs pré-assinadas.
