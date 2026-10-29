@@ -84,14 +84,14 @@ Agendado ──(worker: Inicio ≤ agora < Fim)──► AoVivo ──(worker: F
 | Campo | Tipo | Regra |
 |---|---|---|
 | Id | Guid | PK |
-| ProgramaId | Guid? | programa AoVivo no momento do pedido, se houver |
-| UsuarioId | Guid? | preenchido se o ouvinte estiver logado |
-| NomeOuvinte | string(60) | obrigatório; sem controle/HTML (validador) |
+| ProgramaId | Guid? | programa da janela (`InicioUtc <= agora < FimUtc`, fora de `Finalizado`/`Cancelado`) no momento do pedido, se houver (`07`, E3-D1) |
+| UsuarioId | Guid? | preenchido se o ouvinte estiver logado; `NULL` aos 30 dias nos terminais (`07`, E3-D8) |
+| NomeOuvinte | string(60) | obrigatório; validado pelo `TextoSeguro` (`07`, E3-D7); vira `(anônimo)` aos 30 dias nos terminais (E3-D8) |
 | TituloMusica | string(200) | obrigatório |
 | Artista | string(200) | obrigatório |
-| Mensagem | string(280)? | dedicatória opcional |
+| Mensagem | string(280)? | dedicatória opcional, de uma linha; `NULL` aos 30 dias nos terminais (`07`, E3-D8) |
 | ListenerDeviceHash | byte[32]? | HMAC do `X-Listener-Id`; zerado (NULL) após 30 dias (LGPD) |
-| ListenerIpHash | byte[32]? | HMAC do IP; mesma retenção |
+| ListenerIpHash | byte[32]? | HMAC do IP; zerado (NULL) após **7 dias** (`07`, E3-D8) |
 | Status | StatusPedido | |
 | MidiaId | Guid? | FK ArquivoMidia `Aprovado` do tipo `Musica`, definida na aprovação |
 | ModeradoPorUsuarioId | Guid? | |
@@ -184,7 +184,8 @@ Invariante: `Aprovado ⇒ MimeType, HashSHA256, DuracaoSegundos, SanitizadoEmUtc
 | Não encontrado | 404 | `/erros/nao-encontrado` |
 | `ConflitoDeGrade` | 409 | `/erros/conflito-grade` (+ `programaConflitanteId`) |
 | E-mail já cadastrado (`/auth/registrar`) | 409 | `/erros/conflito-cadastro` (F07a; o registro é aberto e limitado a 3/h por IP, então o 409 é o custo aceito) |
-| `TransicaoInvalida` / `PedidoJaModerado` | 409 | `/erros/transicao-invalida` |
+| `TransicaoInvalida` | 409 | `/erros/transicao-invalida` |
+| `PedidoJaModerado` (também o conflito de `RowVersion` na moderação) | 409 | `/erros/pedido-ja-moderado` (`07`, Épico 3) |
 | `RowVersion` divergente (`If-Match`) | 412 | `/erros/versao-desatualizada` |
 | Throttle de pedido | 429 | `/erros/muitos-pedidos` (+ `retryAfterSeconds`) |
 | Limite por usuário (ex.: 5 gerações de credencial de transmissão por hora, Épico 2) | 429 | `/erros/limite-excedido` (+ `retryAfterSeconds` e `Retry-After`) |

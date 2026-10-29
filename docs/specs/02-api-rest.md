@@ -76,12 +76,12 @@ Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin
 
 | Método | Rota | Auth | Descrição |
 |---|---|---|---|
-| POST | `/pedidos` | público + header `X-Listener-Id` (UUID) | `{ nomeOuvinte, tituloMusica, artista, mensagem? }` → **201** `PedidoDto`; **429** com `Retry-After`; header ausente/inválido → 400 |
+| POST | `/pedidos` | público + header `X-Listener-Id` (UUID) | `{ nomeOuvinte, tituloMusica, artista, mensagem? }` → **201** `PedidoDto`; **429** com `Retry-After` (anti-spam ou teto global de pendentes, `07` E3-D10); header ausente, inválido ou `Guid.Empty` → 400 |
 | GET | `/pedidos/meus` | público + `X-Listener-Id` (ou Bearer) | últimos 20 pedidos desse dispositivo/usuário |
-| GET | `/pedidos?status=Pendente&pagina=&tamanho=` | PodeModerar | fila de moderação (padrão `Pendente`, mais antigos primeiro) |
-| POST | `/pedidos/{id}/aprovar` | PodeModerar | `{ midiaId? }` → 200; mídia inválida → 400; já moderado → 409 |
-| POST | `/pedidos/{id}/rejeitar` | PodeModerar | `{ motivo }` (1–280) → 200 |
-| POST | `/pedidos/{id}/marcar-tocado` | PodeModerar | → 200; só `Aprovado` |
+| GET | `/pedidos?status=Pendente&pagina=&tamanho=` | PodeModerar | fila de moderação (padrão `Pendente`, mais antigos primeiro). `status` só `Pendente` ou `Aprovado` (aprovados das últimas 24 h); outro valor → 400 (Épico 3, `07`) |
+| POST | `/pedidos/{id}/aprovar` | PodeModerar | `{ midiaId? }` → 200; mídia inválida → 400; já moderado → 409 `/erros/pedido-ja-moderado` |
+| POST | `/pedidos/{id}/rejeitar` | PodeModerar | `{ motivo }` (1–280) → 200; já moderado → 409 `/erros/pedido-ja-moderado` |
+| POST | `/pedidos/{id}/marcar-tocado` | PodeModerar | → 200; só `Aprovado`, senão 409 `/erros/pedido-ja-moderado` |
 
 ## 6. Mídia — `/midias` (PodeModerar, salvo indicação)
 
@@ -99,16 +99,16 @@ Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin
 
 ## 7. Divulgações — `/divulgacoes`
 
-`DivulgacaoDto = { id, titulo, mensagem, imagemUrl, linkDestino, prioridade, inicioExibicaoUtc, fimExibicaoUtc, ativo }` (`imagemUrl` = URL pública derivada da chave)
+`DivulgacaoDto = { id, titulo, mensagem, imagemChave, imagemUrl, linkDestino, prioridade, inicioExibicaoUtc, fimExibicaoUtc, ativo }` (`imagemUrl` = URL pública derivada de `imagemChave`; as duas nulas sem imagem)
 
 | Método | Rota | Auth |
 |---|---|---|
-| GET | `/divulgacoes/ativas` | público (ordenadas por prioridade desc; cache HTTP `max-age=30`) |
+| GET | `/divulgacoes/ativas` | público (ordenadas por `prioridade` desc e depois `id`; cache HTTP `max-age=30`) |
 | GET | `/divulgacoes?pagina=&tamanho=` | Admin |
-| POST | `/divulgacoes` | Admin → 201 |
-| PUT | `/divulgacoes/{id}` | Admin + `If-Match` |
+| POST | `/divulgacoes` | Admin → 201. O corpo leva `imagemChave?` (a `chave` do `POST /divulgacoes/imagens`), nunca uma URL (Épico 3, E3-D5 do `07`) |
+| PUT | `/divulgacoes/{id}` | Admin + `If-Match`. **Substitui o recurso inteiro**: o corpo é o mesmo do `POST`, e `imagemChave` ausente ou `null` = divulgação sem imagem. Para manter a imagem, o cliente reenvia a `imagemChave` do DTO |
 | DELETE | `/divulgacoes/{id}` | Admin → 204 |
-| POST | `/divulgacoes/imagens` | Admin; **`multipart/form-data`** com `file` (≤ 2 MB, `RequestSizeLimit`) → **201** `{ chave, imagemUrl }`. A API decodifica e recodifica para WebP, tira os metadados, limita a 4096 px e grava em `publico/` com `Content-Type` do servidor. Arquivo que não é imagem → 400 (S-A05) |
+| POST | `/divulgacoes/imagens` | Admin; **`multipart/form-data`** com `file` (≤ 2 MB, `RequestSizeLimit`) → **201** `{ chave, imagemUrl }`. A API confere formato (JPEG ou PNG; WebP só na saída) e dimensões pelo cabeçalho, **recusa** lado acima de 4096 px, recodifica para WebP, tira os metadados e grava em `publico/` com `Content-Type` do servidor. Corpo acima de 2 MB → **413**; não é imagem aceita ou passa de 4096 px → **400** (S-A05); mais de **30 por hora** por Admin → **429** |
 
 ## 8. Stream e saúde
 
@@ -152,7 +152,7 @@ Eventos servidor → cliente (todos com `eventoId` e `ocorridoEmUtc`; o cliente 
 | `TransmissaoAoVivoAlterada` | todos | `{ noAr, programaId?, locutorNome? }` (Épico 2) |
 | `AlertaHarborFalhas` | `admins` (+ `usuario:{usuarioId}` do dono no tipo `credencial`) | `{ tipo, falhas, janelaMinutos, locutorId?, locutorNome?, credencialAtiva? }` (Épico 2; contrato no `06`, E2-F12) |
 | `PedidoCriado` | `locutores` | `PedidoDto` |
-| `PedidoModerado` | `listener:{hash}` + `locutores` | `{ pedidoId, status, motivoRejeicao? }` |
+| `PedidoModerado` | `listener:{hash}` + `locutores` | `{ pedidoId, status, motivoRejeicao? }`; `status` = `Aprovado`, `Rejeitado` ou `Expirado` (o Worker emite o `Expirado`; Épico 3, E3-D3 do `07`) |
 | `PedidoTocado` | `listener:{hash}` + `locutores` | `{ pedidoId }` |
 | `MidiaSanitizada` | `locutores` | `{ midiaId, statusSanitizacao, motivoRejeicao? }` |
 
