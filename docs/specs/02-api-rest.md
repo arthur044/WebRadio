@@ -78,7 +78,7 @@ Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin
 |---|---|---|---|
 | POST | `/pedidos` | público + header `X-Listener-Id` (UUID) | `{ nomeOuvinte, tituloMusica, artista, mensagem? }` → **201** `PedidoDto`; **429** com `Retry-After`; header ausente/inválido → 400 |
 | GET | `/pedidos/meus` | público + `X-Listener-Id` (ou Bearer) | últimos 20 pedidos desse dispositivo/usuário |
-| GET | `/pedidos?status=Pendente&pagina=&tamanho=` | PodeModerar | fila de moderação (padrão `Pendente`, mais antigos primeiro) |
+| GET | `/pedidos?status=Pendente&pagina=&tamanho=` | PodeModerar | fila de moderação (padrão `Pendente`, mais antigos primeiro). `status` só `Pendente` ou `Aprovado` (aprovados das últimas 24 h); outro valor → 400 (Épico 3, `07`) |
 | POST | `/pedidos/{id}/aprovar` | PodeModerar | `{ midiaId? }` → 200; mídia inválida → 400; já moderado → 409 |
 | POST | `/pedidos/{id}/rejeitar` | PodeModerar | `{ motivo }` (1–280) → 200 |
 | POST | `/pedidos/{id}/marcar-tocado` | PodeModerar | → 200; só `Aprovado` |
