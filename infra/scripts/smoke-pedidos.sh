@@ -15,7 +15,7 @@
 #      passo da outra origem falha.
 #   3. Redis parado: o throttle cai para o SQL, o /health/ready fica Degraded e o segundo pedido do mesmo dispositivo continua 429.
 #
-# O `curl` vem da imagem do próprio `web` (webradio-web:local, já construída pelo compose; a base é fixada por digest e o bloco apk
+# O `curl` vem da imagem do próprio `web` (--pull never: se ela não existir o smoke falha, nunca baixa imagem de fora) (webradio-web:local, já construída pelo compose; a base é fixada por digest e o bloco apk
 # do Dockerfile mantém curl/libcurl corrigidos): o runner não baixa imagem nenhuma. O orçamento de throttle é dividido com o E2E: o
 # `trap` de saída apaga wr:throttle:pedido:* e deixa o Redis de pé (o E2E do Playwright faz o mesmo antes de cada teste de pedidos).
 # A senha do Redis é lida DENTRO do contêiner, nunca em argv nem em log do host. Acumula as falhas e sai com 1 se houve alguma.
@@ -28,7 +28,7 @@ cd "$RAIZ"
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.dev.yml)
 IMAGEM_CURL="${SMOKE_IMAGEM_CURL:-webradio-web:local}"
 REDE="smoke-pedidos-$$"
-SUBREDE="172.31.77"
+SUBREDE="${SMOKE_SUBREDE:-172.31.77}" # só os três primeiros octetos; troque se colidir com outra rede do runner
 ORIGEM_A=11
 ORIGEM_B=12
 ORIGEM_C=13
@@ -41,14 +41,18 @@ WEB_CID=""
 REDE_CRIADA=0
 REDIS_PARADO=0
 
+# A senha do Redis é lida DENTRO do contêiner. O padrão é o do RedisRequestThrottle (prefixo wr: + throttle:pedido:).
 limpar_chaves() {
-  "${COMPOSE[@]}" exec -T redis sh -c 'export REDISCLI_AUTH="$(cat /run/secrets/redis_password)"; redis-cli --scan --pattern "wr:throttle:pedido:*" | xargs -r redis-cli DEL' >/dev/null 2>&1 || true
+  "${COMPOSE[@]}" exec -T redis sh -c 'export REDISCLI_AUTH="$(cat /run/secrets/redis_password)"; redis-cli --scan --pattern "wr:throttle:pedido:*" | xargs -r redis-cli DEL' >/dev/null 2>&1
+}
+chaves_redis() {
+  "${COMPOSE[@]}" exec -T redis sh -c 'export REDISCLI_AUTH="$(cat /run/secrets/redis_password)"; redis-cli --scan --pattern "wr:throttle:pedido:*"' 2>/dev/null | tr -d '\r'
 }
 
 limpar() {
   # O DoD 3 para o Redis: se o script morrer no meio, o stack não pode ficar sem ele para quem vem depois (o E2E do CI).
   if [[ "$REDIS_PARADO" == 1 ]]; then "${COMPOSE[@]}" start redis >/dev/null 2>&1 || true; fi
-  limpar_chaves
+  limpar_chaves || true # no trap é tolerante: o Redis pode nem estar de pé
   if [[ -n "$WEB_CID" && "$REDE_CRIADA" == 1 ]]; then docker network disconnect -f "$REDE" "$WEB_CID" >/dev/null 2>&1 || true; fi
   if [[ "$REDE_CRIADA" == 1 ]]; then docker network rm "$REDE" >/dev/null 2>&1 || true; fi
 }
@@ -73,14 +77,19 @@ REDE_CRIADA=1
 docker network connect "$REDE" "$WEB_CID"
 WEB_IP="$(docker inspect -f "{{(index .NetworkSettings.Networks \"$REDE\").IPAddress}}" "$WEB_CID")"
 [[ -n "$WEB_IP" ]] || { echo "smoke-pedidos: o web não ganhou IP na rede $REDE."; exit 1; }
-limpar_chaves
+# Padrão errado, senha errada ou Redis fora apagariam zero chaves em silêncio e o E2E herdaria o limite por IP: aqui a limpeza inicial
+# tem que funcionar e deixar 0 chaves, senão o script falha.
+if ! limpar_chaves || [[ -n "$(chaves_redis)" ]]; then
+  echo "smoke-pedidos: não consegui limpar as chaves wr:throttle:pedido:* do Redis (Redis fora, senha ou padrão errados)."
+  exit 1
+fi
 
 # STATUS, RETRY (cabeçalho Retry-After) e RESPOSTA (corpo) da última chamada.
 STATUS=""; RETRY=""; RESPOSTA=""
 pedir() { # $1 final do IP da origem, $2 X-Listener-Id, demais = argumentos extras do curl (ex.: -H 'X-Forwarded-For: ...')
   local origem="$1" ouvinte="$2"; shift 2
   local saida
-  saida="$(docker run --rm --network "$REDE" --ip "$SUBREDE.$origem" --read-only --cap-drop ALL \
+  saida="$(docker run --rm --pull never --network "$REDE" --ip "$SUBREDE.$origem" --read-only --cap-drop ALL \
     --security-opt no-new-privileges:true --user 101:101 --entrypoint curl "$IMAGEM_CURL" \
     -s -i --max-time 20 -X POST -H 'Content-Type: application/json' -H "Host: $AUTORIDADE" -H "X-Listener-Id: $ouvinte" "$@" \
     --data "$CORPO" "http://$WEB_IP:8080/api/v1/pedidos" | tr -d '\r' || true)"
@@ -136,9 +145,23 @@ confere "segue Degraded" saude_e Degraded
 redis_saudavel() { [[ "$(docker inspect -f '{{.State.Health.Status}}' "$("${COMPOSE[@]}" ps -q redis)" 2>/dev/null || true)" == healthy ]]; }
 confere "o Redis volta a ficar healthy" espera_ate 60 redis_saudavel
 
+# O disjuntor da API fica aberto até 30 s depois da última falha do Redis, e nesse tempo o throttle conta pedidos no SQL: o E2E que roda
+# logo depois estouraria o limite por IP do banco. Fica aqui até a API voltar a usar o Redis (uma sonda depois dos 30 s cria chave nele).
+limpar_chaves || falha "limpar as chaves do throttle depois de religar o Redis"
+LH=""
+api_voltou_ao_redis() { LH="$(uuid)"; pedir "$ORIGEM_B" "$LH"; [[ -n "$(chaves_redis)" ]]; }
+confere "a API volta a usar o Redis (o disjuntor fecha em até ~30 s)" espera_ate 75 api_voltou_ao_redis
+
+echo "== LGPD: nenhum listenerId nem IP de origem nas chaves do Redis"
+chaves="$(chaves_redis)"
+confere "há chaves reais do throttle para conferir" test -n "$chaves"
+for valor in "$LA" "$LB" "$LC" "$LE" "$LG" "$LH" "$SUBREDE.$ORIGEM_A" "$SUBREDE.$ORIGEM_B" "$SUBREDE.$ORIGEM_C"; do
+  confere "ausente nas chaves: ${valor:0:8}…" test -z "$(grep -F -m1 -e "$valor" <<<"$chaves" || true)"
+done
+
 echo "== LGPD: nenhum listenerId nem IP de origem nos logs do nginx e da API"
 logs="$("${COMPOSE[@]}" logs --no-color web api 2>&1 || true)"
-for valor in "$LA" "$LB" "$LC" "$LE" "$LG" "$SUBREDE.$ORIGEM_A" "$SUBREDE.$ORIGEM_B" "$SUBREDE.$ORIGEM_C"; do
+for valor in "$LA" "$LB" "$LC" "$LE" "$LG" "$LH" "$SUBREDE.$ORIGEM_A" "$SUBREDE.$ORIGEM_B" "$SUBREDE.$ORIGEM_C"; do
   confere "ausente nos logs: ${valor:0:8}…" test -z "$(grep -F -m1 -e "$valor" <<<"$logs" || true)"
 done
 
