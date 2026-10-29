@@ -11,16 +11,17 @@
 
    Uso (sqlcmd): -v CENARIO=A   realista: 40 Pendente recentes, 40 divulgações
                  -v CENARIO=B   acúmulo (Worker parado): 25.000 Pendente vencidos, 40 divulgações + 10.000 inativas
+                 -v ATRASO=1    dias de atraso da retenção do E3-D8 (1 = regime; 10 = job parado há 10 dias)
 
    Forma do dataset (tudo relativo ao SYSUTCDATETIME() da carga; meça logo depois de carregar):
      - 500.000 pedidos no total, espalhados por 365 dias. Terminais: Rejeitado 25%, Tocado 20%, Aprovado 15% (pior
        caso: Aprovado que o locutor nunca marcou como tocado), Expirado 40%.
      - 300 pedidos moderados nas últimas 24 h (40 Aprovado, 100 Rejeitado, 160 Tocado): alimentam a lista do E3-D9 (a distribuição de 365 dias já põe ~200 Aprovado nessa faixa; o total medido sai no resumo).
      - Pendente: A = 40 nos últimos 100 min; B = 25.000 de 2 h a 48 h atrás (vencidos, o Worker não expirou).
-     - Retenção do E3-D8 em regime, com um dia de atraso em cada corte (o que o A02 mede por execução):
-         ListenerIpHash       preenchido só se CriadoEmUtc >= agora - 8 dias   (corte de 7 dias, +1 dia pendente)
-         ListenerDeviceHash   preenchido só se CriadoEmUtc >= agora - 31 dias  (corte de 30 dias, +1 dia pendente)
-         Antes de 31 dias: UsuarioId NULL, Mensagem NULL, NomeOuvinte = '(anônimo)' (todos terminais).
+     - Retenção do E3-D8 com ATRASO dias de atraso em cada corte (o que o A02 mede por execução):
+         ListenerIpHash       preenchido só se CriadoEmUtc >= agora - (7 + ATRASO) dias
+         ListenerDeviceHash   preenchido só se CriadoEmUtc >= agora - (30 + ATRASO) dias
+         Antes de (30 + ATRASO) dias: UsuarioId NULL, Mensagem NULL, NomeOuvinte = '(anônimo)' (todos terminais).
      - Dispositivos: 20.000, com cauda longa (POWER(rnd, 2)): o mais ativo concentra ~0,7% dos pedidos.
        IPs: 6.000, cerca de 3 dispositivos por IP; nos últimos 7 dias 10% dos pedidos saem de UM só IP ('ip-hot', o caso
        do KnownIPNetworks errado, em que todo mundo parece vir do nginx).
@@ -39,6 +40,8 @@ IF EXISTS (SELECT 1 FROM interacao.PedidoMusica) OR EXISTS (SELECT 1 FROM intera
     THROW 50000, N'Já há pedidos ou divulgações: gere o dataset só num banco recém-criado.', 1;
 IF (SELECT COUNT(*) FROM seg.Usuario WHERE Role = 2) < 50 OR NOT EXISTS (SELECT 1 FROM grade.Programa WHERE Status = 3)
     THROW 50000, N'Carregue o gerar-dataset-a02.sql antes (locutores e programas).', 1;
+IF N'$(ATRASO)' NOT LIKE N'[0-9]%' OR LEN(N'$(ATRASO)') > 3
+    THROW 50000, N'Passe -v ATRASO=<dias> (1 = regime).', 1;
 IF N'$(CENARIO)' NOT IN (N'A', N'B')
     THROW 50000, N'Passe -v CENARIO=A ou -v CENARIO=B.', 1;
 GO
@@ -47,6 +50,9 @@ DECLARE @Cenario char(1) = '$(CENARIO)';
 DECLARE @Total int = 500000, @Recentes int = 300;
 DECLARE @Pendentes int = CASE @Cenario WHEN 'A' THEN 40 ELSE 25000 END;
 DECLARE @agora datetime2(3) = SYSUTCDATETIME();
+-- ATRASO = dias de atraso da retenção (1 = regime, o job do dia anterior rodou; 10 = o job ficou parado e há acúmulo).
+DECLARE @atraso int = $(ATRASO);
+DECLARE @corteIp datetime2(3) = DATEADD(DAY, -(7 + @atraso), @agora), @corteDispositivo datetime2(3) = DATEADD(DAY, -(30 + @atraso), @agora);
 
 /* ---------- ouvintes cadastrados, locutores e programas (listas numeradas para o sorteio) ---------- */
 INSERT seg.Usuario (Nome, Email, EmailNormalizado, SenhaHash, Role)
@@ -104,14 +110,14 @@ INSERT interacao.PedidoMusica
      ModeradoPorUsuarioId, ModeradoEmUtc, MotivoRejeicao, TocadoEmUtc, CriadoEmUtc)
 SELECT
     CASE WHEN d.com_programa = 1 THEN p.Id END,
-    CASE WHEN d.com_usuario = 1 AND d.CriadoEmUtc >= DATEADD(DAY, -31, @agora) THEN o.Id END,
-    CASE WHEN d.CriadoEmUtc >= DATEADD(DAY, -31, @agora) THEN CONCAT(N'Ouvinte ', d.dev) ELSE N'(anônimo)' END,
+    CASE WHEN d.com_usuario = 1 AND d.CriadoEmUtc >= @corteDispositivo THEN o.Id END,
+    CASE WHEN d.CriadoEmUtc >= @corteDispositivo THEN CONCAT(N'Ouvinte ', d.dev) ELSE N'(anônimo)' END,
     CONCAT(N'Faixa ', d.sorteio % 5000, N' - versão ', d.sorteio % 7),
     CONCAT(N'Artista ', d.sorteio % 800),
-    CASE WHEN d.com_mensagem = 1 AND d.CriadoEmUtc >= DATEADD(DAY, -31, @agora)
+    CASE WHEN d.com_mensagem = 1 AND d.CriadoEmUtc >= @corteDispositivo
          THEN REPLICATE(N'Um abraço para a galera! ', 1 + d.sorteio % 4) END,
-    CASE WHEN d.CriadoEmUtc >= DATEADD(DAY, -31, @agora) THEN HASHBYTES('SHA2_256', CONCAT(N'dev-', d.dev)) END,
-    CASE WHEN d.CriadoEmUtc >= DATEADD(DAY, -8, @agora)
+    CASE WHEN d.CriadoEmUtc >= @corteDispositivo THEN HASHBYTES('SHA2_256', CONCAT(N'dev-', d.dev)) END,
+    CASE WHEN d.CriadoEmUtc >= @corteIp
          THEN HASHBYTES('SHA2_256', CASE WHEN d.quente = 1 THEN N'ip-hot' ELSE CONCAT(N'ip-', d.dev % 6000) END) END,
     d.Status,
     CASE WHEN d.Status IN (2, 3, 4) THEN l.Id END,
