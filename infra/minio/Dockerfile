@@ -44,7 +44,7 @@ RUN go mod edit \
       -X github.com/minio/mc/cmd.CommitID=7394ce0dd2a80935aded936b09fa12cbb3cb8096" -o /out/mc . \
  && go version -m /out/mc | grep -E '^\s+dep\s+github.com/klauspost/compress\s+v1\.18\.7(\s|$)'
 
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 COPY --from=mc --chmod=0555 /out/mc /usr/local/bin/mc
 # Pastas criadas antes: um COPY --chmod=0444 de pasta deixaria a própria pasta sem o bit x (intransponível).
 RUN mkdir -p -m 0755 /etc/minio-init/policies
