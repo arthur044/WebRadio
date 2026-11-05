@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { imagemSegura, linkSeguro } from './urlSegura'
+import { imagemSegura, linkSeguro, previaLocalSegura } from './urlSegura'
 
 const PERIGOSAS = [
   'javascript:alert(1)',
@@ -41,5 +41,21 @@ describe('imagemSegura', () => {
 
   it.each(PERIGOSAS)('rejeita %s', (url) => {
     expect(imagemSegura(url)).toBeNull()
+  })
+})
+
+describe('previaLocalSegura', () => {
+  it('aceita só blob:', () => {
+    expect(previaLocalSegura('blob:http://localhost/3f2a')).toBe('blob:http://localhost/3f2a')
+  })
+
+  it.each([
+    'https://x.com/a.png',
+    'data:image/png;base64,AAAA',
+    'javascript:alert(1)',
+    '/a.png',
+    '',
+  ])('recusa %s', (valor) => {
+    expect(previaLocalSegura(valor)).toBeNull()
   })
 })
