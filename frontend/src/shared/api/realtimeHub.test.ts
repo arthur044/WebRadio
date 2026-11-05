@@ -79,8 +79,8 @@ describe('registrarEventos', () => {
     ['TocandoAgora', ['stream-info']],
     ['TransmissaoAoVivoAlterada', ['stream-info']],
     ['PedidoCriado', ['pedidos-moderacao']],
-    ['PedidoModerado', ['pedidos-meus']],
-    ['PedidoTocado', ['pedidos-meus']],
+    ['PedidoModerado', ['pedidos-meus', 'pedidos-moderacao']],
+    ['PedidoTocado', ['pedidos-meus', 'pedidos-moderacao']],
     ['MidiaSanitizada', ['midias']],
   ])('%s invalida as queries certas', (evento, chaves) => {
     const { handlers, invalidateQueries } = montar()
@@ -107,6 +107,8 @@ describe('invalidarEstadoDaRadio', () => {
 
     expect(invalidateQueries.mock.calls.map(([a]) => a.queryKey[0]).sort()).toEqual([
       'grade-semana',
+      'pedidos-meus',
+      'pedidos-moderacao',
       'programa-ao-vivo',
       'stream-info',
     ])

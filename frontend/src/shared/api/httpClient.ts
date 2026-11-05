@@ -53,14 +53,16 @@ async function rawFetch(path: string, options: RequestOptions = {}): Promise<Res
 
   const finalHeaders = new Headers(headers)
   if (includeListenerId) finalHeaders.set('X-Listener-Id', getListenerId())
-  if (body !== undefined) finalHeaders.set('Content-Type', 'application/json')
+  // FormData leva o `Content-Type: multipart/form-data; boundary=...` que só o browser sabe montar.
+  const ehFormulario = body instanceof FormData
+  if (body !== undefined && !ehFormulario) finalHeaders.set('Content-Type', 'application/json')
   if (token) finalHeaders.set('Authorization', `Bearer ${token}`)
 
   return fetch(`${BASE_URL}${path}`, {
     ...rest,
     credentials: 'include',
     headers: finalHeaders,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body === undefined ? undefined : ehFormulario ? body : JSON.stringify(body),
   })
 }
 

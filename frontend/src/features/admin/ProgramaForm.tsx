@@ -88,7 +88,13 @@ export function ProgramaForm({
   const [erros, setErros] = useState<ErrosDeCampo>({})
   const [erro, setErro] = useState<ErroDescrito | null>(
     avisoInicial
-      ? { mensagem: avisoInicial, campos: {}, conflitoComId: null, recarregar: false }
+      ? {
+          mensagem: avisoInicial,
+          campos: {},
+          conflitoComId: null,
+          recarregar: false,
+          esperarSegundos: null,
+        }
       : null,
   )
   const [enviando, setEnviando] = useState(false)

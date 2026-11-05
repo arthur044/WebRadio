@@ -66,6 +66,14 @@ export interface PedidoDto {
   programaId: string | null
 }
 
+/** Corpo de `POST /pedidos` (02-api-rest.md §5). */
+export interface PedidoRequest {
+  nomeOuvinte: string
+  tituloMusica: string
+  artista: string
+  mensagem: string | null
+}
+
 export type TipoMidia = 'Musica' | 'Vinheta' | 'Comercial'
 export type StatusSanitizacao =
   'AguardandoUpload' | 'Pendente' | 'EmAnalise' | 'Aprovado' | 'Rejeitado' | 'Quarentena'
@@ -89,12 +97,32 @@ export interface DivulgacaoDto {
   id: string
   titulo: string
   mensagem: string
+  /** Chave no bucket; o `PUT` a reenvia para manter a imagem (02 §7). `imagemUrl` é só para exibir. */
+  imagemChave: string | null
   imagemUrl: string | null
   linkDestino: string | null
   prioridade: number
   inicioExibicaoUtc: string | null
   fimExibicaoUtc: string | null
   ativo: boolean
+}
+
+/** Corpo de `POST /divulgacoes` e de `PUT /divulgacoes/{id}`; o `PUT` substitui tudo (02 §7). */
+export interface DivulgacaoRequest {
+  titulo: string
+  mensagem: string
+  imagemChave: string | null
+  linkDestino: string | null
+  prioridade: number
+  inicioExibicaoUtc: string | null
+  fimExibicaoUtc: string | null
+  ativo: boolean
+}
+
+/** `POST /divulgacoes/imagens` (201). */
+export interface ImagemEnviadaDto {
+  chave: string
+  imagemUrl: string
 }
 
 /** Transmissão ao vivo de um locutor (06-epico-2-tarefas.md §SignalR); sem `programaId`/`locutorNome` quando `noAr` é false. */
