@@ -127,9 +127,23 @@ Jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra 
 
 **Fora do Épico 2:** a fila de pedidos (`GET /internal/playout/proxima` segue respondendo 204) e a biblioteca de mídia; a rotação ainda usa a playlist local.
 
+## Status do Épico 3
+
+**Código na `main` (C1, C2 e C3); Definição de Pronto ainda não conferida.** O Épico 3 entrega pedidos de música com moderação e divulgações com imagem opcional. O pacote de tarefas está em [`docs/specs/07-epico-3-tarefas.md`](docs/specs/07-epico-3-tarefas.md).
+
+| Pacote | Entrega | PR |
+|---|---|---|
+| C1 | Backend de pedidos: criar, consultar, moderar, expirar (Worker) e retenção LGPD | #81 |
+| C2 | Backend de divulgações: CRUD com `ETag`, envio de imagem (recodificada para WebP, sem metadados) e ciclo de vida da imagem no MinIO | #82 |
+| C3 | Telas: pedir música, "Meus pedidos", fila de moderação no Estúdio e Mural | #84 |
+
+- **Pedidos**: o ouvinte pede sem conta; o throttle por dispositivo e por IP responde 429 com `Retry-After`, com teto global de `Pendente`. A fila de moderação e "Meus pedidos" atualizam em tempo real. O pedido sem resposta expira em 120 min.
+- **Divulgações**: o Admin gerencia; o Mural mostra só as ativas, por prioridade.
+- **Fora do Épico 3**: o pedido aprovado ainda não toca sozinho (`GET /internal/playout/proxima` segue em 204): o locutor toca e marca como tocado. O playout do aprovado fica para o Épico 4.
+
 ## O que vem a seguir
 
-- **Épico 3**: pedidos de música e moderação, e divulgações com imagem opcional. O pacote de tarefas está em [`docs/specs/07-epico-3-tarefas.md`](docs/specs/07-epico-3-tarefas.md). O pedido aprovado ainda não toca sozinho: o locutor toca e marca como tocado.
+- **Fechamento do Épico 3**: conferir a Definição de Pronto (9 itens, incluindo o Playwright e o throttle no `compose-smoke`) e registrar o resultado no `07`, como foi feito no Épico 2.
 - **Épico 4**: biblioteca de mídia, upload e sanitização (o pedido aprovado passa a tocar pelo playout). Antes de liberar upload, atualizar as imagens do SQL Server e do Liquidsoap (pendência do Épico 1 acima).
 
 ## Como contribuir
@@ -206,6 +220,6 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 
 ---
 
-**Versão**: Épico 2  
-**Última atualização**: 2026-10-29  
+**Versão**: Épico 3 (C1–C3 na `main`)  
+**Última atualização**: 2026-11-05  
 **Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend), Lore (Documentação)
