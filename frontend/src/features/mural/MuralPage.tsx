@@ -3,7 +3,7 @@ import { apiFetch } from '../../shared/api/httpClient'
 import type { DivulgacaoDto } from '../../shared/api/types'
 import { imagemSegura, linkSeguro } from '../../shared/lib/urlSegura'
 
-/** Guardian M1-style: /divulgacoes/ativas é público, nunca dispara refresh em 401 — não tem 401 nessa rota. */
+/** `/divulgacoes/ativas` é público e já vem ordenada (prioridade desc, depois id): a tela não reordena. */
 function useDivulgacoesAtivas() {
   return useQuery({
     queryKey: ['divulgacoes-ativas'],
@@ -19,13 +19,16 @@ function CardDivulgacao({ divulgacao }: { divulgacao: DivulgacaoDto }) {
       {imagemUrl && (
         <img
           src={imagemUrl}
-          alt=""
+          alt={divulgacao.titulo}
           className="mb-3 aspect-video w-full rounded-md object-cover"
           loading="lazy"
         />
       )}
       <h2 className="font-display text-lg font-bold">{divulgacao.titulo}</h2>
-      <p className="text-text-muted mt-1 text-sm">{divulgacao.mensagem}</p>
+      {/* Texto puro (nunca HTML); `whitespace-pre-line` mostra as quebras de linha da mensagem (01 §2.6). */}
+      <p className="text-text-muted mt-1 text-sm break-words whitespace-pre-line">
+        {divulgacao.mensagem}
+      </p>
     </article>
   )
 

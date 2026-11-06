@@ -7,6 +7,7 @@ import { EstudioPage } from './features/estudio/EstudioPage'
 import { LoginPage } from './features/auth/LoginPage'
 import { TrocarSenhaPage } from './features/auth/TrocarSenhaPage'
 import { AdminGradePage } from './features/admin/AdminGradePage'
+import { AdminDivulgacoesPage } from './features/admin/AdminDivulgacoesPage'
 import { RequireRole } from './features/auth/RequireRole'
 
 function App() {
@@ -29,6 +30,14 @@ function App() {
           element={
             <RequireRole roles={['Admin']}>
               <AdminGradePage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/divulgacoes"
+          element={
+            <RequireRole roles={['Admin']}>
+              <AdminDivulgacoesPage />
             </RequireRole>
           }
         />
