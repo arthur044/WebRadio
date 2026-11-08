@@ -14,6 +14,11 @@ builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
 // Liderança (sp_getapplock), ciclo de 10 s com heartbeat e manutenção diária (E1-F11).
 builder.Services.AddWorkerInfrastructure(builder.Configuration, exigirSenhaDeSegredo: !builder.Environment.IsDevelopment());
 
+// Antivírus do pipeline de mídia (E4-F06): ClamAV por TCP; fora de Development o Worker não sobe sem scanner.
+builder.Services.AddScannerDoWorker(builder.Configuration, builder.Environment);
+// Pipeline de sanitização (E4-F05): um item por vez, só o líder; o sanitizer é o contêiner sem rede que divide o volume /jobs.
+builder.Services.AddPipelineDeMidiaDoWorker(builder.Configuration);
+
 var host = builder.Build();
 
 host.Run();

@@ -45,6 +45,12 @@ public static class Travas
     public static string PedidoDoIp(byte[] ipHash) => "pedido:ip:" + Convert.ToHexString(ipHash);
 
     public static string PedidoDoUsuario(string chaveOpaca) => "pedido:usr:" + chaveOpaca;
+
+    /// <summary>
+    /// 08 E4-F02 (S-M06): serializa contar os uploads abertos do usuário e inserir o novo. Sem a trava, 20 <c>POST</c> paralelos veriam "0 abertos" juntos e
+    /// passariam do limite de 5. Um applock por usuário no lugar de <c>UPDLOCK, HOLDLOCK</c> na tabela: o range lock sem índice por usuário varre (e trava) as linhas dos outros.
+    /// </summary>
+    public static string UploadDeMidiaDoUsuario(string chaveOpaca) => "midia:upload:" + chaveOpaca;
 }
 
 /// <summary>
@@ -92,6 +98,9 @@ public static class EventosDoOutbox
     /// <c>admins</c> e para <c>usuario:{locutorId}</c>; tipo <c>global</c>: só <c>admins</c>. Nunca leva segredo, identificador nem IP.
     /// </summary>
     public const string AlertaHarborFalhas = "AlertaHarborFalhas";
+
+    /// <summary>Carga <c>{ midiaId, statusSanitizacao, motivoRejeicao? }</c> (02 §10): para <c>locutores</c>. Gravado pelo Worker quando a mídia chega a Aprovado, Rejeitado ou Quarentena (E4-F05).</summary>
+    public const string MidiaSanitizada = "MidiaSanitizada";
 
     /// <summary>Carga <c>PedidoDto</c> (02 §10): só para <c>locutores</c>. Leva nome e dedicatória do ouvinte, por isso nunca vai para todos.</summary>
     public const string PedidoCriado = "PedidoCriado";

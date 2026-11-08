@@ -41,6 +41,7 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
 {
     private int _falhasDasTransicoes;
     private int _falhasDaExpiracao;
+    private int _falhasDaSanitizacao;
     private DateTime? _ultimaExpiracaoUtc;
     private DateTime? _ultimaManutencaoUtc;
     private DateTime? _proximaTentativaUtc;
@@ -58,6 +59,7 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
         var job = Task.CompletedTask;
         var transicoes = Task.CompletedTask;
         var expiracao = Task.CompletedTask;
+        var midias = Task.CompletedTask;
         using var timer = new PeriodicTimer(opcoes.Intervalo);
         try
         {
@@ -71,6 +73,9 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
                     transicoes = TransicionarAsync(stoppingToken);
                 if (lideranca.EhLider && expiracao.IsCompleted && ExpiracaoDevida())
                     expiracao = ExpirarPedidosAsync(stoppingToken);
+                // E4-F05: a fila de sanitização (um item por vez, uma instância do Worker: só o líder). Roda fora do tick, em paralelo aos outros jobs.
+                if (lideranca.EhLider && midias.IsCompleted)
+                    midias = SanitizarMidiasAsync(stoppingToken);
             } while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -82,6 +87,7 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
             await job; // ManterAsync nunca lança: só espera o lote em curso perceber o cancelamento
             await transicoes; // idem
             await expiracao; // idem
+            await midias; // idem
         }
     }
 
@@ -111,6 +117,38 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
             else
                 logger.LogWarning("WORKER_TRANSICOES: segue falhando ({Tipo}).", e.GetType().Name);
             Interlocked.Increment(ref _falhasDasTransicoes);
+        }
+    }
+
+    /// <summary>
+    /// E4-F05. Esvazia a fila de mídia <c>Pendente</c>, um item por vez, cada um num escopo próprio (DbContext limpo). PARA quando a fila acaba ou quando a infraestrutura está fora
+    /// (antivírus parado): o próximo tick de 10 s tenta de novo, sem girar em falso. Sem o pipeline registrado (Worker sem storage) não faz nada. Falha não derruba o laço.
+    /// </summary>
+    private async Task SanitizarMidiasAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await using var escopo = escopos.CreateAsyncScope();
+                if (escopo.ServiceProvider.GetService<WebRadio.Application.Features.Midias.PipelineDeMidia>() is not { } pipeline) return;
+                if (await pipeline.ProcessarProximaAsync(ct) != WebRadio.Application.Features.Midias.PassoDoPipeline.Processada) break;
+            }
+
+            var falhas = Interlocked.Exchange(ref _falhasDaSanitizacao, 0);
+            if (falhas > 0) logger.LogInformation("WORKER_SANITIZACAO: voltou a funcionar depois de {Falhas} falha(s) seguida(s).", falhas);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // parada normal do host
+        }
+        catch (Exception e)
+        {
+            if (_falhasDaSanitizacao == 0)
+                logger.LogError(e, "WORKER_SANITIZACAO: falhou; tenta de novo no próximo ciclo e só repete o erro depois que voltar a funcionar.");
+            else
+                logger.LogWarning("WORKER_SANITIZACAO: segue falhando ({Tipo}).", e.GetType().Name);
+            Interlocked.Increment(ref _falhasDaSanitizacao);
         }
     }
 

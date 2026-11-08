@@ -33,7 +33,7 @@ public class DivulgacoesSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTest
 
         public Task<string> UrlGetPreAssinadaAsync(string bucket, string chave, TimeSpan validade, string? contentType = null, string? contentDisposition = null, CancellationToken ct = default) => throw new NotSupportedException();
 
-        public Task MoverAsync(string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<long> BaixarAsync(string bucket, string chave, string etagEsperado, long limiteBytes, Stream destino, CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task<bool> VerificarAsync(CancellationToken ct = default) => Task.FromResult(true);
     }

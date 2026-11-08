@@ -16,5 +16,6 @@ RUN apk add --no-cache icu-libs
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 WORKDIR /app
 COPY --from=build /out .
-USER app
+# E4-D1: o Worker e o sanitizer dividem o tmpfs /jobs (uid 65532, modo 0700); o Worker roda com o MESMO uid (era o `app`, 1654).
+USER 65532:65532
 ENTRYPOINT ["dotnet", "WebRadio.Worker.dll"]

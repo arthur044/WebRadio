@@ -238,6 +238,10 @@ services:
       # apaga em publico/divulgacoes/ (política em infra/minio/policies/svc-worker.json). O PublicEndpoint só existe porque o cliente o exige.
       Storage__Endpoint: "minio:9000"
       Storage__PublicEndpoint: "${PUBLIC_ORIGIN:?Defina PUBLIC_ORIGIN no .env (rode infra/scripts/gerar-segredos.sh)}/storage"
+      # Antivírus (E4-F06): o Worker não sobe sem scanner fora de Development; assinatura com mais de 3 dias deixa o arquivo Pendente (S-A02 item 6).
+      ClamAv__Host: "clamd"
+      Seguranca__IdadeMaximaAssinaturaDias: "3"
+      Seguranca__TimeoutScanSegundos: "120"
     # O banco e a credencial do svc-worker no MinIO (E3-F07). Sem JWT, pepper nem Redis; esses voltam quando um job do Worker precisar deles
     # (Épico 4: sanitização no MinIO, locks no Redis).
     secrets:
@@ -245,13 +249,15 @@ services:
       - { source: minio_worker_access_key, target: Storage__AccessKey }
       - { source: minio_worker_secret_key, target: Storage__SecretKey }
     tmpfs: [/tmp]
-    networks: [dados]
+    networks: [dados, antivirus]
     cpus: 1
     mem_limit: 256m
     pids_limit: 100
     depends_on:
       migrator: { condition: service_completed_successfully }
       minio-init: { condition: service_completed_successfully }
+      # Em dev o clamd fica no perfil `antivirus` e o Worker usa o NoOp: sem ele no projeto, a dependência não vale.
+      clamd: { condition: service_healthy, required: false }
     healthcheck:
       # O worker não tem HTTP: o ciclo de 10 s grava /tmp/worker-heartbeat; parado há mais de ~30 s (3 ciclos) = unhealthy
       # (04, F11). Com retries 3 o contêiner é marcado unhealthy ~30 s depois do limite, não ~2 min.
@@ -261,16 +267,72 @@ services:
       retries: 3
       start_period: 15s
 
-  # Reservado (D16): a imagem com o ffmpeg mínimo chega no Épico 4. Sem rede e sem segredo.
+  # Sanitizer (E4-F04, E4-D1, S-C01): ffmpeg mínimo compilado + um script, sem rede e sem segredo. Encontra o Worker no volume tmpfs sanitizer-jobs
+  # (1 GB, uid 65532): o Worker grava o original e o job.json, e o sanitizer devolve out.mp3 e result.json. Um job por vez.
   sanitizer:
-    image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
-    profiles: [sanitizacao]
+    build: { context: ., dockerfile: infra/sanitizer/Dockerfile }
+    image: webradio-sanitizer:local
     <<: *endurecido
     network_mode: none
     user: "65532:65532"
-    command: ["sleep", "infinity"]
-    mem_limit: 256m
+    volumes: [sanitizer-jobs:/jobs]
+    mem_limit: 512m
     pids_limit: 50
+    cpus: 1
+    healthcheck:
+      test: ["CMD-SHELL", "ps | grep -q '[s]anitizar.sh'"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ------------------------------------------------------------------ antivírus (E4-F06, E4-D7, E4-D8)
+  # clamd em contêiner próprio, numa rede interna só com o worker (INSTREAM na 3310). Sem o NotifyClamd (o freshclam é outro contêiner): SelfCheck de 10 min.
+  # ~1 GB residente medido com a base completa; o limite deixa folga para a recarga (ConcurrentDatabaseReload no). Em dev fica no perfil `antivirus`.
+  clamd:
+    image: clamav/clamav@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a # 1.5.x, alpine 3.24
+    <<: *endurecido
+    user: "100:101"
+    entrypoint: ["clamd"]
+    command: ["--foreground", "--config-file=/etc/clamav-projeto/clamd.conf"]
+    volumes:
+      - clamav-db:/var/lib/clamav:ro
+      - ./infra/clamav/clamd.conf:/etc/clamav-projeto/clamd.conf:ro
+    tmpfs: ["/tmp:uid=100,gid=101"]
+    networks: [antivirus]
+    cpus: 2
+    mem_limit: 1536m
+    pids_limit: 100
+    depends_on:
+      freshclam: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "[ \"$$(echo PING | nc 127.0.0.1 3310)\" = PONG ]"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
+
+  # Único contêiner do Épico 4 com saída à internet (os espelhos de assinatura), numa rede só dele. Não tem dado, segredo nem acesso à rede interna; grava a base no
+  # volume clamav-db, que o clamd monta só leitura.
+  freshclam:
+    image: clamav/clamav@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a
+    <<: *endurecido
+    user: "100:101"
+    entrypoint: ["freshclam"]
+    command: ["--foreground", "--stdout", "--daemon", "--config-file=/etc/clamav-projeto/freshclam.conf"]
+    volumes:
+      - clamav-db:/var/lib/clamav
+      - ./infra/clamav/freshclam.conf:/etc/clamav-projeto/freshclam.conf:ro
+    tmpfs: ["/tmp:uid=100,gid=101"]
+    networks: [saida-freshclam]
+    cpus: 1
+    mem_limit: 512m
+    pids_limit: 50
+    healthcheck:
+      test: ["CMD-SHELL", "ls /var/lib/clamav/main.c*d /var/lib/clamav/daily.c*d >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 600s
 
   # ------------------------------------------------------------------ playout
   icecast:
@@ -389,11 +451,25 @@ networks:
     internal: true
     ipam:
       config: [{ subnet: 172.30.4.0/24 }]
+  # E4-F06: rede SÓ do freshclam, com saída à internet (espelhos de assinatura) e mais ninguém: o freshclam faz o parse do que baixa, e na `borda` ele alcançaria as portas
+  # do web e do harbor-borda (multi-homed para app e playout).
+  saida-freshclam: {}
+  # E4-D7: só o worker e o clamd (INSTREAM na 3310).
+  antivirus:
+    internal: true
+    ipam:
+      config: [{ subnet: 172.30.5.0/24 }]
 
 volumes:
   sqlserver-data: {}
   minio-data: {}
   redis-data: {}
+  # E4-D7: a base de assinaturas do ClamAV (o freshclam escreve, o clamd lê).
+  clamav-db: {}
+  # E4-D1: o original e o resultado da sanitização existem só em memória (tmpfs), com o uid do Worker e do sanitizer (65532) e modo 0700.
+  sanitizer-jobs:
+    driver: local
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1g,uid=65532,gid=65532,mode=0700" }
 
 # Um arquivo por segredo, gerado por infra/scripts/gerar-segredos.sh (nunca versionado).
 secrets:

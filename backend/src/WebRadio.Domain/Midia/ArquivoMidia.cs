@@ -172,6 +172,23 @@ public sealed class ArquivoMidia : Entidade
         TransicaoPorFalha(agora);
     }
 
+    /// <summary>
+    /// Falha de INFRAESTRUTURA (E4-D13: clamd fora, assinatura velha, MinIO ou SQL fora): volta a Pendente e a tentativa é DEVOLVIDA. Quem consome a fila não pode
+    /// rejeitar um arquivo legítimo só porque o antivírus esteve parado por três ciclos.
+    /// </summary>
+    public void DevolverPorFalhaDeInfraestrutura()
+    {
+        GarantirStatus(StatusSanitizacao.EmAnalise);
+
+        if (TentativasSanitizacao > 0)
+        {
+            TentativasSanitizacao--;
+        }
+
+        StatusSanitizacao = StatusSanitizacao.Pendente;
+        EmAnaliseDesdeUtc = null;
+    }
+
     /// <summary>Hash do arquivo recebido, antes da recodificação — auditoria; escrita única, não muda o status.</summary>
     public void RegistrarHashOriginal(byte[] hashOriginalSha256)
     {
@@ -279,7 +296,24 @@ public sealed class ArquivoMidia : Entidade
         EmAnaliseDesdeUtc = null;
     }
 
+    /// <summary>
+    /// PATCH (E4-F03): título e artista da biblioteca. Música exige título (CK_ArquivoMidia_Musica_Titulo). O texto já vem normalizado e validado
+    /// pelo <c>TextoSeguro</c> da Application (vai ao Liquidsoap e ao Icecast, S-A09).
+    /// </summary>
+    public void EditarTexto(string? titulo, string? artista)
+    {
+        if (TipoMidia == TipoMidia.Musica)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(titulo);
+        }
+
+        Titulo = string.IsNullOrWhiteSpace(titulo) ? null : titulo;
+        Artista = string.IsNullOrWhiteSpace(artista) ? null : artista;
+    }
+
     public void Desativar() => Ativo = false;
+
+    public void Ativar() => Ativo = true;
 
     private void TransicaoPorFalha(DateTime agora)
     {
