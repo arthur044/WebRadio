@@ -14,6 +14,10 @@
 | `02-api-rest.md` | Contratos REST, SignalR, endpoints internos, RBAC | Forge, Prism |
 | `03-schema-sqlserver.sql` | DDL de referência do SQL Server | Atlas, Forge |
 | `04-epico-1-tarefas.md` | Pacote de tarefas do Épico 1 | Forge, Atlas, Prism |
+| `05-seguranca-auditoria.md` | Auditoria do Sentinel (normativa) | Todos |
+| `06-epico-2-tarefas.md` | Pacote de tarefas do Épico 2 | Forge, Atlas, Prism |
+| `07-epico-3-tarefas.md` | Pacote de tarefas do Épico 3 | Forge, Atlas, Prism |
+| `08-epico-4-tarefas.md` | Pacote de tarefas do Épico 4 | Forge, Atlas, Prism, Sentinel |
 
 ---
 
@@ -150,7 +154,7 @@ A regra de dependência é garantida por **teste de arquitetura** (NetArchTest),
 ### Fluxo D — Playout (contrato definido agora, implementação no Épico 2)
 - Script do Liquidsoap: `fallback(track_sensitive=false, [ao_vivo_harbor, fila_api, rotacao, silencio_emergencia])`, com `rotate(weights=[1,4], [vinhetas, musicas])` na rotação.
 - O Liquidsoap fala **só** com `http://api:8081` (porta interna, D17) pela rede `playout`. Ele valida o prefixo da `url` recebida (`http://minio:9000/midia/`) e aplica os metadados com `metadata.map`, nunca concatenando dentro de `annotate:` (S-A09).
-- `fila_api` = `request.dynamic` → `GET /internal/playout/proxima` → a API faz `UPDATE TOP(1) ... WITH (UPDLOCK, READPAST) SET EnviadoPlayoutEmUtc` no pedido aprovado mais antigo que tenha mídia e devolve uma URL pré-assinada **interna** (`minio:9000`). Sem pedido na fila, responde 204 e a rotação assume.
+- `fila_api` = `request.dynamic` → `GET /internal/playout/proxima` → a API faz `UPDATE TOP(1) ... WITH (UPDLOCK, READPAST) SET EnviadoPlayoutEmUtc` no pedido aprovado mais antigo que tenha mídia e devolve uma URL pré-assinada **interna** (`minio:9000`). Sem pedido na fila, a partir do Épico 4 a API devolve uma faixa da rotação da biblioteca (`08`, E4-D4); com a biblioteca vazia responde 204 e a rotação local assume.
 - `on_track` → `POST /internal/playout/eventos` → grava `midia.Reproducao`, marca o pedido como `Tocado` e publica `TocandoAgora`.
 - Ao vivo: o locutor conecta um source client (BUTT, Mixxx) no harbor `:8005/live`, que tem prioridade no fallback.
 - Os endpoints `/internal/*` exigem `Authorization: Bearer {Playout__Token}`, e o nginx **bloqueia** `/api/internal` do lado público.

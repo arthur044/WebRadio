@@ -79,19 +79,19 @@ Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin
 | POST | `/pedidos` | público + header `X-Listener-Id` (UUID) | `{ nomeOuvinte, tituloMusica, artista, mensagem? }` → **201** `PedidoDto`; **429** com `Retry-After` (anti-spam ou teto global de pendentes, `07` E3-D10); header ausente, inválido ou `Guid.Empty` → 400 |
 | GET | `/pedidos/meus` | público + `X-Listener-Id` (ou Bearer) | `PedidoDto[]` sem paginação: últimos 20 pedidos desse dispositivo/usuário |
 | GET | `/pedidos?status=Pendente&pagina=&tamanho=` | PodeModerar | fila de moderação (padrão `Pendente`, mais antigos primeiro). `status` só `Pendente` ou `Aprovado` (aprovados das últimas 24 h); outro valor → 400 (Épico 3, `07`) |
-| POST | `/pedidos/{id}/aprovar` | PodeModerar | `{ midiaId? }` → 200; mídia inválida → 400; já moderado → 409 `/erros/pedido-ja-moderado` |
+| POST | `/pedidos/{id}/aprovar` | PodeModerar | `{ midiaId? }` → 200; `midiaId` que não é mídia `Aprovado`, `Ativo` e `Musica` → 400 (`08`, E4-D6); já moderado → 409 `/erros/pedido-ja-moderado` |
 | POST | `/pedidos/{id}/rejeitar` | PodeModerar | `{ motivo }` (1–280) → 200; já moderado → 409 `/erros/pedido-ja-moderado` |
 | POST | `/pedidos/{id}/marcar-tocado` | PodeModerar | → 200; só `Aprovado`, senão 409 `/erros/pedido-ja-moderado` |
 
 ## 6. Mídia — `/midias` (PodeModerar, salvo indicação)
 
-`MidiaDto = { id, nomeOriginal, titulo, artista, tipoMidia, mimeType, tamanhoBytes, duracaoSegundos, statusSanitizacao, motivoRejeicao, dataUploadUtc, ativo }` (o hash sai em hex só para Admin)
+`MidiaDto = { id, nomeOriginal, titulo, artista, tipoMidia, mimeType, tamanhoBytes, duracaoSegundos, statusSanitizacao, motivoRejeicao, dataUploadUtc, ativo, enviadoPorNome }` (o hash sai em hex só para Admin; `enviadoPorNome` a partir do Épico 4)
 
 | Método | Rota | Descrição |
 |---|---|---|
 | POST | `/midias/uploads` | `{ nomeOriginal, tipoMidia, tamanhoBytes, mimeTypeDeclarado, titulo?, artista? }` → **201** `{ midiaId, upload: { url, campos: {chave:valor}, expiraEmUtc } }`. `url` = `<origem>/storage/quarentena` (mesma origem). O browser faz `multipart/form-data POST` para `url` com os `campos` + `file` por último. `tamanhoBytes` acima do limite do tipo → 400; mais de 20/h ou 5 abertos por usuário → 429 (S-M06). `nomeOriginal` sem caracteres de controle ou bidi, sem `/ \ :` (S-M07) |
 | POST | `/midias/{id}/concluir` | → **202**; objeto ausente ou de tamanho diferente → 400 (o registro continua em `AguardandoUpload` até expirar) |
-| GET | `/midias?tipo=&status=&busca=&pagina=&tamanho=` | `busca` em Título/Artista/NomeOriginal |
+| GET | `/midias?tipo=&status=&ativo=&busca=&pagina=&tamanho=` | `busca` em Título/Artista/NomeOriginal; `ativo` só vale para o Admin (o Locutor vê só as ativas) |
 | GET | `/midias/{id}` | + `ETag` |
 | GET | `/midias/{id}/preview` | **302** para uma URL pré-assinada pública de GET (5 min) em `/storage/midia/…`, com `response-content-type=audio/mpeg` e `response-content-disposition=inline; filename*=UTF-8''{id}.mp3`; só `Aprovado`. Nunca há URL pré-assinada para a `quarentena` |
 | PATCH | `/midias/{id}` | `{ titulo?, artista?, ativo? }` + `If-Match` (**Admin** para `ativo`) |
@@ -125,7 +125,7 @@ O grupo `/api/v1/internal` (e `/health/*`) tem um filtro de endpoint que exige `
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/internal/playout/proxima` | **200** `{ midiaId, pedidoId, url, titulo, artista }` (URL pré-assinada interna `http://minio:9000/midia/…`, 30 min) ou **204** |
+| GET | `/internal/playout/proxima` | **200** `{ midiaId, pedidoId, url, titulo, artista }` (URL pré-assinada interna `http://minio:9000/midia/…`, 30 min) ou **204**. Primeiro o pedido `Aprovado` com mídia mais antigo (reenviado se não tocou em 30 min); sem pedido, uma faixa da rotação da biblioteca, com `pedidoId` nulo; biblioteca vazia → 204 (`08`, E4-D4 e E4-D5) |
 | POST | `/internal/playout/eventos` | `{ tipo: "FaixaIniciada", midiaId?, pedidoId?, titulo?, artista?, ocorridoEmUtc }` → 202. `midiaId` nulo = faixa da rotação local ou do ao vivo (só atualiza "tocando agora"). `titulo`/`artista` com até 200 caracteres, sem caracteres de controle (S-A09) |
 | POST | `/internal/harbor/auth` | **Épico 2**: `{ usuario, senha, enderecoIp }` do source client → **200** `{ programaId, fimUtc }` ou 401. `usuario` é o **identificador opaco** da credencial de transmissão do locutor (nunca o e-mail) e `senha` é o segredo dela, não a senha da conta. Aceita só o locutor dono do programa cuja **janela** (`InicioUtc <= agora < FimUtc`, calculada no SQL) está em curso (S-A08). Contrato completo em `06-epico-2-tarefas.md` |
 | GET | `/internal/harbor/autorizacao/{identificador}` | **Épico 2**: **200** `{ programaId, fimUtc }` enquanto a autorização do `auth` valer; 403 quando deixar de valer (o Liquidsoap derruba o ao vivo). Ver `06` |
@@ -159,3 +159,9 @@ Eventos servidor → cliente (todos com `eventoId` e `ocorridoEmUtc`; o cliente 
 
 No MVP não há métodos cliente → servidor: toda ação passa pela REST (`MaximumReceiveMessageSize` = 1 KB).
 Segurança do hub (S-M08, S-M09): `CloseOnAuthenticationExpiration = true`; mudar o papel, desativar o usuário ou trocar a senha derruba as conexões dele; `listenerId` precisa ser um UUID válido (senão a conexão é recusada); a query string do hub **não** vai para os logs do nginx nem do Serilog.
+
+## 11. Relatórios — `/relatorios` (SomenteAdmin, Épico 4)
+
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/relatorios/mais-tocadas?de=&ate=&top=` | `[{ midiaId, titulo, artista, tipoMidia, reproducoes }]`, ordenado por `reproducoes`; `de`/`ate` em UTC (`ate` exclusivo), período de até 366 dias, `top` de 1 a 100 (padrão 20); fora disso → 400. Chama `rel.usp_MaisTocadas` (`08`, E4-D12) |

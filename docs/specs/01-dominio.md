@@ -97,7 +97,7 @@ Agendado ──(worker: Inicio ≤ agora < Fim)──► AoVivo ──(worker: F
 | ModeradoPorUsuarioId | Guid? | |
 | ModeradoEmUtc | DateTime? | |
 | MotivoRejeicao | string(280)? | obrigatório se Rejeitado |
-| EnviadoPlayoutEmUtc | DateTime? | quando o Liquidsoap retirou o pedido da fila |
+| EnviadoPlayoutEmUtc | DateTime? | quando o Liquidsoap retirou o pedido da fila; regravado no reenvio de um pedido que não tocou em 30 min (`08`, E4-D5) |
 | TocadoEmUtc | DateTime? | |
 | CriadoEmUtc / RowVersion | | |
 
@@ -119,7 +119,7 @@ Moderar um pedido que não está `Pendente` → erro de domínio `PedidoJaModera
 | Bucket | string(63) | `quarentena` até ser aprovado, depois `midia` |
 | ChaveStorage | string(512) | `{yyyy}/{MM}/{Id}` (+ extensão após a recodificação); gerada pelo servidor |
 | MimeTypeDeclarado | string(100) | o que o cliente disse (só auditoria) |
-| **MimeType** | string(100)? | tipo **detectado** (magic bytes + ffprobe); obrigatório quando Aprovado |
+| **MimeType** | string(100)? | tipo do **arquivo de saída**, sempre `audio/mpeg` (`08`, E4-D3); o formato de entrada detectado pelos magic bytes fica só no log do job; obrigatório quando Aprovado |
 | TamanhoBytes | long | declarado na criação e conferido no `concluir`; depois o tamanho final |
 | **HashSHA256** | byte[32]? | da **saída recodificada** (determinística com `+bitexact`); único entre os `Aprovado` |
 | HashOriginalSHA256 | byte[32]? | do arquivo **enviado**, antes da recodificação (auditoria, reenvio, inteligência de malware); não único |
