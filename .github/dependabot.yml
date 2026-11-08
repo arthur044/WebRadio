@@ -88,6 +88,11 @@ updates:
       interval: "weekly"
 
   - package-ecosystem: "docker"
+    directory: "/infra/sanitizer"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
     directory: "/infra/minio"
     schedule:
       interval: "weekly"

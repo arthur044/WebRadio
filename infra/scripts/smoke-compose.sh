@@ -51,7 +51,7 @@ while read -r servico estado; do
     *healthy*|*"Exited (0)"*) ok "$servico" ;;
     *) falha "$servico: $estado" ;;
   esac
-done < <("${COMPOSE[@]}" ps -a --format '{{.Service}} {{.Status}}' | grep -v '^sanitizer ')
+done < <("${COMPOSE[@]}" ps -a --format '{{.Service}} {{.Status}}')
 
 echo "== 2. SPA e stream"
 esperar "GET / (SPA)" 200 "$(status "$BASE/")"

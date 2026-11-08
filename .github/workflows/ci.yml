@@ -253,6 +253,9 @@ jobs:
       - name: infra/harbor-borda/teste.sh
         run: infra/harbor-borda/teste.sh
 
+      - name: infra/sanitizer/teste.sh
+        run: infra/sanitizer/teste.sh
+
   # F17: o 03-schema-sqlserver.sql (contrato, ADR D14) e as migrations do EF precisam gerar o MESMO schema. Dois bancos
   # descartáveis no SQL Server do próprio job; o resultado (catálogo e diff) vai para o resumo do job, para o Atlas.
   ddl-check:
@@ -409,7 +412,7 @@ jobs:
         run: |
           set -euo pipefail
           falhas=0
-          for imagem in webradio-api:local webradio-worker:local webradio-migrator:local webradio-web:local webradio-icecast:local webradio-liquidsoap:local webradio-harbor-borda:local webradio-minio-init:local; do
+          for imagem in webradio-api:local webradio-worker:local webradio-migrator:local webradio-web:local webradio-icecast:local webradio-liquidsoap:local webradio-harbor-borda:local webradio-sanitizer:local webradio-minio-init:local; do
             echo "== ${imagem}"
             trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${imagem}" || falhas=$((falhas + 1))
           done

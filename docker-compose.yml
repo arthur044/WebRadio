@@ -261,16 +261,23 @@ services:
       retries: 3
       start_period: 15s
 
-  # Reservado (D16): a imagem com o ffmpeg mínimo chega no Épico 4. Sem rede e sem segredo.
+  # Sanitizer (E4-F04, E4-D1, S-C01): ffmpeg mínimo compilado + um script, sem rede e sem segredo. Encontra o Worker no volume tmpfs sanitizer-jobs
+  # (1 GB, uid 65532): o Worker grava o original e o job.json, e o sanitizer devolve out.mp3 e result.json. Um job por vez.
   sanitizer:
-    image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
-    profiles: [sanitizacao]
+    build: { context: ., dockerfile: infra/sanitizer/Dockerfile }
+    image: webradio-sanitizer:local
     <<: *endurecido
     network_mode: none
     user: "65532:65532"
-    command: ["sleep", "infinity"]
-    mem_limit: 256m
+    volumes: [sanitizer-jobs:/jobs]
+    mem_limit: 512m
     pids_limit: 50
+    cpus: 1
+    healthcheck:
+      test: ["CMD-SHELL", "ps | grep -q '[s]anitizar.sh'"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   # ------------------------------------------------------------------ playout
   icecast:
@@ -394,6 +401,10 @@ volumes:
   sqlserver-data: {}
   minio-data: {}
   redis-data: {}
+  # E4-D1: o original e o resultado da sanitização existem só em memória (tmpfs), com o uid do Worker e do sanitizer (65532) e modo 0700.
+  sanitizer-jobs:
+    driver: local
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1g,uid=65532,gid=65532,mode=0700" }
 
 # Um arquivo por segredo, gerado por infra/scripts/gerar-segredos.sh (nunca versionado).
 secrets:
