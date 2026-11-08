@@ -320,7 +320,9 @@ services:
   # 0.0.0.0). allow/deny por HARBOR_PERMITIDOS (vazio = ninguém entra), limite de conexões simultâneas por IP (limit_conn) e timeouts no nginx.conf. É o único
   # serviço que vê o IP real do locutor: access log com IP anonimizado e entra no limpar-logs.sh.
   harbor-borda:
-    image: nginxinc/nginx-unprivileged:1.31.6-alpine3.24@sha256:884e0b7f42f303641b0f4e78755aea647521dca0b89ca3be7992ad78b5c07434 # uid 101
+    # Imagem própria (E4-F01): o nginx-unprivileged por digest com brotli-libs e os demais pacotes corrigidos (uid 101).
+    build: { context: ., dockerfile: infra/harbor-borda/Dockerfile }
+    image: webradio-harbor-borda:local
     <<: *endurecido
     entrypoint: ["/usr/local/bin/harbor-borda.sh"]
     environment:

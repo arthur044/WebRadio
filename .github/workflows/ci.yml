@@ -405,7 +405,7 @@ jobs:
         run: |
           set -euo pipefail
           falhas=0
-          for imagem in webradio-api:local webradio-worker:local webradio-migrator:local webradio-web:local webradio-icecast:local webradio-liquidsoap:local webradio-minio-init:local; do
+          for imagem in webradio-api:local webradio-worker:local webradio-migrator:local webradio-web:local webradio-icecast:local webradio-liquidsoap:local webradio-harbor-borda:local webradio-minio-init:local; do
             echo "== ${imagem}"
             trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${imagem}" || falhas=$((falhas + 1))
           done
@@ -416,10 +416,10 @@ jobs:
 
       - name: "Imagens de terceiros do compose (CRITICAL corrigível quebra o job; HIGH é informativo)"
         run: |
-          # sqlserver, redis e minio não são construídos aqui (o liquidsoap é imagem própria e já passou pelo passo acima); a atualização delas é
+          # sqlserver, redis e minio não são construídos aqui (o liquidsoap e o harbor-borda são imagens próprias e já passaram pelo passo acima); a atualização delas é
           # manual (digest). E4-F01: CRITICAL com correção disponível nessas três FALHA o job, sem exceção (.trivyignore). O HIGH aparece como aviso e
-          # no resumo do job, para quem decide a troca do digest. alpine (minio-init) e nginx (harbor-borda) seguem só informativos (a CRITICAL do
-          # nginx é a CVE-2026-111497 do brotli, sem imagem oficial corrigida; pendente no 08 §E4-F01).
+          # no resumo do job, para quem decide a troca do digest. O alpine do minio-init segue só informativo (0 CRITICAL hoje). O harbor-borda
+          # (nginx, a única imagem publicada para fora) também é imagem própria agora e está no passo estrito acima.
           bloqueiam="mcr.microsoft.com/mssql/server redis cgr.dev/chainguard/minio"
           {
             echo "### Imagens de terceiros do compose (com correção disponível)"
