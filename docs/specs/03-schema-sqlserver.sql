@@ -219,6 +219,12 @@ CREATE TABLE midia.ArquivoMidia (
     UploadExpiraEmUtc   datetime2(3)     NOT NULL,
     SanitizadoEmUtc     datetime2(3)     NULL,
     Ativo               bit              NOT NULL CONSTRAINT DF_ArquivoMidia_Ativo DEFAULT (1),
+    -- [Atlas/E4-A01a] Chave do sorteio da rotação (08, E4-D4): CALCULADA e PERSISTIDA, nunca gravada pela aplicação. Uma coluna
+    -- gravada a cada faixa tocada trocaria o RowVersion e daria 412 na edição do Admin (If-Match). Os 4 primeiros bytes do SHA-256 do Id:
+    -- uniforme no int inteiro e sem colisão (40 mil linhas, 40 mil valores). NÃO usar CHECKSUM(Id): com NEWSEQUENTIALID() os Ids são
+    -- quase iguais e o CHECKSUM dá 4.086 valores distintos para 40.000 mídias, todos negativos e numa faixa estreita, o que faria o
+    -- sorteio devolver sempre as mesmas faixas.
+    Sorteio             AS CONVERT(int, SUBSTRING(HASHBYTES('SHA2_256', CONVERT(binary(16), Id)), 1, 4)) PERSISTED,
     RowVersion          rowversion       NOT NULL,
     CONSTRAINT PK_ArquivoMidia PRIMARY KEY CLUSTERED (Id),
     CONSTRAINT FK_ArquivoMidia_EnviadoPor FOREIGN KEY (EnviadoPorUsuarioId) REFERENCES seg.Usuario (Id),
@@ -254,6 +260,10 @@ CREATE INDEX IX_ArquivoMidia_HashOriginal ON midia.ArquivoMidia (HashOriginalSHA
 -- Biblioteca / rotação do playout.
 CREATE INDEX IX_ArquivoMidia_Biblioteca ON midia.ArquivoMidia (TipoMidia, StatusSanitizacao)
     INCLUDE (Titulo, Artista, DuracaoSegundos, Ativo);
+-- [Atlas/E4-A01a] Rotação (08, E4-D4): sorteio por chave. Só mídia que pode tocar (Aprovado e Ativo); o `Sorteio >= @r ORDER BY Sorteio`
+-- é um seek de 3 leituras (de 786 do ORDER BY NEWID() na biblioteca de 40 mil músicas). Predicados com CONSTANTE, para o filtro casar.
+CREATE INDEX IX_ArquivoMidia_Rotacao ON midia.ArquivoMidia (TipoMidia, Sorteio)
+    INCLUDE (Titulo, Artista) WHERE StatusSanitizacao = 4 AND Ativo = 1;
 -- Fila do Worker de sanitização e limpeza de uploads abandonados.
 -- [Atlas/v1.1] S-M04: TentativasSanitizacao/EmAnaliseDesdeUtc incluídos — o worker decide
 -- retry vs. lease expirado sem key lookup.
@@ -279,6 +289,9 @@ CREATE TABLE interacao.PedidoMusica (
     ModeradoEmUtc         datetime2(3)     NULL,
     MotivoRejeicao        nvarchar(280)    NULL,
     EnviadoPlayoutEmUtc   datetime2(3)     NULL,
+    -- [Atlas/E4-A01a] Instância do Liquidsoap (UUID do boot, cabeçalho X-Playout-Instancia) que recebeu o pedido (08, E4-D5): o pedido só é
+    -- reenviado a uma instância diferente, ou seja, depois de um reinício.
+    EnviadoPlayoutInstancia uniqueidentifier NULL,
     TocadoEmUtc           datetime2(3)     NULL,
     CriadoEmUtc           datetime2(3)     NOT NULL CONSTRAINT DF_PedidoMusica_CriadoEmUtc DEFAULT SYSUTCDATETIME(),
     RowVersion            rowversion       NOT NULL,
@@ -298,8 +311,12 @@ CREATE TABLE interacao.PedidoMusica (
 CREATE INDEX IX_PedidoMusica_Fila ON interacao.PedidoMusica (CriadoEmUtc)
     INCLUDE (NomeOuvinte, TituloMusica, Artista, Mensagem, ProgramaId) WHERE Status = 1;
 -- Fila do playout: aprovados com mídia ainda não enviados ao Liquidsoap.
+-- [Atlas/E4-A01a] Refeito para o E4-D5: o predicado de entrega tem `OR` (nunca entregue, ou entregue a outra instância), que não implica o
+-- filtro antigo (`EnviadoPlayoutEmUtc IS NULL`): 3.402 leituras de varredura do clustered contra 13 com este índice (105 mil pedidos). Chave em
+-- ModeradoEmUtc: a idade máxima de 24 h e o ORDER BY da CTE são seek/ordem do próprio índice; o filtro só guarda pedido com mídia ainda
+-- aprovado (Tocado sai do índice).
 CREATE INDEX IX_PedidoMusica_Playout ON interacao.PedidoMusica (ModeradoEmUtc)
-    INCLUDE (MidiaId) WHERE Status = 2 AND MidiaId IS NOT NULL AND EnviadoPlayoutEmUtc IS NULL;
+    INCLUDE (MidiaId, EnviadoPlayoutEmUtc, EnviadoPlayoutInstancia) WHERE Status = 2 AND MidiaId IS NOT NULL;
 -- Aprovados das últimas 24 h (07, E3-D9): chave em ModeradoEmUtc (um Aprovado não sai do status 2 no Épico 3), para o corte
 -- de 24 h ser seek; o INCLUDE cobre a lista do locutor (predicado com CONSTANTE Status = 2).
 CREATE INDEX IX_PedidoMusica_Aprovados ON interacao.PedidoMusica (ModeradoEmUtc)

@@ -1,6 +1,6 @@
 /* =====================================================================
    WebRadio — infra/scripts/ddl-catalogo.sql (E1-F17, job ddl-check)
-   Descreve o schema de um banco em linhas de texto comparáveis: colunas (tipo, tamanho, nulabilidade, collation), índices
+   Descreve o schema de um banco em linhas de texto comparáveis: colunas (tipo, tamanho, nulabilidade, collation, definição e persistência da coluna calculada), índices
    (únicos, filtro, colunas e INCLUDEs), FKs (com a ação), CHECKs e DEFAULTs. O ddl-check.sh roda isto no banco criado pelo
    03-schema-sqlserver.sql e no criado pelo `dotnet ef migrations script --idempotent` e compara as saídas. Só leitura.
    O COLLATE explícito evita "Cannot resolve collation conflict" entre as colunas do catálogo e os literais.
@@ -11,7 +11,9 @@ SELECT 'COLUNA|' + s.name COLLATE Latin1_General_BIN2 + '.' + t.name COLLATE Lat
        + '|' + ty.name COLLATE Latin1_General_BIN2 + '(' + CAST(c.max_length AS varchar) + ',' + CAST(c.precision AS varchar) + ',' + CAST(c.scale AS varchar) + ')'
        + '|null=' + CAST(c.is_nullable AS varchar) + '|id=' + CAST(c.is_identity AS varchar)
        + '|col=' + ISNULL(c.collation_name COLLATE Latin1_General_BIN2, '')
+       + '|calc=' + ISNULL(cc.definition COLLATE Latin1_General_BIN2 + '/persistida=' + CAST(cc.is_persisted AS varchar), '')
 FROM sys.columns c
+LEFT JOIN sys.computed_columns cc ON cc.object_id = c.object_id AND cc.column_id = c.column_id
 JOIN sys.tables t ON t.object_id = c.object_id
 JOIN sys.schemas s ON s.schema_id = t.schema_id
 JOIN sys.types ty ON ty.user_type_id = c.user_type_id

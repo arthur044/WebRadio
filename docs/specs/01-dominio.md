@@ -135,7 +135,7 @@ Moderar um pedido que não está `Pendente` → erro de domínio `PedidoJaModera
 | UploadExpiraEmUtc | DateTime | criação + 1 h (limpeza de `AguardandoUpload`) |
 | SanitizadoEmUtc | DateTime? | |
 | Ativo | bool | desativar tira da rotação sem apagar o histórico |
-| Sorteio | int | coluna calculada persistida `CHECKSUM(Id)`, chave do sorteio da rotação (`08`, E4-D4); nunca gravada pela aplicação |
+| Sorteio | int | coluna calculada persistida (4 primeiros bytes do SHA-256 do `Id`; `CHECKSUM(Id)` não serve, dá poucos valores distintos com `NEWSEQUENTIALID()`), chave do sorteio da rotação (`08`, E4-D4); nunca gravada pela aplicação |
 | RowVersion | byte[] | |
 
 Limites por tipo (configuráveis em `Midia:Limites`):
