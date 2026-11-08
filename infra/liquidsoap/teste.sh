@@ -403,9 +403,9 @@ confere "o stream segue" toca
 confere "o teto do fim do programa derruba mesmo sem resposta" espera_log "$P-radio" "Derrubando o ao vivo: teto da falha aberta (fim do programa + 1 min)" 90
 
 echo "-- API fora, teto 2: último 200 + HARBOR_TETO_SEM_RESPOSTA_S (a janela é longa, só o 200 antigo vale)"
-# Sem espera de isolamento (#94): o source client de antes (o `fonte`, que reconecta sozinho) segue vivo e a conexão que entra agora não pode
-# ser derrubada pela leitura da antiga, que o harbor encerra no stop(). Se isso voltasse, o desconectado cairia dentro dos 20 s abaixo e,
-# com a API fora e sem conexão, o teto nunca dispararia: o teste falharia aqui e no "reconectou ... segue no ar" do bloco "janela volta".
+# Sem espera de isolamento (#94): o teto 2 não precisa mais esperar a leitura antiga morrer. A regressão do harbor (leitura antiga derrubando a
+# conexão nova) é guardada pelo bloco "derrubada com o source client mudo", acima: aqui o `fonte` já foi removido e o `fonte_ao_vivo` troca o
+# `fonte2` por um novo (rm -f antes), com clientes que mandam áudio, então este bloco não pegaria a regressão.
 api vazia
 controle fim "$(iso_em 3600)"
 CON="$(conta_log "$P-radio" 'Source client conectado')"
