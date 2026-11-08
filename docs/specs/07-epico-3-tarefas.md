@@ -3,6 +3,7 @@
 > Autor: Nexus · 2026-10-29 · Referências: `00-arquitetura.md` (Fluxo B), `01-dominio.md` (§2.4 `PedidoMusica`, §2.6 `Divulgacao`), `02-api-rest.md` (§5, §7, §10), `03-schema-sqlserver.sql` (`interacao.*`), `05-seguranca-auditoria.md` (S-A05, S-B03, S-B10, S-M08, S-M14).
 > Donos: **Forge** (backend, Worker, contêineres), **Atlas** (banco), **Prism** (frontend), **Sentinel** (revisão de segurança do upload de imagem e do throttle).
 > O `05` continua **normativo**: cada achado que cita o Épico 3 vira critério de aceite da tarefa correspondente. A checklist da §8 do `05` é o quality gate de todo PR.
+> **v1.6 (2026-11-08):** fechamento do Épico 3 (seção "Fechamento do Épico 3"): a DoD conferida item a item, com o PR que entrega cada um. O P05 cita o DoD 8 (estava DoD 7).
 > **v1.5 (2026-10-29):** pergunta do Prism no C3: `GET /divulgacoes/{id}` (Admin) com `ETag` como fonte do `If-Match`; `POST` e `PUT` com o mesmo corpo, inclusive `ativo`; `GET /pedidos/meus` devolve array.
 > **v1.4 (2026-10-29):** re-review do #75: sem WebP na entrada também no `02` e no P04, `IX_PedidoMusica_Aprovados` por `ModeradoEmUtc`, `TextoSeguro` no motivo, chaves `wr:throttle:pedido:*`, rede própria com subnet para as duas origens do smoke, índice único da chave da imagem, teto global com `TOP` e cache, `@LockTimeout` do applock, magic bytes antes do `SKCodec`.
 > **v1.3 (2026-10-29):** review do Sentinel no PR #75: políticas do MinIO por prefixo, método das duas origens e XFF forjado no smoke, `location` exato do upload, entrada só JPEG/PNG, quadro único, semáforo e teto de tempo no decode, retenção decidida (E3-D8, hash de IP em 7 dias, outbox de pedidos em 30 dias), validador `TextoSeguro` (E3-D7), link e chave da imagem mais estritos.
@@ -90,7 +91,7 @@
 | **E3-P02** | **Meus pedidos**: lista dos últimos 20 com status; atualiza por `PedidoModerado` e `PedidoTocado` sem refresh; ressincroniza por REST ao reconectar o hub; motivo da rejeição visível como texto puro | E3-F02, E3-F03 | Playwright no `compose-smoke` (DoD 1, lado do ouvinte) |
 | **E3-P03** | **Fila de moderação** no Estúdio (Locutor e Admin): pendentes mais antigos primeiro, chegando por `PedidoCriado`; aprovar, rejeitar (diálogo com motivo obrigatório, 1–280) e marcar tocado na lista de aprovados; 409 `/erros/pedido-ja-moderado` mostra "outro locutor já moderou" (texto novo no `descreverErro`) e tira o item; nome e dedicatória como texto puro | E3-F02, E3-F03 | Playwright no `compose-smoke` (DoD 1, lado do locutor); teste do 409 |
 | **E3-P04** | **Administração de divulgações** (Admin): lista, criar, editar com `If-Match`, remover com confirmação; upload de imagem com prévia local, enviado ao `POST /divulgacoes/imagens` **só ao salvar** o formulário (a `Manutencao` apaga imagem sem divulgação depois de 24 h, E3-D6) (aceita só `image/jpeg,image/png`, avisa > 2 MB antes de enviar), prioridade 0–100, janela de exibição em horário de Brasília (dados em UTC), link só `https://`; na edição, reenvia a `imagemChave` do DTO para manter a imagem (`PUT` substitui tudo) | E3-F05, E3-F06 | Vitest do formulário e dos erros (412, 413, 429, 400 do link); teste de que editar só o título mantém a `imagemChave`; teste do fuso como na grade |
-| **E3-P05** | **Mural** (substitui o placeholder): cards por prioridade com imagem (`loading="lazy"`, `alt` = título), mensagem como texto puro com quebras de linha, link com `target="_blank" rel="noopener noreferrer"` | E3-F05 | Vitest de que HTML na mensagem aparece como texto; Playwright de preview (DoD 7) |
+| **E3-P05** | **Mural** (substitui o placeholder): cards por prioridade com imagem (`loading="lazy"`, `alt` = título), mensagem como texto puro com quebras de linha, link com `target="_blank" rel="noopener noreferrer"` | E3-F05 | Vitest de que HTML na mensagem aparece como texto; Playwright de preview (DoD 8) |
 
 ## Agrupamento de entrega
 
@@ -103,6 +104,24 @@ Por decisão do dono do produto, a entrega é por **feature grande**: um PR por 
 | **C3** | Telas | P01, P02, P03, P04, P05 | Guardian | contratos do C1 e do C2 |
 
 O C1 e o C2 podem andar em paralelo no worktree do Forge (branches separadas). O Prism começa o C3 pelos contratos do `02` com a API mockada e abre o PR quando o C1 e o C2 estiverem mergeados, para o Playwright do `compose-smoke` rodar contra o stack real. O Atlas começa o A01 assim que o F02 e o F04 tiverem o SQL definido (pode pedir o texto ao Forge antes do PR).
+
+## Fechamento do Épico 3
+
+Conferido pelo Nexus em 2026-11-08 contra a `main` (`7a2f3ba`). C1 (#81), C2 (#82) e C3 (#84) mergeados; os ajustes de spec do C2 entraram no #83. O A01 e o A02 estão no parecer `docs/pareceres/e3-a01-a02-pedidos.md` (Atlas, com a medição das divulgações acrescentada no #83); a correção obrigatória dele (hint no `IX_PedidoMusica_Fila` na expiração) entrou no #81.
+
+| DoD | Onde é verificado | PR |
+|---|---|---|
+| 1. Pedido chega à moderação e a decisão chega ao ouvinte sem recarregar (aprovado, tocado e rejeitado com motivo) | `frontend/e2e/pedidos-moderacao.spec.ts` no `compose-smoke`, contra o stack real | #84 (telas), #81 (hub e eventos) |
+| 2. Throttle atrás do nginx: dispositivo, IP, outra origem e `X-Forwarded-For` forjado | `infra/scripts/smoke-pedidos.sh` (duas origens em rede com subnet própria) | #81 |
+| 3. Redis parado: fallback SQL, `/health/ready` `Degraded` e 429 | `infra/scripts/smoke-pedidos.sh`; corrida do fallback em `PedidosSqlTests.Fallback_dois_POST_simultaneos_do_mesmo_dispositivo_um_201_e_um_429` | #81 |
+| 4. Dois locutores aprovando ao mesmo tempo: um 200, o resto 409 | `PedidosSqlTests.DoD_4_oito_locutores_aprovando_o_mesmo_pedido_ao_mesmo_tempo_um_200_e_o_resto_409` (`[SqlFact]`, oito em vez de dois) | #81 |
+| 5. `Pendente` de 121 min vira `Expirado` e o outbox ganha o `PedidoModerado` | `ExpiracaoDePedidosSqlTests.DoD_5_pendente_de_121_minutos_vira_Expirado_e_o_outbox_ganha_o_PedidoModerado_para_o_ouvinte_e_os_locutores` | #81 |
+| 6. Teto global de `Pendente`: 429 sem a reserva de 5 min | `PedidosSqlTests.DoD_6_com_o_teto_atingido_o_proximo_dispositivo_leva_429_sem_ficar_com_a_reserva_de_5_minutos` | #81 |
+| 7. Imagem de divulgação: recodificação, recusas sem decodificar, cabeçalhos e listagem negada | `infra/scripts/smoke-pedidos.sh` (bloco do DoD 7, com as políticas do MinIO e o ciclo de vida da imagem) e `ImagensSkiaTests.cs` (`ValidadorDeCabecalhoSkiaTests`, `RecodificadorSkiaTests`) | #82 |
+| 8. Mural só com as ativas, por prioridade e `id`, texto puro e link seguro | `ConsultasDeDivulgacaoTests` (janela pelo relógio do servidor, `Ativo`, desempate por `Id`), `DivulgacoesEndpointsTests` e `frontend/e2e/mural.spec.ts` no preview | #82, #84 |
+| 9. CI dos Épicos 1 e 2 continua verde (cobertura ≥ 80% em Domain e Application) | CI completo da `main` | #90 (CVEs novas do trivy em musl, zlib e `golang.org/x/net` do `mc`, mais o NuGet 10.0.14) |
+
+**O Épico 3 está fechado em 2026-11-08.** O run do CI na `main` depois do #79 (`7a2f3ba`, run 42453053652) passou verde em todos os jobs na segunda tentativa, e o CodeQL passou na primeira. Na primeira tentativa, o job Infra falhou no "teto 2" do `teste.sh` do Liquidsoap ("20 s sem resposta: segue no ar" e "o teto do último 200 derruba"); o mesmo bloco passou no #79, no #88 e no #90 e já tinha sido ajustado no `9e4ee7d`. É instabilidade de tempo, não regressão, e virou tarefa do Forge (tornar o teste determinístico).
 
 ## Riscos
 
