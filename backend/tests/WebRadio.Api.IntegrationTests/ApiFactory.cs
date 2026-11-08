@@ -40,6 +40,8 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(Ambiente);
+        // #102: sem reload, o host não cria um FileSystemWatcher (uma instância de inotify, limite de 128 no runner) por appsettings.
+        builder.UseSetting("hostBuilder:reloadConfigOnChange", "false");
         // UseSetting (e não AddInMemoryCollection): o Program lê builder.Configuration no topo, antes
         // de ConfigureAppConfiguration ser aplicado.
         foreach (var (chave, valor) in Config) builder.UseSetting(chave, valor);
