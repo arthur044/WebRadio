@@ -124,6 +124,8 @@ export function invalidarEstadoDaRadio(queryClient: Pick<QueryClient, 'invalidat
   // Pedidos criados e moderados durante a queda (E3-P02, E3-P03).
   queryClient.invalidateQueries({ queryKey: ['pedidos-meus'] })
   queryClient.invalidateQueries({ queryKey: ['pedidos-moderacao'] })
+  // Mídias sanitizadas durante a queda (E4-P01): o status da biblioteca só muda por `MidiaSanitizada`.
+  queryClient.invalidateQueries({ queryKey: ['midias'] })
 }
 
 /**

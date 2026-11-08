@@ -8,6 +8,7 @@ import { LoginPage } from './features/auth/LoginPage'
 import { TrocarSenhaPage } from './features/auth/TrocarSenhaPage'
 import { AdminGradePage } from './features/admin/AdminGradePage'
 import { AdminDivulgacoesPage } from './features/admin/AdminDivulgacoesPage'
+import { BibliotecaPage } from './features/biblioteca/BibliotecaPage'
 import { RequireRole } from './features/auth/RequireRole'
 
 function App() {
@@ -22,6 +23,14 @@ function App() {
           element={
             <RequireRole roles={['Locutor', 'Admin']}>
               <EstudioPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/biblioteca"
+          element={
+            <RequireRole roles={['Locutor', 'Admin']}>
+              <BibliotecaPage />
             </RequireRole>
           }
         />
