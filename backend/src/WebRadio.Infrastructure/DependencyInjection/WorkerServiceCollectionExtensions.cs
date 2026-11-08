@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using WebRadio.Application.Abstracoes;
 using WebRadio.Infrastructure.Triagem;
+using WebRadio.Infrastructure.Sanitizacao;
 using WebRadio.Infrastructure.Seguranca;
 using WebRadio.Infrastructure.Trabalhos;
 
@@ -49,6 +50,38 @@ public static class WorkerServiceCollectionExtensions
         services.AddScoped<IManutencao, Manutencao>();
         services.AddScoped<ITransicoesDaGrade, TransicoesDaGrade>();
         services.AddHostedService<CicloDoWorker>();
+        return services;
+    }
+
+    /// <summary>
+    /// E4-F05: o pipeline de sanitização no Worker (só com <c>Storage:Endpoint</c>; sem storage o ciclo o ignora). Limites por tipo em <c>Midia:*</c>, o volume de jobs em
+    /// <c>Sanitizer:*</c> e o marcador "Degraded" em <c>Worker:ArquivoDeDegradacao</c> (padrão /tmp/worker-degradado, em tmpfs).
+    /// </summary>
+    public static IServiceCollection AddPipelineDeMidiaDoWorker(this IServiceCollection services, IConfiguration configuration)
+    {
+        if (string.IsNullOrWhiteSpace(configuration["Storage:Endpoint"])) return services;
+
+        var midia = new WebRadio.Application.Features.Midias.MidiaOptions();
+        configuration.GetSection(WebRadio.Application.Features.Midias.MidiaOptions.Secao).Bind(midia);
+        if (new WebRadio.Application.Features.Midias.MidiaOptionsValidator().Validate(null, midia) is { Failed: true } invalido)
+            throw new InvalidOperationException(string.Join(" ", invalido.Failures));
+        var sanitizer = new SanitizerOptions();
+        configuration.GetSection(SanitizerOptions.Secao).Bind(sanitizer);
+        var scan = int.TryParse(configuration["Seguranca:TimeoutScanSegundos"], out var t) ? t : 120;
+        var degradacao = string.IsNullOrWhiteSpace(configuration["Worker:ArquivoDeDegradacao"]) ? "/tmp/worker-degradado" : configuration["Worker:ArquivoDeDegradacao"];
+
+        services.AddSingleton(Options.Create(midia));
+        services.AddSingleton(sanitizer);
+        services.AddSingleton<IAudioSanitizer, SanitizerPorVolume>();
+        services.AddSingleton<IMarcadorDeDegradacao>(sp => new MarcadorDeDegradacao(degradacao, sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MarcadorDeDegradacao>>()));
+        services.AddScoped<IRadioDbContext>(sp => sp.GetRequiredService<WebRadio.Infrastructure.Persistencia.RadioDbContext>());
+        services.AddScoped<IOutbox, WebRadio.Infrastructure.Persistencia.Outbox.OutboxEf>();
+        services.AddScoped<ICapturaDeMidia, CapturaDeMidia>();
+        services.AddScoped(sp => new WebRadio.Application.Features.Midias.PipelineDeMidia(
+            sp.GetRequiredService<IRadioDbContext>(), sp.GetRequiredService<ICapturaDeMidia>(), sp.GetRequiredService<IObjectStorage>(), sp.GetRequiredService<IMalwareScanner>(),
+            sp.GetRequiredService<IAudioSanitizer>(), sp.GetRequiredService<IOutbox>(), sp.GetRequiredService<IClock>(), sp.GetRequiredService<IMarcadorDeDegradacao>(),
+            sp.GetRequiredService<IOptions<WebRadio.Application.Features.Midias.MidiaOptions>>(),
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebRadio.Application.Features.Midias.PipelineDeMidia>>()) { TimeoutDoScanSegundos = scan });
         return services;
     }
 

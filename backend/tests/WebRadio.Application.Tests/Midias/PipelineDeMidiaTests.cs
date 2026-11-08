@@ -139,7 +139,7 @@ public sealed class PipelineDeMidiaTests
     public async Task Fila_vazia_nao_faz_nada()
     {
         var c = new Cena();
-        Assert.False(await c.Pipeline.ProcessarProximaAsync(default));
+        Assert.Equal(PassoDoPipeline.FilaVazia, await c.Pipeline.ProcessarProximaAsync(default));
         Assert.Equal(0, c.Scanner.Chamadas);
     }
 
@@ -151,7 +151,7 @@ public sealed class PipelineDeMidiaTests
         var chaveDoOriginal = m.ChaveStorage;
         c.SanitizerAprova(10m);
 
-        Assert.True(await c.Pipeline.ProcessarProximaAsync(default));
+        Assert.NotEqual(PassoDoPipeline.FilaVazia, await c.Pipeline.ProcessarProximaAsync(default));
 
         var r = c.Recarregar(m.Id);
         Assert.Equal(StatusSanitizacao.Aprovado, r.StatusSanitizacao);
@@ -311,7 +311,7 @@ public sealed class PipelineDeMidiaTests
         var m = c.Pendente();
         c.Scanner.Erro = new ScannerIndisponivelException("clamd fora");
 
-        for (var i = 0; i < 4; i++) Assert.True(await c.Pipeline.ProcessarProximaAsync(default));
+        for (var i = 0; i < 4; i++) Assert.Equal(PassoDoPipeline.InfraestruturaFora, await c.Pipeline.ProcessarProximaAsync(default));
 
         var r = c.Recarregar(m.Id);
         Assert.Equal(StatusSanitizacao.Pendente, r.StatusSanitizacao);
@@ -323,7 +323,7 @@ public sealed class PipelineDeMidiaTests
         // Quando o clamd volta, o MESMO arquivo é processado.
         c.Scanner.Erro = null;
         c.SanitizerAprova();
-        Assert.True(await c.Pipeline.ProcessarProximaAsync(default));
+        Assert.NotEqual(PassoDoPipeline.FilaVazia, await c.Pipeline.ProcessarProximaAsync(default));
         Assert.Equal(StatusSanitizacao.Aprovado, c.Recarregar(m.Id).StatusSanitizacao);
         Assert.Null(c.Marcador.Motivo); // saiu de Degraded
     }
@@ -539,7 +539,7 @@ public sealed class PipelineDeMidiaTests
             }
         }
 
-        Assert.False(await c.Pipeline.ProcessarProximaAsync(default));
+        Assert.Equal(PassoDoPipeline.FilaVazia, await c.Pipeline.ProcessarProximaAsync(default));
 
         var r = c.Recarregar(m.Id);
         Assert.Equal((StatusSanitizacao.Rejeitado, "falha de processamento"), (r.StatusSanitizacao, r.MotivoRejeicao));
@@ -555,7 +555,7 @@ public sealed class PipelineDeMidiaTests
         c.F.Db.SaveChanges();
         c.F.Relogio.UtcNow = c.F.Relogio.UtcNow.AddSeconds(30);
 
-        Assert.False(await c.Pipeline.ProcessarProximaAsync(default));
+        Assert.Equal(PassoDoPipeline.FilaVazia, await c.Pipeline.ProcessarProximaAsync(default));
         Assert.Equal(StatusSanitizacao.EmAnalise, c.Recarregar(m.Id).StatusSanitizacao);
     }
 

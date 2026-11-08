@@ -8,6 +8,14 @@ using WebRadio.Domain.Midia;
 
 namespace WebRadio.Application.Features.Midias;
 
+/// <summary>O que um passo do pipeline fez (o laço do Worker decide se continua).</summary>
+public enum PassoDoPipeline
+{
+    FilaVazia = 0,
+    Processada = 1,
+    InfraestruturaFora = 2,
+}
+
 /// <summary>
 /// Pipeline de sanitização do Worker (<c>00</c> Fluxo C passo 3, 08 E4-F05). Um item por vez (E4-D1): captura → <c>stat</c> → download condicional direto no tmpfs do job → hash do
 /// original → magic bytes → ClamAV no ORIGINAL → sanitizer → conferência da saída → só então o <c>PutAsync</c> em <c>midia/</c> → <c>Aprovado</c> + <c>MidiaSanitizada</c> no outbox
@@ -52,13 +60,14 @@ public sealed class PipelineDeMidia(
     public const string MotivoInfectado = "o antivírus detectou ameaça no arquivo";
     public const string MotivoSaidaInvalida = "a saída da sanitização não passou na conferência";
 
-    /// <summary>Um item: devolve <c>false</c> se a fila estava vazia.</summary>
-    public async Task<bool> ProcessarProximaAsync(CancellationToken ct)
+    /// <summary>Um item. O laço do Worker continua enquanto vier <see cref="PassoDoPipeline.Processada"/>; com a infraestrutura fora ele PARA até o próximo tick (sem girar em falso).</summary>
+    public async Task<PassoDoPipeline> ProcessarProximaAsync(CancellationToken ct)
     {
         await LiberarLeasesVencidosAsync(ct);
-        if (await captura.CapturarProximaAsync(ct) is not { } id) return false;
+        if (await captura.CapturarProximaAsync(ct) is not { } id) return PassoDoPipeline.FilaVazia;
 
         var midia = await db.ArquivosMidia.FirstAsync(m => m.Id == id, ct);
+        var passo = PassoDoPipeline.Processada;
         try
         {
             await ProcessarAsync(midia, ct);
@@ -72,6 +81,7 @@ public sealed class PipelineDeMidia(
             degradacao.Degradado(e.Motivo);
             logger.LogError("PIPELINE_MIDIA_ANTIVIRUS_INDISPONIVEL midia {MidiaId}: {Motivo}. O arquivo continua Pendente e a tentativa foi devolvida.", midia.Id, e.Motivo);
             await DevolverAsync(midia, ct);
+            passo = PassoDoPipeline.InfraestruturaFora;
         }
         catch (FalhaNoScanException e)
         {
@@ -83,9 +93,10 @@ public sealed class PipelineDeMidia(
             // Qualquer outra (MinIO, SQL, disco do job, rede) é infraestrutura: o arquivo não tem culpa.
             logger.LogError(e, "PIPELINE_MIDIA_INFRAESTRUTURA midia {MidiaId} ({Tipo}): o item volta a Pendente e a tentativa é devolvida.", midia.Id, e.GetType().Name);
             await DevolverAsync(midia, ct);
+            passo = PassoDoPipeline.InfraestruturaFora;
         }
 
-        return true;
+        return passo;
     }
 
     /// <summary>Lease vencido (Worker morto no meio) conta como falha de processamento e volta à fila; na 3ª o item é rejeitado (S-M04).</summary>
