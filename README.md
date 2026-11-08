@@ -113,7 +113,7 @@ Jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra 
 ### Pendente
 
 - Execução do `gerar-segredos.ps1` em Windows real e subida da base de produção num job.
-- Atualização das imagens do SQL Server e do Liquidsoap, antes de o Épico 4 liberar upload.
+- ~~Atualização das imagens do SQL Server e do Liquidsoap, antes de o Épico 4 liberar upload.~~ Resolvida no #95 (E4-F01): nenhuma imagem do compose tem CRITICAL corrigível e o trivy do CI falha se aparecer uma. Os HIGH do SQL Server e do Redis seguem só informativos (ver o risco aceito 2 do `05`, §4).
 - Reescrita do runbook de rotação de segredos (ver o aviso no topo dele).
 
 ## Status do Épico 2
@@ -129,7 +129,7 @@ Jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra 
 
 ## Status do Épico 3
 
-**Código na `main` (C1, C2 e C3); Definição de Pronto ainda não conferida.** O Épico 3 entrega pedidos de música com moderação e divulgações com imagem opcional. O pacote de tarefas está em [`docs/specs/07-epico-3-tarefas.md`](docs/specs/07-epico-3-tarefas.md).
+**Fechado em 2026-11-08.** O Épico 3 entrega pedidos de música com moderação e divulgações com imagem opcional. O pacote de tarefas, com a Definição de Pronto conferida item a item e o PR que entrega cada um (#91), está em [`docs/specs/07-epico-3-tarefas.md`](docs/specs/07-epico-3-tarefas.md).
 
 | Pacote | Entrega | PR |
 |---|---|---|
@@ -141,10 +141,25 @@ Jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra 
 - **Divulgações**: o Admin gerencia; o Mural mostra só as ativas, por prioridade.
 - **Fora do Épico 3**: o pedido aprovado ainda não toca sozinho (`GET /internal/playout/proxima` segue em 204): o locutor toca e marca como tocado. O playout do aprovado fica para o Épico 4.
 
+## Status do Épico 4
+
+**Em andamento.** O Épico 4 entrega biblioteca de mídia, upload, sanitização e playout: locutor e Admin enviam áudio direto ao storage, o Worker passa o original pelo antivírus e o `sanitizer` recodifica para MP3; só a saída recodificada entra na biblioteca. O pedido aprovado com mídia passa a tocar sozinho pelo playout, e o Admin ganha o relatório de mais tocadas. O pacote de tarefas, as decisões e a Definição de Pronto estão em [`docs/specs/08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md).
+
+| Pacote | Entrega | PR | Situação |
+|---|---|---|---|
+| Spec | Pacote de tarefas do Épico 4 (v1.2, com os reviews do Guardian, do Sentinel e do Atlas) | #92 | Na `main` |
+| D1 | Imagens de terceiros sem CRITICAL corrigível e trivy bloqueando (E4-F01) | #95 | Na `main` |
+| D2 | Upload, sanitização, ClamAV e biblioteca (backend) | — | Pendente |
+| D3 | Playout pela biblioteca e relatório de mais tocadas (backend) | — | Pendente |
+| D4 | Telas: biblioteca, envio, aprovar com mídia, mais tocadas | — | Pendente |
+
+- **Ainda não existe upload nem biblioteca**: até o D2 entrar na `main`, nada do que o Épico 4 descreve acima está disponível na API ou nas telas.
+- **Revisão**: todo PR do Épico 4 passa pelo Sentinel, por ser o épico do upload não confiável.
+
 ## O que vem a seguir
 
-- **Fechamento do Épico 3**: conferir a Definição de Pronto (9 itens, incluindo o Playwright e o throttle no `compose-smoke`) e registrar o resultado no `07`, como foi feito no Épico 2.
-- **Épico 4**: biblioteca de mídia, upload e sanitização (o pedido aprovado passa a tocar pelo playout). Antes de liberar upload, atualizar as imagens do SQL Server e do Liquidsoap (pendência do Épico 1 acima).
+- **Épico 4**: D2 (upload, sanitização e biblioteca), D3 (playout e relatório) e D4 (telas), nessa ordem.
+- **Épico 5**: imagem de divulgação passa para o `sanitizer` (E5-F01).
 
 ## Como contribuir
 
@@ -213,6 +228,7 @@ WebRadio é um projeto **público no GitHub**. Nenhum segredo, credencial, e-mai
 | [`05-seguranca-auditoria.md`](docs/specs/05-seguranca-auditoria.md) | Auditoria de segurança (normativo) | Backend, DevSecOps |
 | [`06-epico-2-tarefas.md`](docs/specs/06-epico-2-tarefas.md) | Pacote de tarefas do Épico 2 (grade, ao vivo, credencial de transmissão) | Time |
 | [`07-epico-3-tarefas.md`](docs/specs/07-epico-3-tarefas.md) | Pacote de tarefas do Épico 3 (pedidos de música, moderação, divulgações) | Time |
+| [`08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md) | Pacote de tarefas do Épico 4 (biblioteca de mídia, upload, sanitização, playout) | Time |
 
 ## Licença
 
@@ -220,6 +236,6 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 
 ---
 
-**Versão**: Épico 3 (C1–C3 na `main`)  
-**Última atualização**: 2026-11-05  
+**Versão**: Épico 3 fechado; Épico 4 em andamento (spec e D1 na `main`)  
+**Última atualização**: 2026-11-08  
 **Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend), Lore (Documentação)
