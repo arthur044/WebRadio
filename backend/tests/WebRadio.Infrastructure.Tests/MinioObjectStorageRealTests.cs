@@ -101,46 +101,41 @@ public sealed class MinioObjectStorageRealTests : IAsyncLifetime
     }
 
     [MinioFact]
-    public async Task Mover_com_o_etag_certo_copia_confere_o_destino_e_apaga_a_origem()
+    public async Task Baixar_com_o_etag_certo_grava_o_conteudo_no_destino()
+    {
+        await EnviarAsync("faixa", 7, tamanho: 1000);
+        var etag = (await _storage!.HeadAsync(_origem, "faixa"))!.ETag!;
+        using var destino = new MemoryStream();
+
+        var n = await _storage.BaixarAsync(_origem, "faixa", etag, 5000, destino);
+
+        Assert.Equal(1000, n);
+        Assert.Equal(Enumerable.Repeat((byte)7, 1000).ToArray(), destino.ToArray());
+    }
+
+    [MinioFact]
+    public async Task Baixar_com_o_etag_entre_aspas_tambem_funciona()
     {
         await EnviarAsync("faixa", 1);
         var etag = (await _storage!.HeadAsync(_origem, "faixa"))!.ETag!;
 
-        await _storage.MoverAsync(_origem, "faixa", _destino, "faixa-final", etag);
-
-        Assert.Null(await _storage.HeadAsync(_origem, "faixa"));
-        Assert.Equal(etag, (await _storage.HeadAsync(_destino, "faixa-final"))!.ETag);
+        Assert.Equal(100, await _storage.BaixarAsync(_origem, "faixa", "\"" + etag + "\"", 5000, new MemoryStream()));
     }
 
     [MinioFact]
-    public async Task Mover_com_o_etag_entre_aspas_tambem_funciona()
+    public async Task Baixar_com_etag_errado_e_412_e_nada_e_escrito()
     {
         await EnviarAsync("faixa", 1);
-        var etag = (await _storage!.HeadAsync(_origem, "faixa"))!.ETag!;
+        using var destino = new MemoryStream();
 
-        await _storage.MoverAsync(_origem, "faixa", _destino, "faixa-final", "\"" + etag + "\"");
+        await Assert.ThrowsAsync<EtagDivergenteException>(() => _storage!.BaixarAsync(_origem, "faixa", new string('0', 32), 5000, destino));
 
-        Assert.Null(await _storage.HeadAsync(_origem, "faixa"));
-        Assert.NotNull(await _storage.HeadAsync(_destino, "faixa-final"));
+        Assert.Equal(0, destino.Length);
+        Assert.NotNull(await _storage!.HeadAsync(_origem, "faixa")); // o objeto continua lá: quem decide é o pipeline
     }
 
     [MinioFact]
-    public async Task Mover_com_etag_errado_nao_copia_e_nao_apaga_a_origem()
-    {
-        await EnviarAsync("faixa", 1);
-
-        var e = await Assert.ThrowsAsync<EtagDivergenteException>(
-            () => _storage!.MoverAsync(_origem, "faixa", _destino, "faixa-final", new string('0', 32)));
-
-        // Só o servidor recusando a cópia (header enviado) produz o 412; a limpeza do destino, que também deixa o bucket vazio, não.
-        Assert.IsType<PreconditionFailedException>(e.InnerException);
-
-        Assert.NotNull(await _storage!.HeadAsync(_origem, "faixa"));
-        Assert.Null(await _storage.HeadAsync(_destino, "faixa-final"));
-    }
-
-    [MinioFact]
-    public async Task Objeto_trocado_depois_da_verificacao_nao_chega_ao_destino_TOCTOU()
+    public async Task DoD_5_objeto_trocado_entre_o_stat_e_o_GET_e_412_e_o_conteudo_novo_nunca_e_baixado_TOCTOU()
     {
         await EnviarAsync("faixa", 1);
         var verificado = (await _storage!.HeadAsync(_origem, "faixa"))!.ETag!;
@@ -148,12 +143,30 @@ public sealed class MinioObjectStorageRealTests : IAsyncLifetime
         // A POST policy aceita outro POST na mesma key depois do concluir: o conteúdo muda e o ETag verificado não vale mais.
         await EnviarAsync("faixa", 2, tamanho: 200);
 
-        var e = await Assert.ThrowsAsync<EtagDivergenteException>(
-            () => _storage.MoverAsync(_origem, "faixa", _destino, "faixa-final", verificado));
-        Assert.IsType<PreconditionFailedException>(e.InnerException);
+        using var destino = new MemoryStream();
+        await Assert.ThrowsAsync<EtagDivergenteException>(() => _storage.BaixarAsync(_origem, "faixa", verificado, 5000, destino));
 
-        Assert.Null(await _storage.HeadAsync(_destino, "faixa-final"));
-        var restante = await _storage.HeadAsync(_origem, "faixa");
-        Assert.Equal(200, restante!.TamanhoBytes);
+        Assert.Equal(0, destino.Length);
+    }
+
+    [MinioFact]
+    public async Task Baixar_corta_em_limite_mais_um_e_avisa_que_passou()
+    {
+        await EnviarAsync("faixa", 9, tamanho: 100_000);
+        var etag = (await _storage!.HeadAsync(_origem, "faixa"))!.ETag!;
+        using var destino = new MemoryStream();
+
+        await Assert.ThrowsAsync<ObjetoGrandeDemaisException>(() => _storage.BaixarAsync(_origem, "faixa", etag, 1000, destino));
+
+        Assert.Equal(1001, destino.Length); // limite + 1, nem um byte a mais: o tmpfs do job não enche com um objeto enorme
+    }
+
+    [MinioFact]
+    public async Task Baixar_no_limite_exato_passa()
+    {
+        await EnviarAsync("faixa", 9, tamanho: 1000);
+        var etag = (await _storage!.HeadAsync(_origem, "faixa"))!.ETag!;
+
+        Assert.Equal(1000, await _storage.BaixarAsync(_origem, "faixa", etag, 1000, new MemoryStream()));
     }
 }

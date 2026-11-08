@@ -39,7 +39,7 @@ public sealed class StorageDeMidia : IObjectStorage
         return Task.FromResult($"http://localhost/storage/{bucket}/{chave}?X-Amz-Signature=abc");
     }
 
-    public Task MoverAsync(string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<long> BaixarAsync(string bucket, string chave, string etagEsperado, long limiteBytes, Stream destino, CancellationToken ct = default) => throw new NotSupportedException();
 
     public Task<bool> VerificarAsync(CancellationToken ct = default) => Task.FromResult(true);
 

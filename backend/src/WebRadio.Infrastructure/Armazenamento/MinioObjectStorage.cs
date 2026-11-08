@@ -25,6 +25,8 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
     private readonly string _urlSaudeInterna;
     private readonly IClock _clock;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(3) };
+    // Download do original (até 250 MiB): sem timeout total; o cancelamento vem do token (o pipeline tem o orçamento do lease).
+    private readonly HttpClient _download = new() { Timeout = Timeout.InfiniteTimeSpan };
 
     public MinioObjectStorage(StorageOptions o, IClock clock)
         : this(Criar(o.Endpoint, o.UsarSsl, o), CriarPublico(o), o, clock)
@@ -93,61 +95,35 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
         }
     }
 
-    public async Task MoverAsync(
-        string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default)
+    public async Task<long> BaixarAsync(string bucket, string chave, string etagEsperado, long limiteBytes, Stream destino, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(etagEsperado);
         var esperado = etagEsperado.Trim('"');
-        var origem = new CopySourceObjectArgs().WithBucket(bucketOrigem).WithObject(chaveOrigem).WithMatchETag(esperado);
 
-        // S-M02, duas armadilhas do SDK (Minio 6.0.4 e 7.0.0, confirmadas contra MinIO real):
-        // 1) WithMatchETag é descartado: o PUT da cópia sai só com x-amz-copy-source. O header vai explícito, para o servidor
-        //    recusar (412) a cópia de um objeto diferente do verificado, de forma atômica.
-        // 2) No Minio 6.x o CopyObjectAsync devolvia normalmente mesmo com o 412 (o 7.x lança PreconditionFailedException, tratada
-        //    abaixo). Por isso o destino é conferido ANTES de apagar a origem, seja qual for a versão.
-        var copia = new CopyObjectArgs().WithBucket(bucketDestino).WithObject(chaveDestino).WithCopyObjectSource(origem)
-            .WithHeaders(new Dictionary<string, string> { ["x-amz-copy-source-if-match"] = esperado });
-        var mensagem =
-            $"O objeto {bucketOrigem}/{chaveOrigem} mudou depois da verificação: a cópia para {bucketDestino}/{chaveDestino} não confere com o ETag esperado.";
-        // O que já estava no destino antes da cópia: a limpeza só apaga o que ESTA cópia escreveu (Sentinel B1 do #52).
-        var antes = await HeadAsync(bucketDestino, chaveDestino, ct);
-        try
-        {
-            await _interno.CopyObjectAsync(copia, ct);
-        }
-        catch (PreconditionFailedException e)
-        {
-            // Minio 7 passou a lançar o 412 (o 6.x o engolia); em qualquer dos dois o servidor recusou e nada foi copiado.
-            throw new EtagDivergenteException(mensagem, e);
-        }
+        // GET direto numa URL pré-assinada INTERNA (60 s) com o If-Match explícito: o servidor recusa com 412 e nada é lido. O SDK não serve aqui: descarta o
+        // WithMatchETag e, no 412 do GetObject, lança NullReferenceException (Minio 7.0.0, confirmado contra MinIO real). O If-Match não entra nos headers assinados.
+        var url = await _interno.PresignedGetObjectAsync(new PresignedGetObjectArgs().WithBucket(bucket).WithObject(chave).WithExpiry(60));
+        using var pedido = new HttpRequestMessage(HttpMethod.Get, url);
+        pedido.Headers.TryAddWithoutValidation("If-Match", $"\"{esperado}\"");
+        using var resposta = await _download.SendAsync(pedido, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (resposta.StatusCode == System.Net.HttpStatusCode.PreconditionFailed)
+            throw new EtagDivergenteException($"O objeto {bucket}/{chave} mudou depois do concluir: o ETag não confere.");
+        resposta.EnsureSuccessStatusCode();
 
-        var destino = await HeadAsync(bucketDestino, chaveDestino, ct);
-        if (destino?.ETag is null || !string.Equals(destino.ETag.Trim('"'), esperado, StringComparison.OrdinalIgnoreCase))
+        // Corte em limiteBytes + 1: o objeto pode ser bem maior que o declarado e não pode encher o tmpfs do job.
+        await using var fluxo = await resposta.Content.ReadAsStreamAsync(ct);
+        var buffer = new byte[81920];
+        long escritos = 0;
+        int lidos;
+        while ((lidos = await fluxo.ReadAsync(buffer, ct)) > 0)
         {
-            // Se algo no caminho descartou o header e a cópia foi feita, o objeto trocado não pode ficar no bucket final.
-            // Só é apagado o que a cópia escreveu: o destino não existia antes ou o ETag mudou depois dela. Um objeto que já estava
-            // lá e continua igual (cópia que voltou sem escrever) não é tocado, mesmo que a chave devesse ser exclusiva.
-            var escritoPelaCopia = destino is not null
-                && (antes?.ETag is null || !string.Equals(antes.ETag.Trim('"'), destino.ETag?.Trim('"'), StringComparison.OrdinalIgnoreCase));
-            if (escritoPelaCopia)
-            {
-                // Limpeza não cancelável pelo chamador (um shutdown no meio deixaria o objeto não verificado no bucket final),
-                // com prazo próprio.
-                using var prazo = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                try
-                {
-                    await _interno.RemoveObjectAsync(new RemoveObjectArgs().WithBucket(bucketDestino).WithObject(chaveDestino), prazo.Token);
-                }
-                catch (Exception e)
-                {
-                    throw new EtagDivergenteException(mensagem + " A limpeza do destino também falhou: o objeto não verificado continua lá.", e);
-                }
-            }
-
-            throw new EtagDivergenteException(mensagem);
+            var cabe = (int)Math.Min(lidos, limiteBytes + 1 - escritos);
+            await destino.WriteAsync(buffer.AsMemory(0, cabe), ct);
+            escritos += cabe;
+            if (escritos > limiteBytes) throw new ObjetoGrandeDemaisException($"O objeto {bucket}/{chave} passa de {limiteBytes} bytes.");
         }
 
-        await _interno.RemoveObjectAsync(new RemoveObjectArgs().WithBucket(bucketOrigem).WithObject(chaveOrigem), ct);
+        return escritos;
     }
 
     public async Task PutAsync(string bucket, string chave, Stream conteudo, long tamanhoBytes, string contentType, CancellationToken ct = default) =>
@@ -192,6 +168,7 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
     public void Dispose()
     {
         _http.Dispose();
+        _download.Dispose();
         _interno.Dispose();
         _publico.Dispose();
     }

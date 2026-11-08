@@ -74,11 +74,11 @@ public class MinioObjectStorageTests
     }
 
     [Fact]
-    public async Task Mover_sem_etag_esperado_e_recusado_antes_de_tocar_no_storage()
+    public async Task Baixar_sem_etag_esperado_e_recusado_antes_de_tocar_no_storage()
     {
         using var storage = Novo(endpoint: "127.0.0.1:1");
 
-        await Assert.ThrowsAnyAsync<ArgumentException>(() => storage.MoverAsync(Buckets.Quarentena, "a", Buckets.Midia, "b", " "));
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => storage.BaixarAsync(Buckets.Quarentena, "a", " ", 10, new MemoryStream()));
     }
 
     [Fact]
