@@ -47,6 +47,15 @@ services:
   worker:
     environment:
       DOTNET_ENVIRONMENT: Development
+      # E4-D8: o clamd (~1 GB) fica fora do `up` padrão do dev (perfil `antivirus`); sem ClamAv__Host o Worker usa o NoOp, só em Development (S-A02).
+      Seguranca__PermitirScannerNoOp: "true"
+      ClamAv__Host: ""
+
+  # Para ligar o scanner real no dev: --profile antivirus e ClamAv__Host=clamd no worker.
+  clamd:
+    profiles: [antivirus]
+  freshclam:
+    profiles: [antivirus]
 
   # O ao vivo do dev entra pela borda, como em produção (E2-F11): a API vê o IP do proxy e roda com Harbor__AtrasDoProxy.
   # No dev a porta é só do loopback e o cliente chega pelo gateway do Docker, então a lista libera tudo.

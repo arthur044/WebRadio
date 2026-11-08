@@ -162,8 +162,8 @@ def redes(nome):
     return set((servicos[nome].get("networks") or {}).keys())
 
 # --- redes e portas (04 §Redes, S-M15)
-confere("redes da base: exatamente borda, app, dados, playout, midia-borda (nenhuma diag-*)",
-        set(prod["networks"]) == {"borda", "app", "dados", "playout", "midia-borda"}, str(sorted(prod["networks"])))
+confere("redes da base: exatamente borda, app, dados, playout, midia-borda e antivirus (nenhuma diag-*)",
+        set(prod["networks"]) == {"borda", "app", "dados", "playout", "midia-borda", "antivirus"}, str(sorted(prod["networks"])))
 publicadas = {n: [(p.get("published"), p.get("target"), p.get("host_ip")) for p in s.get("ports", [])] for n, s in servicos.items() if s.get("ports")}
 confere("só o web publica porta, e só a 8080", publicadas == {"web": [("8080", 8080, None)]}, str(publicadas))
 confere("web nas redes borda, app e midia-borda, e NÃO na playout", redes("web") == {"borda", "app", "midia-borda"}, str(sorted(redes("web"))))
@@ -184,7 +184,24 @@ confere("só o dev define HARBOR_LIBERAR_TUDO (lista aberta no harbor-borda)",
 confere("base: api sem Harbor__AtrasDoProxy=true", servicos["api"]["environment"].get("Harbor__AtrasDoProxy") in (None, "false"))
 confere("dev: liquidsoap sem porta publicada (o ao vivo entra pelo harbor-borda)", not dev["services"]["liquidsoap"].get("ports"))
 confere("api em app, dados e playout", redes("api") == {"app", "dados", "playout"}, str(sorted(redes("api"))))
-confere("worker só na dados", redes("worker") == {"dados"}, str(sorted(redes("worker"))))
+confere("worker na dados e na antivirus", redes("worker") == {"dados", "antivirus"}, str(sorted(redes("worker"))))
+# --- E4-F06: o antivírus. O clamd só na rede interna antivirus (com o worker); o freshclam é o único com saída à internet (borda) e não toca a rede interna.
+confere("clamd só na rede antivirus", redes("clamd") == {"antivirus"}, str(sorted(redes("clamd"))))
+confere("freshclam só na rede borda (espelhos de assinatura)", redes("freshclam") == {"borda"}, str(sorted(redes("freshclam"))))
+confere("rede antivirus: só o worker e o clamd",
+        sorted(n for n in servicos if "antivirus" in redes(n)) == ["clamd", "worker"], str(sorted(n for n in servicos if "antivirus" in redes(n))))
+confere("clamd lê a base só em leitura; o freshclam a escreve",
+        any(v.get("target") == "/var/lib/clamav" and v.get("read_only") for v in servicos["clamd"]["volumes"])
+        and any(v.get("target") == "/var/lib/clamav" and not v.get("read_only") for v in servicos["freshclam"]["volumes"]))
+confere("clamd e freshclam: não root, cap_drop ALL, read_only, no-new-privileges, mem e pids limitados",
+        all(servicos[n].get("user") == "100:101" and servicos[n].get("cap_drop") == ["ALL"] and servicos[n].get("read_only")
+            and "no-new-privileges:true" in (servicos[n].get("security_opt") or []) and servicos[n].get("mem_limit") and servicos[n].get("pids_limit")
+            for n in ("clamd", "freshclam")))
+# A exceção do smoke (assinatura sem data, porque o CI não baixa a base) NUNCA existe na base nem na base + live, e o .ndb de teste não é montado.
+for nome_cfg, cfg in (("base", prod), ("base + live", live)):
+    texto = json.dumps(cfg)
+    confere(f"{nome_cfg}: sem Seguranca__AceitarAssinaturaSemData", "AceitarAssinaturaSemData" not in texto)
+    confere(f"{nome_cfg}: sem o .ndb de teste montado", ".ndb" not in texto)
 confere("sanitizer sem rede (network_mode none)", servicos["sanitizer"].get("network_mode") == "none")
 for n in ("app", "dados", "playout", "midia-borda"):
     confere(f"rede {n} é internal", bool(prod["networks"][n].get("internal")))
@@ -228,7 +245,9 @@ confere("api: ASPNETCORE_ENVIRONMENT=Production na base e Development com o dev.
 # --- B3-11: o Worker só recebe o segredo que o código lê
 alvos = sorted(x["target"] for x in servicos["worker"].get("secrets", []))
 confere("worker: só o banco e a credencial do svc-worker no MinIO (sem JWT, pepper nem Redis)", alvos == ["Banco__Senha", "Storage__AccessKey", "Storage__SecretKey"], str(alvos))
-confere("worker: depende só do migrator e do minio-init", set(servicos["worker"].get("depends_on", {})) == {"migrator", "minio-init"})
+confere("worker: depende do migrator, do minio-init e do clamd (opcional, só para o dev sem scanner)",
+        set(servicos["worker"].get("depends_on", {})) == {"migrator", "minio-init", "clamd"}
+        and servicos["worker"]["depends_on"]["clamd"].get("required") is False)
 
 print("\n".join(saida))
 PY

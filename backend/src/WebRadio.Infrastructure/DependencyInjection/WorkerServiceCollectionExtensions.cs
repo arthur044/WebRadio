@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using WebRadio.Application.Abstracoes;
+using WebRadio.Infrastructure.Triagem;
 using WebRadio.Infrastructure.Seguranca;
 using WebRadio.Infrastructure.Trabalhos;
 
@@ -49,4 +51,46 @@ public static class WorkerServiceCollectionExtensions
         services.AddHostedService<CicloDoWorker>();
         return services;
     }
+
+    /// <summary>
+    /// E4-F06 (E4-D7, E4-D8, S-A02): o antivírus do Worker. Com <c>ClamAv:Host</c> registra o <see cref="ClamAvMalwareScanner"/>; sem ele, só Development com
+    /// <c>Seguranca:PermitirScannerNoOp=true</c> aceita o NoOp. Fora de Development o scanner é resolvido NO BOOT: sem scanner (ou com opção inválida) o Worker não sobe,
+    /// em vez de descobrir só quando o primeiro arquivo chegar.
+    /// </summary>
+    public static IServiceCollection AddScannerDoWorker(this IServiceCollection services, IConfiguration configuration, IHostEnvironment ambiente)
+    {
+        if (!string.IsNullOrWhiteSpace(configuration["ClamAv:Host"]))
+        {
+            var o = new ClamAvOptions { Host = configuration["ClamAv:Host"]! };
+            if (int.TryParse(configuration["ClamAv:Porta"], out var porta)) o.Porta = porta;
+            if (int.TryParse(configuration["Seguranca:TimeoutScanSegundos"], out var timeout)) o.TimeoutScanSegundos = timeout;
+            if (int.TryParse(configuration["Seguranca:IdadeMaximaAssinaturaDias"], out var idade)) o.IdadeMaximaAssinaturaDias = idade;
+            if (bool.TryParse(configuration["Seguranca:AceitarAssinaturaSemData"], out var semData)) o.AceitarAssinaturaSemData = semData;
+            if (new ClamAvOptionsValidator().Validate(null, o) is { Failed: true } invalido) throw new InvalidOperationException(string.Join(" ", invalido.Failures));
+
+            services.AddSingleton(Options.Create(o));
+            services.AddSingleton<IClamdTransporte, ClamdTcpTransporte>();
+            services.AddSingleton<IMalwareScanner, ClamAvMalwareScanner>();
+        }
+        else
+        {
+            services.AddScannerNoOpSePermitido(configuration, ambiente);
+        }
+
+        if (!ambiente.IsDevelopment()) services.AddHostedService<ScannerObrigatorioNoBoot>();
+        return services;
+    }
+}
+
+/// <summary>Falha o boot do Worker se o <see cref="IMalwareScanner"/> não estiver registrado (fail-closed, S-A02).</summary>
+internal sealed class ScannerObrigatorioNoBoot(IServiceProvider servicos) : IHostedService
+{
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        _ = servicos.GetService<IMalwareScanner>()
+            ?? throw new InvalidOperationException("Nenhum antivírus configurado: defina ClamAv:Host (fora de Development o Worker não sobe sem scanner).");
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
