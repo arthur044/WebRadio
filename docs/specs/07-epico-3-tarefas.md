@@ -117,7 +117,7 @@ Conferido pelo Nexus em 2026-11-08 contra a `main` (`7a2f3ba`). C1 (#81), C2 (#8
 | 4. Dois locutores aprovando ao mesmo tempo: um 200, o resto 409 | `PedidosSqlTests.DoD_4_oito_locutores_aprovando_o_mesmo_pedido_ao_mesmo_tempo_um_200_e_o_resto_409` (`[SqlFact]`, oito em vez de dois) | #81 |
 | 5. `Pendente` de 121 min vira `Expirado` e o outbox ganha o `PedidoModerado` | `ExpiracaoDePedidosSqlTests.DoD_5_pendente_de_121_minutos_vira_Expirado_e_o_outbox_ganha_o_PedidoModerado_para_o_ouvinte_e_os_locutores` | #81 |
 | 6. Teto global de `Pendente`: 429 sem a reserva de 5 min | `PedidosSqlTests.DoD_6_com_o_teto_atingido_o_proximo_dispositivo_leva_429_sem_ficar_com_a_reserva_de_5_minutos` | #81 |
-| 7. Imagem de divulgação: recodificação, recusas sem decodificar, cabeçalhos e listagem negada | `infra/scripts/smoke-pedidos.sh` (bloco do DoD 7, com as políticas do MinIO e o ciclo de vida da imagem) e `ImagensSkiaTests` | #82 |
+| 7. Imagem de divulgação: recodificação, recusas sem decodificar, cabeçalhos e listagem negada | `infra/scripts/smoke-pedidos.sh` (bloco do DoD 7, com as políticas do MinIO e o ciclo de vida da imagem) e `ImagensSkiaTests.cs` (`ValidadorDeCabecalhoSkiaTests`, `RecodificadorSkiaTests`) | #82 |
 | 8. Mural só com as ativas, por prioridade e `id`, texto puro e link seguro | `ConsultasDeDivulgacaoTests` (janela pelo relógio do servidor, `Ativo`, desempate por `Id`), `DivulgacoesEndpointsTests` e `frontend/e2e/mural.spec.ts` no preview | #82, #84 |
 | 9. CI dos Épicos 1 e 2 continua verde (cobertura ≥ 80% em Domain e Application) | CI completo da `main` | #90 (CVEs novas do trivy em musl, zlib e `golang.org/x/net` do `mc`, mais o NuGet 10.0.14) |
 
