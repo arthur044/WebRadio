@@ -110,10 +110,13 @@ O Épico 1 entrega a fundação rodando de ponta a ponta; as regras de negócio 
 
 Jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra e varredura de vulnerabilidades; pendências dos reviews do B2; imagens-base atualizadas; `SECURITY.md`. Os testes Playwright rodam no `compose-smoke`.
 
+### Entregue depois (E4-F01, PR #95)
+
+O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload foi fechado: as imagens construídas (Liquidsoap e `harbor-borda`) e as de SQL Server, Redis e MinIO não têm CRITICAL corrigível, e o trivy do CI falha se aparecer uma. O alpine do `minio-init` e os HIGH seguem só informativos (risco aceito (2) do B3, no `05`, §4).
+
 ### Pendente
 
 - Execução do `gerar-segredos.ps1` em Windows real e subida da base de produção num job.
-- ~~Atualização das imagens do SQL Server e do Liquidsoap, antes de o Épico 4 liberar upload.~~ Resolvida no #95 (E4-F01): nenhuma imagem do compose tem CRITICAL corrigível e o trivy do CI falha se aparecer uma. Os HIGH do SQL Server e do Redis seguem só informativos (ver o risco aceito 2 do `05`, §4).
 - Reescrita do runbook de rotação de segredos (ver o aviso no topo dele).
 
 ## Status do Épico 2
@@ -129,7 +132,7 @@ Jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra 
 
 ## Status do Épico 3
 
-**Fechado em 2026-11-08.** O Épico 3 entrega pedidos de música com moderação e divulgações com imagem opcional. O pacote de tarefas, com a Definição de Pronto conferida item a item e o PR que entrega cada um (#91), está em [`docs/specs/07-epico-3-tarefas.md`](docs/specs/07-epico-3-tarefas.md).
+**Fechado em 2026-11-08.** O Épico 3 entrega pedidos de música com moderação e divulgações com imagem opcional. O pacote de tarefas, com a Definição de Pronto conferida item a item e o PR que entrega cada um (registrada no #91), está em [`docs/specs/07-epico-3-tarefas.md`](docs/specs/07-epico-3-tarefas.md).
 
 | Pacote | Entrega | PR |
 |---|---|---|
