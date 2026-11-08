@@ -24,7 +24,8 @@ public class MidiasEndpointsTests
 
         public Task<InfoObjeto?> HeadAsync(string bucket, string chave, CancellationToken ct = default) => Task.FromResult(Objetos.TryGetValue($"{bucket}/{chave}", out var o) ? o : null);
 
-        public Task<string> UrlGetPreAssinadaAsync(string bucket, string chave, TimeSpan validade, string? contentType = null, string? contentDisposition = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<string> UrlGetPreAssinadaAsync(string bucket, string chave, TimeSpan validade, string? contentType = null, string? contentDisposition = null, CancellationToken ct = default) =>
+            Task.FromResult($"http://localhost:8080/storage/{bucket}/{chave}?X-Amz-Signature=abc");
 
         public Task MoverAsync(string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default) => throw new NotSupportedException();
 
@@ -39,7 +40,7 @@ public class MidiasEndpointsTests
         public string UrlPublica(string bucket, string chave) => throw new NotSupportedException();
     }
 
-    private sealed record Cena(HttpClient C, StorageFalso Storage);
+    private sealed record Cena(HttpClient C, StorageFalso Storage, ApiFactory F);
 
     private static Cena NovaCena()
     {
@@ -50,7 +51,7 @@ public class MidiasEndpointsTests
         f.CriarUsuario("locutor@example.com", Role.Locutor);
         f.CriarUsuario("locutor2@example.com", Role.Locutor);
         f.CriarUsuario("ouvinte@example.com", Role.Ouvinte);
-        return new Cena(host.CreateClient(new() { BaseAddress = new Uri("http://localhost") }), storage);
+        return new Cena(host.CreateClient(new() { BaseAddress = new Uri("http://localhost") }), storage, f);
     }
 
     private static async Task<string> TokenDe(HttpClient c, string email)
@@ -163,5 +164,173 @@ public class MidiasEndpointsTests
 
         Assert.Equal(HttpStatusCode.NotFound, (await Post(c.C, $"{Rota}/{id}/concluir", await TokenDe(c.C, "locutor2@example.com"))).StatusCode);
         Assert.Equal(HttpStatusCode.Accepted, (await Post(c.C, $"{Rota}/{id}/concluir", await TokenDe(c.C, "admin@example.com"))).StatusCode);
+    }
+
+    // ---- E4-F03: consultas e manutenção ----
+
+    private static Guid Semear(Cena c, StatusSanitizacao status = StatusSanitizacao.Aprovado, string titulo = "Aurora", TipoMidia tipo = TipoMidia.Musica, bool ativo = true, bool comReproducao = false)
+    {
+        using var escopo = c.F.Services.CreateScope();
+        var db = escopo.ServiceProvider.GetRequiredService<WebRadio.Application.Abstracoes.IRadioDbContext>();
+        var agora = DateTime.UtcNow;
+        var dono = db.Usuarios.First().Id;
+        var m = new WebRadio.Domain.Midia.ArquivoMidia(Guid.NewGuid(), "aurora.mp3", titulo, "Banda", tipo, "audio/mpeg", 1000, dono, agora);
+        if (status >= StatusSanitizacao.Pendente) m.ConcluirUpload(1000, "etag", agora);
+        if (status >= StatusSanitizacao.EmAnalise) m.IniciarAnalise(agora);
+        if (status == StatusSanitizacao.Aprovado)
+        {
+            m.RegistrarHashOriginal(new byte[32]);
+            m.Aprovar("audio/mpeg", Enumerable.Repeat((byte)1, 32).ToArray(), 200m, 900, ".mp3", new WebRadio.Application.Features.Midias.MidiaOptions().Limite(tipo), agora);
+        }
+
+        if (!ativo) m.Desativar();
+        db.ArquivosMidia.Add(m);
+        if (comReproducao) db.Reproducoes.Add(new WebRadio.Domain.Midia.Reproducao(m.Id, null, null, agora));
+        db.SaveChangesAsync().GetAwaiter().GetResult();
+        return m.Id;
+    }
+
+    private static Task<HttpResponseMessage> Enviar(HttpClient c, HttpMethod metodo, string url, string? token, object? corpo = null, string? ifMatch = null)
+    {
+        var req = new HttpRequestMessage(metodo, url);
+        if (token is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (corpo is not null) req.Content = JsonContent.Create(corpo);
+        if (ifMatch is not null) req.Headers.TryAddWithoutValidation("If-Match", ifMatch);
+        return c.SendAsync(req);
+    }
+
+    [Fact]
+    public async Task Leituras_sao_do_PodeModerar_anonimo_401_ouvinte_403()
+    {
+        var c = NovaCena();
+        var id = Semear(c);
+        foreach (var url in new[] { Rota, $"{Rota}/{id}", $"{Rota}/{id}/preview" })
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, (await Enviar(c.C, HttpMethod.Get, url, null)).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await Enviar(c.C, HttpMethod.Get, url, await TokenDe(c.C, "ouvinte@example.com"))).StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Lista_pagina_filtra_e_o_locutor_nao_ve_as_desativadas()
+    {
+        var c = NovaCena();
+        Semear(c, titulo: "Ativa");
+        Semear(c, titulo: "Desativada", ativo: false);
+        Semear(c, StatusSanitizacao.Pendente, titulo: "Pendente");
+
+        var locutor = await Json(await Enviar(c.C, HttpMethod.Get, Rota, await TokenDe(c.C, "locutor@example.com")));
+        Assert.Equal(2, locutor.GetProperty("total").GetInt32());
+
+        var admin = await TokenDe(c.C, "admin@example.com");
+        Assert.Equal(3, (await Json(await Enviar(c.C, HttpMethod.Get, Rota, admin))).GetProperty("total").GetInt32());
+        Assert.Equal(1, (await Json(await Enviar(c.C, HttpMethod.Get, Rota + "?ativo=false", admin))).GetProperty("total").GetInt32());
+        Assert.Equal(1, (await Json(await Enviar(c.C, HttpMethod.Get, Rota + "?status=Pendente", admin))).GetProperty("total").GetInt32());
+        var busca = await Json(await Enviar(c.C, HttpMethod.Get, Rota + "?busca=desativ", admin));
+        Assert.Equal("Desativada", busca.GetProperty("itens")[0].GetProperty("titulo").GetString());
+        Assert.Equal(HttpStatusCode.BadRequest, (await Enviar(c.C, HttpMethod.Get, Rota + "?tamanho=101", admin)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Enviar(c.C, HttpMethod.Get, Rota + "?tipo=Inexistente", admin)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Por_id_tem_etag_e_o_hash_so_aparece_para_o_admin()
+    {
+        var c = NovaCena();
+        var id = Semear(c);
+
+        var admin = await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}", await TokenDe(c.C, "admin@example.com"));
+        Assert.NotNull(admin.Headers.ETag);
+        Assert.Equal(new string('0', 64), (await Json(admin)).GetProperty("hashOriginalSha256").GetString());
+
+        var locutor = await Json(await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}", await TokenDe(c.C, "locutor@example.com")));
+        Assert.Equal(JsonValueKind.Null, locutor.GetProperty("hashSha256").ValueKind);
+        Assert.False(locutor.TryGetProperty("versao", out _));
+        Assert.Equal(HttpStatusCode.NotFound, (await Enviar(c.C, HttpMethod.Get, $"{Rota}/{Guid.NewGuid()}", await TokenDe(c.C, "locutor@example.com"))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Preview_e_302_para_a_url_assinada_e_com_formato_url_e_200_em_json()
+    {
+        var c = NovaCena();
+        var id = Semear(c);
+        var token = await TokenDe(c.C, "locutor@example.com");
+
+        var json = await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}/preview?formato=url", token);
+        Assert.Equal(HttpStatusCode.OK, json.StatusCode);
+        Assert.Equal("no-store", json.Headers.CacheControl!.ToString());
+        var corpo = await Json(json);
+        Assert.StartsWith("http://localhost:8080/storage/midia/", corpo.GetProperty("url").GetString());
+        Assert.True(corpo.TryGetProperty("expiraEmUtc", out _));
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}/preview?formato=outro", token)).StatusCode);
+    }
+
+    [Theory]
+    [InlineData(StatusSanitizacao.AguardandoUpload)]
+    [InlineData(StatusSanitizacao.Pendente)]
+    [InlineData(StatusSanitizacao.EmAnalise)]
+    [InlineData(StatusSanitizacao.Rejeitado)]
+    public async Task Preview_de_midia_nao_aprovada_e_404(StatusSanitizacao status)
+    {
+        var c = NovaCena();
+        var id = Semear(c, status);
+        var token = await TokenDe(c.C, "locutor@example.com");
+        Assert.Equal(HttpStatusCode.NotFound, (await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}/preview?formato=url", token)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}/preview", token)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Patch_exige_if_match_412_se_divergente_e_200_com_etag_novo()
+    {
+        var c = NovaCena();
+        var id = Semear(c);
+        var token = await TokenDe(c.C, "locutor@example.com");
+        var etag = (await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}", token)).Headers.ETag!.ToString();
+
+        Assert.Equal((HttpStatusCode)428, (await Enviar(c.C, HttpMethod.Patch, $"{Rota}/{id}", token, new { titulo = "Novo" })).StatusCode);
+        Assert.Equal((HttpStatusCode)412, (await Enviar(c.C, HttpMethod.Patch, $"{Rota}/{id}", token, new { titulo = "Novo" }, "\"AAAAAAAAAAA=\"")).StatusCode);
+
+        var ok = await Enviar(c.C, HttpMethod.Patch, $"{Rota}/{id}", token, new { titulo = "Novo título", artista = "Outro" }, etag);
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        Assert.Equal("Novo título", (await Json(ok)).GetProperty("titulo").GetString());
+        // (O ETag velho deixar de valer depois do PATCH depende do RowVersion do SQL Server: MidiasSqlTests.)
+    }
+
+    [Fact]
+    public async Task Patch_de_ativo_e_so_do_admin_e_texto_invalido_ou_musica_sem_titulo_e_400()
+    {
+        var c = NovaCena();
+        var id = Semear(c);
+        var locutor = await TokenDe(c.C, "locutor@example.com");
+        var admin = await TokenDe(c.C, "admin@example.com");
+        async Task<string> Etag() => (await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}", admin)).Headers.ETag!.ToString();
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await Enviar(c.C, HttpMethod.Patch, $"{Rota}/{id}", locutor, new { ativo = false }, await Etag())).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Enviar(c.C, HttpMethod.Patch, $"{Rota}/{id}", locutor, new { titulo = "tít\u202Eulo" }, await Etag())).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Enviar(c.C, HttpMethod.Patch, $"{Rota}/{id}", locutor, new { titulo = "" }, await Etag())).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Enviar(c.C, HttpMethod.Patch, $"{Rota}/{id}", locutor, new { titulo = 5 }, await Etag())).StatusCode);
+
+        var desativada = await Enviar(c.C, HttpMethod.Patch, $"{Rota}/{id}", admin, new { ativo = false }, await Etag());
+        Assert.Equal(HttpStatusCode.OK, desativada.StatusCode);
+        Assert.False((await Json(desativada)).GetProperty("ativo").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Delete_e_so_do_admin_204_sem_reproducao_e_200_desativando_com_reproducao()
+    {
+        var c = NovaCena();
+        var livre = Semear(c);
+        var tocada = Semear(c, titulo: "Tocada", comReproducao: true);
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await Enviar(c.C, HttpMethod.Delete, $"{Rota}/{livre}", await TokenDe(c.C, "locutor@example.com"))).StatusCode);
+        var admin = await TokenDe(c.C, "admin@example.com");
+
+        Assert.Equal(HttpStatusCode.NoContent, (await Enviar(c.C, HttpMethod.Delete, $"{Rota}/{livre}", admin)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Enviar(c.C, HttpMethod.Get, $"{Rota}/{livre}", admin)).StatusCode);
+
+        var r = await Enviar(c.C, HttpMethod.Delete, $"{Rota}/{tocada}", admin);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.False((await Json(r)).GetProperty("ativo").GetBoolean());
+        Assert.Equal(HttpStatusCode.NotFound, (await Enviar(c.C, HttpMethod.Delete, $"{Rota}/{Guid.NewGuid()}", admin)).StatusCode);
     }
 }

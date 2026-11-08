@@ -21,6 +21,8 @@ public sealed class StorageDeMidia : IObjectStorage
 
     public bool FalharNaPolicy { get; set; }
 
+    public List<(string Bucket, string Chave, TimeSpan Validade, string? ContentType, string? Disposition)> Previews { get; } = [];
+
     public Task<PostPolicyAssinada> CriarPostPolicyAsync(string bucket, string chave, string contentType, long tamanhoMaximoBytes, TimeSpan validade, CancellationToken ct = default)
     {
         if (FalharNaPolicy) throw new InvalidOperationException("storage fora");
@@ -31,7 +33,11 @@ public sealed class StorageDeMidia : IObjectStorage
     public Task<InfoObjeto?> HeadAsync(string bucket, string chave, CancellationToken ct = default) =>
         Task.FromResult(Objetos.TryGetValue($"{bucket}/{chave}", out var o) ? o : null);
 
-    public Task<string> UrlGetPreAssinadaAsync(string bucket, string chave, TimeSpan validade, string? contentType = null, string? contentDisposition = null, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<string> UrlGetPreAssinadaAsync(string bucket, string chave, TimeSpan validade, string? contentType = null, string? contentDisposition = null, CancellationToken ct = default)
+    {
+        Previews.Add((bucket, chave, validade, contentType, contentDisposition));
+        return Task.FromResult($"http://localhost/storage/{bucket}/{chave}?X-Amz-Signature=abc");
+    }
 
     public Task MoverAsync(string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default) => throw new NotSupportedException();
 
@@ -81,6 +87,32 @@ public sealed class MidiasFixture
 
     public ConcluirUploadHandler Concluir => new(Db, Relogio, Storage);
 
+    public ListaDeLogs Logs { get; } = new();
+
+    public ListarMidiasHandler Listar => new(Db);
+
+    public MidiaPorIdHandler PorId => new(Db);
+
+    public PreviewDaMidiaHandler Preview => new(Db, Relogio, Storage);
+
+    public EditarMidiaHandler Editar => new(Db);
+
+    public ExcluirMidiaHandler Excluir => new(Db, Logs.Logger<ExcluirMidiaHandler>());
+
+    /// <summary>Uma mídia <c>Aprovado</c> direto no banco, com os dois hashes (para a lista, o preview e a exclusão).</summary>
+    public ArquivoMidia SemearAprovada(string? titulo = "Aurora", string? artista = "Banda", TipoMidia tipo = TipoMidia.Musica, Guid? usuario = null, string nome = "aurora.mp3", bool ativo = true)
+    {
+        var m = new ArquivoMidia(Guid.CreateVersion7(), nome, titulo, artista, tipo, "audio/mpeg", 1000, usuario ?? Usuario, Relogio.UtcNow);
+        m.ConcluirUpload(1000, "etag", Relogio.UtcNow);
+        m.IniciarAnalise(Relogio.UtcNow);
+        m.RegistrarHashOriginal(Enumerable.Repeat((byte)0xAB, 32).ToArray());
+        m.Aprovar("audio/mpeg", Enumerable.Repeat((byte)0xCD, 32).ToArray(), tipo == TipoMidia.Musica ? 200m : 20m, 900, ".mp3", Opcoes.Limite(tipo), Relogio.UtcNow);
+        if (!ativo) m.Desativar();
+        Db.ArquivosMidia.Add(m);
+        Db.SaveChanges();
+        return m;
+    }
+
     public IniciarUploadCommand Comando(Guid? usuario = null, string nome = "vinheta.mp3", TipoMidia tipo = TipoMidia.Vinheta, string mime = "audio/mpeg",
         long tamanho = 1_000_000, string? titulo = null, string? artista = null)
         => new(usuario ?? Usuario, nome, titulo, artista, tipo, mime, tamanho);
@@ -101,5 +133,23 @@ public sealed class MidiasFixture
         Db.ArquivosMidia.Add(m);
         Db.SaveChanges();
         return m;
+    }
+}
+
+/// <summary>Logger que guarda as mensagens formatadas (a auditoria da exclusão sai pelo log estruturado).</summary>
+public sealed class ListaDeLogs
+{
+    public List<string> Linhas { get; } = [];
+
+    public Microsoft.Extensions.Logging.ILogger<T> Logger<T>() => new Captura<T>(Linhas);
+
+    private sealed class Captura<T>(List<string> linhas) : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => linhas.Add(formatter(state, exception));
     }
 }

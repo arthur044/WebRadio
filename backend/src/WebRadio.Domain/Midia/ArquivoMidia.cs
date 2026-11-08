@@ -279,7 +279,24 @@ public sealed class ArquivoMidia : Entidade
         EmAnaliseDesdeUtc = null;
     }
 
+    /// <summary>
+    /// PATCH (E4-F03): título e artista da biblioteca. Música exige título (CK_ArquivoMidia_Musica_Titulo). O texto já vem normalizado e validado
+    /// pelo <c>TextoSeguro</c> da Application (vai ao Liquidsoap e ao Icecast, S-A09).
+    /// </summary>
+    public void EditarTexto(string? titulo, string? artista)
+    {
+        if (TipoMidia == TipoMidia.Musica)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(titulo);
+        }
+
+        Titulo = string.IsNullOrWhiteSpace(titulo) ? null : titulo;
+        Artista = string.IsNullOrWhiteSpace(artista) ? null : artista;
+    }
+
     public void Desativar() => Ativo = false;
+
+    public void Ativar() => Ativo = true;
 
     private void TransicaoPorFalha(DateTime agora)
     {

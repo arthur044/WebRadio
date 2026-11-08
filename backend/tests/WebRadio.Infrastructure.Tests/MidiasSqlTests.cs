@@ -121,4 +121,84 @@ public class MidiasSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
 
         public Task<TimeSpan?> TempoRestanteAsync(string chave, CancellationToken ct = default) => throw Fora();
     }
+
+    [SqlTheory]
+    [InlineData("100%")]
+    [InlineData("a_b")]
+    [InlineData("[abc]")]
+    [InlineData("\\")]
+    [InlineData("x[")]
+    public async Task Busca_da_biblioteca_trata_percent_underscore_colchete_e_barra_como_literais_no_SQL_Server(string literal)
+    {
+        var usuario = (await _c.CriarUsuarioAsync(Cenario.Email(), Role.Locutor)).Id;
+        var marca = Guid.NewGuid().ToString("N")[..8];
+        await using (var db = _c.NovoDb())
+        {
+            foreach (var titulo in new[] { $"{marca} Hit {literal} fim", $"{marca} Hit 1000 fim", $"{marca} Hit axb fim", $"{marca} Hit a fim", $"{marca} Hit abc fim" })
+                db.ArquivosMidia.Add(new WebRadio.Domain.Midia.ArquivoMidia(Guid.NewGuid(), "a.mp3", titulo, null, TipoMidia.Musica, "audio/mpeg", 1000, usuario, DateTime.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        await using var consulta = _c.NovoDb();
+        var r = await new ListarMidiasHandler(consulta).Handle(new ListarMidiasQuery(null, null, null, $"{marca} Hit {literal}", 1, 20, true), default);
+
+        Assert.Equal($"{marca} Hit {literal} fim", Assert.Single(r.Itens).Titulo);
+    }
+
+    [SqlFact]
+    public async Task Patch_com_a_versao_lida_vale_uma_vez_e_o_etag_velho_vira_412_no_SQL_Server()
+    {
+        var usuario = (await _c.CriarUsuarioAsync(Cenario.Email(), Role.Locutor)).Id;
+        var id = Guid.NewGuid();
+        await using (var db = _c.NovoDb())
+        {
+            db.ArquivosMidia.Add(new WebRadio.Domain.Midia.ArquivoMidia(id, "a.mp3", "Antes", null, TipoMidia.Musica, "audio/mpeg", 1000, usuario, DateTime.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        byte[] versaoLida;
+        await using (var leitura = _c.NovoDb()) versaoLida = (await leitura.ArquivosMidia.AsNoTracking().SingleAsync(m => m.Id == id)).RowVersion;
+
+        await using (var db = _c.NovoDb())
+        {
+            var dto = await new EditarMidiaHandler(db).Handle(new EditarMidiaCommand(id, versaoLida, "Depois", null, null, false, true, false), default);
+            Assert.Equal("Depois", dto.Titulo);
+            Assert.NotEqual(Convert.ToBase64String(versaoLida), dto.Versao);
+        }
+
+        await using var velho = _c.NovoDb();
+        await Assert.ThrowsAsync<VersaoDesatualizadaException>(() =>
+            new EditarMidiaHandler(velho).Handle(new EditarMidiaCommand(id, versaoLida, "Outro", null, null, false, true, false), default));
+    }
+
+    [SqlFact]
+    public async Task Excluir_com_reproducao_desativa_e_sem_reproducao_apaga_no_SQL_Server_com_a_FK_da_Reproducao()
+    {
+        var usuario = (await _c.CriarUsuarioAsync(Cenario.Email(), Role.Locutor)).Id;
+        var comReproducao = Guid.NewGuid();
+        var livre = Guid.NewGuid();
+        await using (var db = _c.NovoDb())
+        {
+            foreach (var id in new[] { comReproducao, livre })
+                db.ArquivosMidia.Add(new WebRadio.Domain.Midia.ArquivoMidia(id, "a.mp3", "T", null, TipoMidia.Musica, "audio/mpeg", 1000, usuario, DateTime.UtcNow));
+            db.Reproducoes.Add(new WebRadio.Domain.Midia.Reproducao(comReproducao, null, null, DateTime.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = _c.NovoDb())
+        {
+            var r1 = await new ExcluirMidiaHandler(db, NullLogger<ExcluirMidiaHandler>.Instance).Handle(new ExcluirMidiaCommand(comReproducao, Guid.NewGuid()), default);
+            Assert.False(r1.Excluida);
+        }
+
+        await using (var db = _c.NovoDb())
+        {
+            var r2 = await new ExcluirMidiaHandler(db, NullLogger<ExcluirMidiaHandler>.Instance).Handle(new ExcluirMidiaCommand(livre, Guid.NewGuid()), default);
+            Assert.True(r2.Excluida);
+        }
+
+        await using var conferencia = _c.NovoDb();
+        Assert.False((await conferencia.ArquivosMidia.SingleAsync(m => m.Id == comReproducao)).Ativo);
+        Assert.False(await conferencia.ArquivosMidia.AnyAsync(m => m.Id == livre));
+    }
 }
