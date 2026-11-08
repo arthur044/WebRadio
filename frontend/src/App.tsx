@@ -9,6 +9,7 @@ import { TrocarSenhaPage } from './features/auth/TrocarSenhaPage'
 import { AdminGradePage } from './features/admin/AdminGradePage'
 import { AdminDivulgacoesPage } from './features/admin/AdminDivulgacoesPage'
 import { BibliotecaPage } from './features/biblioteca/BibliotecaPage'
+import { MaisTocadasPage } from './features/admin/MaisTocadasPage'
 import { RequireRole } from './features/auth/RequireRole'
 
 function App() {
@@ -47,6 +48,14 @@ function App() {
           element={
             <RequireRole roles={['Admin']}>
               <AdminDivulgacoesPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/mais-tocadas"
+          element={
+            <RequireRole roles={['Admin']}>
+              <MaisTocadasPage />
             </RequireRole>
           }
         />
