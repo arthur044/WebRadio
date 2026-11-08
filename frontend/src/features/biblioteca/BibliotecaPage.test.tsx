@@ -30,6 +30,7 @@ function midia(id: string, extras: Partial<MidiaDto> = {}): MidiaDto {
     dataUploadUtc: '2026-11-08T15:00:00Z',
     ativo: true,
     enviadoPorNome: 'Lia Locutora',
+    podeEditar: true,
     ...extras,
   }
 }
@@ -184,6 +185,16 @@ describe('Biblioteca (E4-P01 a E4-P03)', () => {
       'desativadas',
     )
     await waitFor(() => expect(api.listagens().at(-1)!.caminho).toContain('ativo=false'))
+  })
+
+  it('o Locutor só vê "Editar" nas mídias com podeEditar (as dele, ativas); o resto da biblioteca é só ouvir', async () => {
+    montarApi([midia('a'), midia('b', { podeEditar: false, enviadoPorNome: 'Outro Locutor' })])
+    renderBiblioteca('Locutor')
+
+    await screen.findByText('Faixa b')
+    expect(screen.getByRole('button', { name: 'Editar Faixa a' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Editar Faixa b' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Pré-escutar Faixa b' })).toBeInTheDocument()
   })
 
   it('o Locutor não vê o filtro de situação nem desativar, reativar ou excluir', async () => {

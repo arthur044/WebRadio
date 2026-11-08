@@ -153,18 +153,20 @@ export function MidiaItem({
               Pré-escutar
             </button>
           )}
-          <button
-            ref={editarRef}
-            type="button"
-            className={botao}
-            aria-label={`Editar ${nome}`}
-            onClick={() => {
-              setErro(null)
-              setEditando(true)
-            }}
-          >
-            Editar
-          </button>
+          {midia.podeEditar && (
+            <button
+              ref={editarRef}
+              type="button"
+              className={botao}
+              aria-label={`Editar ${nome}`}
+              onClick={() => {
+                setErro(null)
+                setEditando(true)
+              }}
+            >
+              Editar
+            </button>
+          )}
           {ehAdmin && (
             <>
               <button

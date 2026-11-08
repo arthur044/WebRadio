@@ -30,6 +30,7 @@ const MIDIA = {
   dataUploadUtc: '2026-11-08T15:00:00Z',
   ativo: true,
   enviadoPorNome: 'Ada Admin',
+  podeEditar: true,
 }
 
 async function entrarComoAdmin(page: Page) {

@@ -93,6 +93,11 @@ export interface MidiaDto {
   ativo: boolean
   /** A partir do Épico 4 (02 §6). */
   enviadoPorNome: string | null
+  /**
+   * Calculado pelo servidor para quem chamou (02 §6): o Admin sempre; o Locutor só na mídia que enviou e que está
+   * ativa. O `PATCH` de quem não pode dá 403; a tela só oferece o botão a quem pode.
+   */
+  podeEditar: boolean
 }
 
 /** Corpo de `POST /midias/uploads` (02 §6). `titulo` é obrigatório para `Musica` (a API devolve 400 sem ele). */
