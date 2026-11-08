@@ -85,7 +85,7 @@ Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin
 
 ## 6. Mídia — `/midias` (PodeModerar, salvo indicação)
 
-`MidiaDto = { id, nomeOriginal, titulo, artista, tipoMidia, mimeType, tamanhoBytes, duracaoSegundos, statusSanitizacao, motivoRejeicao, dataUploadUtc, ativo, enviadoPorNome }` (o hash sai em hex só para Admin; `enviadoPorNome` a partir do Épico 4)
+`MidiaDto = { id, nomeOriginal, titulo, artista, tipoMidia, mimeType, tamanhoBytes, duracaoSegundos, statusSanitizacao, motivoRejeicao, dataUploadUtc, ativo, enviadoPorNome, podeEditar }` (o hash sai em hex só para Admin; `enviadoPorNome` a partir do Épico 4; `podeEditar` é calculado para quem chama, pela regra do `PATCH`: dono com a mídia ativa, ou Admin)
 
 | Método | Rota | Descrição |
 |---|---|---|
