@@ -94,7 +94,7 @@ Rotas `GET`/`POST`/`DELETE /locutores/me/credencial-transmissao` (Locutor, Admin
 | GET | `/midias?tipo=&status=&ativo=&busca=&pagina=&tamanho=` | `busca` em Título/Artista/NomeOriginal; `ativo` só vale para o Admin (o Locutor vê só as ativas) |
 | GET | `/midias/{id}` | + `ETag` |
 | GET | `/midias/{id}/preview` | **302** para uma URL pré-assinada pública de GET (5 min) em `/storage/midia/…`, com `response-content-type=audio/mpeg` e `response-content-disposition=inline; filename*=UTF-8''{id}.mp3`; só `Aprovado`. Com `?formato=url` → **200** `{ url, expiraEmUtc }` com a mesma URL, sem redirecionar: o `<audio>` não manda o Bearer, e um `fetch` que seguisse o 302 reenviaria o `Authorization` ao MinIO (mesma origem pelo nginx), que recusa dois mecanismos de autenticação. O frontend usa essa forma. Nunca há URL pré-assinada para a `quarentena` |
-| PATCH | `/midias/{id}` | `{ titulo?, artista?, ativo? }` + `If-Match` (**Admin** para `ativo`) |
+| PATCH | `/midias/{id}` | `{ titulo?, artista?, ativo? }` + `If-Match`. Só o **dono** (quem enviou) ou o **Admin**; outro Locutor → 403, e o Locutor não edita mídia desativada. `ativo` só **Admin**. A biblioteca é compartilhada para ouvir e escolher, não para editar |
 | DELETE | `/midias/{id}` | Admin; → 204. Se já houver reprodução registrada, só desativa (histórico preservado) → 200 |
 
 ## 7. Divulgações — `/divulgacoes`
