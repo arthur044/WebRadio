@@ -173,10 +173,15 @@ end
 re_bandeira = "\xF0\x9F\x8F\xB4(\xF3\xA0\x80[\xA0-\xBF]|\xF3\xA0\x81[\x80-\xBE])+\xF3\xA0\x81\xBF"
 re_proibido = "[\x00-\x1F]|\x7F|\xC2[\x80-\x9F]|\xE2\x80[\xA8-\xA9]|\xC2\xAD|\xD8[\x80-\x85]|\xD8\x9C|\xDB\x9D|\xDC\x8F|\xE0\xA2[\x90-\x91]|\xE0\xA3\xA2|\xE1\xA0\x8E|\xE2\x80[\x8B-\x8C]|\xE2\x80[\x8E-\x8F]|\xE2\x80[\xAA-\xAE]|\xE2\x81[\xA0-\xA4]|\xE2\x81[\xA6-\xAF]|\xEF\xBB\xBF|\xEF\xBF[\xB9-\xBB]|\xF0\x91\x82\xBD|\xF0\x91\x83\x8D|\xF0\x93\x90[\xB0-\xBF]|\xF0\x9B\xB2[\xA0-\xA3]|\xF0\x9D\x85[\xB3-\xBA]|\xF3\xA0\x80\x81|\xF3\xA0\x80[\xA0-\xBF]|\xF3\xA0\x81[\x80-\xBF]|\xED[\xA0-\xBF][\x80-\xBF]"
 
+# UTF-8 bem formado (RFC 3629, tabela 3-7): sem bytes soltos, sem sequência truncada, sem overlong, sem surrogate, sem passar de U+10FFFF.
+# O string.length da v2.4.0 lançava para bytes inválidos; a v2.4.6 não lança mais (conta byte solto como caractere), então a validação é explícita.
+re_utf8_valido = "^([\x00-\x7F]|[\xC2-\xDF][\x80-\xBF]|\xE0[\xA0-\xBF][\x80-\xBF]|[\xE1-\xEC\xEE\xEF][\x80-\xBF][\x80-\xBF]|\xED[\x80-\x9F][\x80-\xBF]|\xF0[\x90-\xBF][\x80-\xBF][\x80-\xBF]|[\xF1-\xF3][\x80-\xBF][\x80-\xBF][\x80-\xBF]|\xF4[\x80-\x8F][\x80-\xBF][\x80-\xBF])*\z"
+
 def metadado_seguro(texto) =
-  # string.length em UTF-8 lança para bytes inválidos: o que não é UTF-8 também é recusado.
+  # Primeiro a validade do UTF-8 (o resto, inclusive o limite de 200 caracteres, só faz sentido em texto válido); o try fica como rede
+  # de segurança para qualquer erro de string.length/string.match: na dúvida, recusa.
   try
-    string.length(texto) <= 200 and not string.match(pattern=re_proibido, string.replace(pattern=re_bandeira, fun (_) -> "", texto))
+    string.match(pattern=re_utf8_valido, texto) and string.length(texto) <= 200 and not string.match(pattern=re_proibido, string.replace(pattern=re_bandeira, fun (_) -> "", texto))
   catch _ do
     false
   end

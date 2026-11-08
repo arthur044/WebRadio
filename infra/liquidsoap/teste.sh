@@ -16,7 +16,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-LIQUIDSOAP="savonet/liquidsoap@sha256:8c1918482b76ca11191162a07ab47a7f0e0697e7b1a23e81b55cba0552f61e8e" # v2.4.0, uid 100
+LIQUIDSOAP="webradio-liquidsoap:teste" # construída aqui a partir de infra/liquidsoap/Dockerfile (E4-F01), uid 100
 ICECAST="webradio-icecast:teste"
 P="wr-liq-teste-$$"
 TMP="$(mktemp -d)"
@@ -97,6 +97,9 @@ ao_vivo = metadata.map(insert_missing=true, fun (_) -> [("title", titulo), ("art
 output.icecast(%mp3(bitrate=128), host="liquidsoap", port=8005, user=usuario, password=senha, mount="live", fallible=true, ao_vivo)
 LIQ
 chmod 0644 "$TMP/fonte.liq"
+
+echo "== imagem própria do Liquidsoap (E4-F01)"
+docker build -q -f infra/liquidsoap/Dockerfile -t "$LIQUIDSOAP" . >/dev/null
 
 echo "== segredo ruim aborta o boot (S-C02)"
 segredo_ruim() {
@@ -184,9 +187,13 @@ caso("tabulação", false, "a\tb")
 caso("DEL", false, "a\x7Fb")
 caso("surrogate solto (ED A0 80)", false, "a\xED\xA0\x80b")
 caso("UTF-8 inválido", false, "a\xFFb")
+# A v2.4.0 recusava estes pelo erro do string.length; a v2.4.6 não lança mais (E4-F01): a validação é explícita no radio.liq.
+caso("UTF-8 truncado (sequência de 3 bytes cortada)", false, "a\xE6\x97")
+caso("UTF-8 overlong (C0 80)", false, "a\xC0\x80b")
+caso("acima de U+10FFFF (F4 90 80 80)", false, "a\xF4\x90\x80\x80b")
 LIQ
 SAIDA_META="$(docker run --rm --user 100 -v "$TMP/metadado.liq:/metadado.liq:ro" "$LIQUIDSOAP" /metadado.liq 2>&1 || true)"
-[[ "$(grep -c '^CASO ' <<<"$SAIDA_META")" -ge 22 ]] && ok "tabela executada (22 casos)" || falha "a tabela de metadados não rodou: $SAIDA_META"
+[[ "$(grep -c '^CASO ' <<<"$SAIDA_META")" -ge 26 ]] && ok "tabela executada (26 casos)" || falha "a tabela de metadados não rodou: $SAIDA_META"
 if grep '^CASO FALHA' <<<"$SAIDA_META"; then falha "metadado_seguro diverge do contrato"; else ok "metadado_seguro segue o contrato em todos os casos"; fi
 
 echo "== ao vivo pelo harbor (E2-F08, S-A08, S-A09)"

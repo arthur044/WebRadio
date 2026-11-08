@@ -140,8 +140,8 @@ services:
 
   minio:
     # A MinIO deixou de publicar imagens oficiais (minio/minio e quay.io); esta é a build da Chainguard, a partir do
-    # código-fonte, sem root (uid 65532). Fixada por digest (latest de 2026-10-14; a Chainguard só publica a tag latest no plano gratuito).
-    image: cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
+    # código-fonte, sem root (uid 65532). Fixada por digest (latest de 2026-11-08, sem CRITICAL corrigível no trivy; E4-F01; a Chainguard só publica a tag latest no plano gratuito).
+    image: cgr.dev/chainguard/minio@sha256:a1ac4589a5f8136b616e667b48a0bea9719bb10bd45799ea946f24bbedfafde4
     <<: *endurecido
     command: ["server", "/data"]
     environment:
@@ -286,7 +286,9 @@ services:
     pids_limit: 100
 
   liquidsoap:
-    image: savonet/liquidsoap@sha256:8c1918482b76ca11191162a07ab47a7f0e0697e7b1a23e81b55cba0552f61e8e # v2.4.0, uid 100
+    # Imagem própria (E4-F01): a oficial v2.4.6 por digest, com libbrotli1/zlib1g/apt já na revisão de segurança corrente (uid 100).
+    build: { context: ., dockerfile: infra/liquidsoap/Dockerfile }
+    image: webradio-liquidsoap:local
     <<: *endurecido
     command: ["/etc/liquidsoap/radio.liq"]
     environment:

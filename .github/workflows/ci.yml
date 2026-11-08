@@ -25,7 +25,7 @@ env:
   # Imagem do Redis dos testes do throttle: a mesma, por digest, do docker-compose.yml.
   REDIS_IMAGEM: "redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"
   # Imagem do MinIO dos testes do storage (S-M02, backend-sql): a mesma, por digest, do docker-compose.yml.
-  MINIO_IMAGEM: "cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8"
+  MINIO_IMAGEM: "cgr.dev/chainguard/minio@sha256:a1ac4589a5f8136b616e667b48a0bea9719bb10bd45799ea946f24bbedfafde4"
   # trivy: binário com sha256 esperado fixado aqui, como o gitleaks (05 §9.2).
   TRIVY_VERSION: "0.75.0"
   TRIVY_SHA256: "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f"
@@ -405,7 +405,7 @@ jobs:
         run: |
           set -euo pipefail
           falhas=0
-          for imagem in webradio-api:local webradio-worker:local webradio-migrator:local webradio-web:local webradio-icecast:local webradio-minio-init:local; do
+          for imagem in webradio-api:local webradio-worker:local webradio-migrator:local webradio-web:local webradio-icecast:local webradio-liquidsoap:local webradio-minio-init:local; do
             echo "== ${imagem}"
             trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${imagem}" || falhas=$((falhas + 1))
           done
@@ -414,29 +414,50 @@ jobs:
             exit 1
           fi
 
-      - name: "Imagens de terceiros do compose (informativo, não quebra o job)"
+      - name: "Imagens de terceiros do compose (CRITICAL corrigível quebra o job; HIGH é informativo)"
         run: |
-          # sqlserver, redis, minio e liquidsoap não são construídos aqui; a atualização delas é manual (digest). Os achados
-          # aparecem como aviso e no resumo do job, para quem decide a troca do digest.
+          # sqlserver, redis e minio não são construídos aqui (o liquidsoap é imagem própria e já passou pelo passo acima); a atualização delas é
+          # manual (digest). E4-F01: CRITICAL com correção disponível nessas três FALHA o job, sem exceção (.trivyignore). O HIGH aparece como aviso e
+          # no resumo do job, para quem decide a troca do digest. alpine (minio-init) e nginx (harbor-borda) seguem só informativos (a CRITICAL do
+          # nginx é a CVE-2026-111497 do brotli, sem imagem oficial corrigida; pendente no 08 §E4-F01).
+          bloqueiam="mcr.microsoft.com/mssql/server redis cgr.dev/chainguard/minio"
           {
-            echo "### Imagens de terceiros do compose (HIGH/CRITICAL com correção disponível)"
-            echo "| Imagem | HIGH | CRITICAL |"
-            echo "|---|---|---|"
+            echo "### Imagens de terceiros do compose (com correção disponível)"
+            echo "| Imagem | HIGH | CRITICAL | CRITICAL quebra o job |"
+            echo "|---|---|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
           lidas=0
+          quebradas=0
           for imagem in $(grep -hoE 'image: [^ ]+@sha256:[0-9a-f]+' docker-compose.yml | awk '{print $2}' | sort -u); do
+            nome="${imagem%%@*}"
+            nome="${nome%%:*}"
             contagem="$(trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --format json "${imagem}" 2>/dev/null \
               | python3 -c "import json,sys; d=json.load(sys.stdin); v=[x for r in d.get('Results',[]) for x in (r.get('Vulnerabilities') or [])]; print(sum(x['Severity']=='HIGH' for x in v), sum(x['Severity']=='CRITICAL' for x in v))" || echo "? ?")"
             read -r altas criticas <<<"${contagem}"
-            [ "${altas}" != "?" ] && lidas=$((lidas + 1))
-            echo "| \`${imagem%%@*}\` | ${altas} | ${criticas} |" >> "$GITHUB_STEP_SUMMARY"
+            bloqueia="não"
+            case " ${bloqueiam} " in *" ${nome} "*) bloqueia="sim" ;; esac
+            echo "| \`${nome}\` | ${altas} | ${criticas} | ${bloqueia} |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "${altas}" = "?" ]; then
+              # Sem leitura não há como afirmar "zero CRITICAL": nas imagens que bloqueiam, falha fechada.
+              [ "${bloqueia}" = "sim" ] && { echo "::error::${nome}: o trivy não conseguiu ler a imagem."; quebradas=$((quebradas + 1)); }
+              continue
+            fi
+            lidas=$((lidas + 1))
             if [ "${altas}" != "0" ] || [ "${criticas}" != "0" ]; then
-              echo "::warning::${imagem%%@*}: ${altas} HIGH, ${criticas} CRITICAL com correção disponível (imagem de terceiros, sem build aqui)."
+              echo "::warning::${nome}: ${altas} HIGH, ${criticas} CRITICAL com correção disponível (imagem de terceiros, sem build aqui)."
+            fi
+            if [ "${bloqueia}" = "sim" ] && [ "${criticas}" != "0" ]; then
+              echo "::error::${nome}: ${criticas} CRITICAL com correção disponível. Troque o digest no docker-compose.yml."
+              quebradas=$((quebradas + 1))
             fi
           done
           # Informativo não quer dizer cego: se o trivy quebrou e nenhuma contagem foi lida, o passo falha.
           if [ "${lidas}" -eq 0 ]; then
             echo "::error::O trivy não leu nenhuma imagem de terceiros (todas as contagens são '?')."
+            exit 1
+          fi
+          if [ "${quebradas}" -ne 0 ]; then
+            echo "::error::${quebradas} imagem(ns) de terceiros com CRITICAL corrigível (ou ilegível)."
             exit 1
           fi
 
