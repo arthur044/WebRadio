@@ -76,7 +76,13 @@ function montarApi(respostas: { uploads?: Response[]; concluir?: Response[] } = 
             midiaId: `m${++n}`,
             upload: {
               url: `${window.location.origin}/storage/quarentena`,
-              campos: { key: `2026/m${n}`, policy: 'p', 'x-amz-signature': 's' },
+              campos: {
+                key: `2026/m${n}`,
+                policy: 'p',
+                'x-amz-signature': 's',
+                'Content-Type': 'audio/mpeg',
+                success_action_status: '201',
+              },
               expiraEmUtc: '2026-11-08T12:00:00Z',
             },
           })
@@ -106,7 +112,7 @@ describe('fila de envios (E4-P02)', () => {
     // O laço da fila é do módulo: cada teste precisa deixá-lo ocioso, senão o seguinte herda um envio pendurado.
     vi.useRealTimers()
     for (let i = 0; i < 20; i++) {
-      for (const xhr of XhrFalso.instancias) if (!xhr.respondido) xhr.responder(204)
+      for (const xhr of XhrFalso.instancias) if (!xhr.respondido) xhr.responder(201)
       await esperar()
     }
     vi.unstubAllGlobals()
@@ -125,8 +131,15 @@ describe('fila de envios (E4-P02)', () => {
     const xhr = XhrFalso.instancias[0]
     expect(xhr.metodo).toBe('POST')
     expect(xhr.url).toBe(`${window.location.origin}/storage/quarentena`)
-    // Os campos da policy na ordem que vieram e o `file` por último (o S3 ignora o que vem depois dele).
-    expect([...xhr.corpo!.keys()]).toEqual(['key', 'policy', 'x-amz-signature', 'file'])
+    // Só os campos da policy, na ordem que vieram, e o `file` por último: nenhum campo extra (acl, x-amz-meta-*) dá 403.
+    expect([...xhr.corpo!.keys()]).toEqual([
+      'key',
+      'policy',
+      'x-amz-signature',
+      'Content-Type',
+      'success_action_status',
+      'file',
+    ])
     expect(api.chamadas[0]).toEqual({
       metodo: 'POST',
       caminho: '/midias/uploads',
@@ -144,7 +157,7 @@ describe('fila de envios (E4-P02)', () => {
     xhr.upload.onprogress?.({ lengthComputable: true, loaded: 50, total: 100 })
     expect(useEnvios.getState().envios[0].estado).toEqual({ fase: 'enviando', progresso: 0.5 })
 
-    xhr.responder(204)
+    xhr.responder(201)
     await ate(() => useEnvios.getState().envios[0].estado.fase === 'enviado')
     expect(api.chamadas.at(-1)).toEqual({
       metodo: 'POST',
@@ -165,7 +178,7 @@ describe('fila de envios (E4-P02)', () => {
     expect(api.chamadas.filter((c) => c.caminho === '/midias/uploads')).toHaveLength(1)
     expect(useEnvios.getState().envios[1].estado.fase).toBe('aguardando')
 
-    XhrFalso.instancias[0].responder(204)
+    XhrFalso.instancias[0].responder(201)
     await ate(() => XhrFalso.instancias.length === 2)
     expect(api.chamadas.filter((c) => c.caminho === '/midias/uploads')).toHaveLength(2)
   })

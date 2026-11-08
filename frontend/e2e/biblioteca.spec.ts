@@ -101,7 +101,13 @@ test('o envio pede a policy, manda o arquivo ao storage e conclui; o 429 vira co
         midiaId: MIDIA.id,
         upload: {
           url: `${new URL(page.url()).origin}/storage/quarentena`,
-          campos: { key: `2026/${MIDIA.id}`, policy: 'p', 'x-amz-signature': 's' },
+          campos: {
+            key: `2026/${MIDIA.id}`,
+            policy: 'p',
+            'x-amz-signature': 's',
+            'Content-Type': 'audio/mpeg',
+            success_action_status: '201',
+          },
           expiraEmUtc: '2099-01-01T00:00:00Z',
         },
       },
@@ -112,7 +118,7 @@ test('o envio pede a policy, manda o arquivo ao storage e conclui; o 429 vira co
     const corpo = rota.request().postData() ?? ''
     // Os campos da policy vêm antes do arquivo (o S3 ignora o que vem depois do `file`).
     expect(corpo.indexOf('name="key"')).toBeLessThan(corpo.indexOf('name="file"'))
-    return rota.fulfill({ status: 204 })
+    return rota.fulfill({ status: 201, contentType: 'application/xml', body: '<PostResponse/>' })
   })
   await page.route('**/api/v1/midias/*/concluir', (rota) => {
     ordem.push('concluir')
