@@ -103,6 +103,9 @@ function montarApi(cenario: Cenario = {}) {
         return json(204)
       }
     }
+    // A fila de moderação (E3-P03) vive na mesma página; estes testes não a exercitam (FilaDeModeracao.test.tsx).
+    if (caminho.startsWith('/pedidos?'))
+      return json(200, { itens: [], total: 0, pagina: 1, tamanho: 100 })
     if (caminho === '/credenciais-transmissao') return json(200, estado.ativas)
     const revogar = /^\/usuarios\/([^/]+)\/credencial-transmissao$/.exec(caminho)
     if (revogar && metodo === 'DELETE') {

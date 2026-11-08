@@ -383,3 +383,33 @@ describe('apiFetch — semRefreshSeCredenciais (geração da credencial de trans
     expect(posts).toHaveLength(1)
   })
 })
+
+describe('apiFetch — corpo multipart (upload de imagem, E3-P04)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('FormData segue como está e sem Content-Type: o browser monta o boundary', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(201, { chave: 'k' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const corpo = new FormData()
+    corpo.append('file', new Blob(['x'], { type: 'image/png' }), 'a.png')
+
+    await apiFetch('/divulgacoes/imagens', { method: 'POST', body: corpo })
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.body).toBe(corpo)
+    expect(new Headers(init.headers).has('Content-Type')).toBe(false)
+  })
+
+  it('objeto continua indo como JSON', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, {}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await apiFetch('/x', { method: 'POST', body: { a: 1 } })
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.body).toBe('{"a":1}')
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json')
+  })
+})
