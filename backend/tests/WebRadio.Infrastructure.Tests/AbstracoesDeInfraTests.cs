@@ -49,6 +49,11 @@ public class MinioObjectStorageTests
         var expiracao = DateTime.Parse(politica.RootElement.GetProperty("expiration").GetString()!, null, System.Globalization.DateTimeStyles.RoundtripKind);
         Assert.Equal(Agora.AddMinutes(15), expiracao.ToUniversalTime());
         Assert.False(assinada.Campos.ContainsKey("x-amz-security-token"));
+
+        // O browser só repassa `campos` + file: o que a policy exige como campo do form (eq) tem de estar lá (E4-F02: o SDK não os devolvia).
+        Assert.Equal("audio/mpeg", assinada.Campos["Content-Type"]);
+        Assert.Equal("201", assinada.Campos["success_action_status"]);
+        Assert.Equal("2026/09/abc", assinada.Campos["key"]);
     }
 
     [Fact]

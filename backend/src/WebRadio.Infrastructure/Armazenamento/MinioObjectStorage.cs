@@ -57,7 +57,10 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
 
         var (_, campos) = await _publico.PresignedPostPolicyAsync(new PresignedPostPolicyArgs().WithBucket(bucket).WithObject(chave).WithPolicy(policy));
 
-        return new PostPolicyAssinada(new Uri(_publicEndpoint, bucket).ToString(), new Dictionary<string, string>(campos), expira);
+        // O SDK devolve só os campos de assinatura. A policy exige (eq) o Content-Type e o success_action_status: sem eles em `campos` o browser, que
+        // só repassa o que a API devolve, tomaria 403 em todo upload (Policy Condition failed). Nada além disso entra no form (sem acl nem x-amz-meta-*).
+        var formulario = new Dictionary<string, string>(campos) { ["Content-Type"] = contentType, ["success_action_status"] = "201" };
+        return new PostPolicyAssinada(new Uri(_publicEndpoint, bucket).ToString(), formulario, expira);
     }
 
     public async Task<string> UrlGetPreAssinadaAsync(
