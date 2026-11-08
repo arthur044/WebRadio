@@ -97,6 +97,10 @@ jobs:
         run: dotnet build backend/WebRadio.slnx --no-restore --configuration Release
 
       - name: Test (unitários + arquitetura; exclui [Trait("Categoria","Integracao")])
+        # #102: cada host de teste podia abrir um FileSystemWatcher (inotify; o runner limita a 128 instâncias). O reload de
+        # configuração já está desligado na ApiFactory; o polling é a rede para qualquer outro host que volte a observar arquivos.
+        env:
+          DOTNET_USE_POLLING_FILE_WATCHER: "1"
         run: >
           dotnet test backend/WebRadio.slnx --no-build --configuration Release
           --filter "Categoria!=Integracao"
