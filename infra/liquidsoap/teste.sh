@@ -369,8 +369,15 @@ sleep 12
 confere "o locutor já autorizado segue no ar" test "$(conta_log "$P-radio" 'Source client desconectado')" = "$DESC"
 confere "o stream segue" toca
 confere "o teto do fim do programa derruba mesmo sem resposta" espera_log "$P-radio" "Derrubando o ao vivo: teto da falha aberta (fim do programa + 1 min)" 90
+T_DERRUBADA=$SECONDS
 
 echo "-- API fora, teto 2: último 200 + HARBOR_TETO_SEM_RESPOSTA_S (a janela é longa, só o 200 antigo vale)"
+# ATENÇÃO (flake do run 42453053652, a causa de verdade): depois do stop() do teto 1 o input.harbor ainda tem a thread de leitura da conexão
+# ANTIGA, que estoura 30 s depois ("Error while reading from client: Timed out after waiting for 30.00 sec" + "Source client desconectado") e leva junto a
+# conexão NOVA que estiver no ar: o desconectado cai dentro dos 20 s abaixo e, com a API fora e sem conexão, o teto nunca dispara. Não é o teto sob
+# teste. Por isso: o cliente antigo sai (fecha o socket) e o teto 2 só começa 35 s depois da derrubada, com essa leitura já morta.
+docker rm -f "$P-fonte" >/dev/null
+while [[ $((SECONDS - T_DERRUBADA)) -lt 35 ]]; do sleep 1; done
 api vazia
 controle fim "$(iso_em 3600)"
 CON="$(conta_log "$P-radio" 'Source client conectado')"
@@ -392,9 +399,10 @@ docker rm -f "$P-fonte2" >/dev/null
 echo "-- API fora: conexão nova é recusada"
 CON="$(conta_log "$P-radio" 'Source client conectado')"
 REC="$(conta_log "$P-radio" 'Recusado: API respondeu 52')"
-# O source client antigo demora a tentar de novo depois do stop(); um novo mostra a recusa na hora.
+# O source client antigo demora a tentar de novo depois do stop(); um novo mostra a recusa na hora, mas só depois de o harbor soltar a leitura
+# da conexão antiga (estoura em 30 s, ver o teto 2): o prazo cobre esses 30 s mais a volta do cliente.
 fonte_ao_vivo fonte2 "$USR" "$TMP/senha-ok"
-confere "conexão nova com a API fora é recusada" espera_mais "$P-radio" "Recusado: API respondeu 52" "$REC" 30
+confere "conexão nova com a API fora é recusada" espera_mais "$P-radio" "Recusado: API respondeu 52" "$REC" 75
 confere "e não entra no ar" test "$(conta_log "$P-radio" 'Source client conectado')" = "$CON"
 docker rm -f "$P-fonte2" >/dev/null
 confere "o stream de saída nunca caiu (o ouvinte contínuo segue conectado)" kill -0 "$CONTINUO"
