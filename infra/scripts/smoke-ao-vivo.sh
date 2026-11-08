@@ -83,7 +83,7 @@ toca() {
   grep -q -i '^content-type: audio/mpeg' "$TMP/cab" 2>/dev/null && [[ "$(stat -c %s "$TMP/amostra.mp3")" -gt 16000 ]]
 }
 
-LIQ_IMG="$(grep -m1 -oE 'savonet/liquidsoap@sha256:[0-9a-f]{64}' docker-compose.yml)"
+LIQ_IMG="webradio-liquidsoap:local" # construída pelo compose (infra/liquidsoap/Dockerfile) antes deste script
 cat > "$TMP/fonte.liq" <<'LIQ'
 settings.log.stdout := true
 settings.log.file := false

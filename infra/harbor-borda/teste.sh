@@ -15,7 +15,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-NGINX="nginxinc/nginx-unprivileged:1.31.6-alpine3.24@sha256:884e0b7f42f303641b0f4e78755aea647521dca0b89ca3be7992ad78b5c07434"
+NGINX="webradio-harbor-borda:teste" # construída aqui a partir de infra/harbor-borda/Dockerfile (E4-F01), uid 101
 PYTHON="python:3.12-alpine"
 P="wr-harbor-teste-$$"
 REDE="172.31.250"
@@ -70,6 +70,9 @@ print(vivas)
 }
 
 conexoes_no_liquidsoap() { docker logs "$P-liq" 2>&1 | grep -c "CONEXAO" || true; }
+
+echo "== imagem própria do harbor-borda (E4-F01)"
+docker build -q -f infra/harbor-borda/Dockerfile -t "$NGINX" . >/dev/null
 
 echo "== 1. lista inválida aborta a subida"
 for ruim in "10.0.0.0/33" "300.1.1.1" "estudio.exemplo.com" "1.2.3.4;deny" "all"; do
