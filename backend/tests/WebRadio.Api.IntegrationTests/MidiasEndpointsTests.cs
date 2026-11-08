@@ -307,6 +307,24 @@ public class MidiasEndpointsTests
     }
 
     [Fact]
+    public async Task PodeEditar_vem_calculado_para_quem_chama_na_lista_e_no_por_id()
+    {
+        var c = NovaCena();
+        var minha = Semear(c, titulo: "Minha"); // do locutor@example.com
+        var alheia = Semear(c, titulo: "Alheia", donoEmail: "admin@example.com");
+        var locutor = await TokenDe(c.C, "locutor@example.com");
+
+        var lista = await Json(await Enviar(c.C, HttpMethod.Get, Rota, locutor));
+        var itens = lista.GetProperty("itens").EnumerateArray().ToDictionary(i => i.GetProperty("titulo").GetString()!, i => i.GetProperty("podeEditar").GetBoolean());
+        Assert.True(itens["Minha"]);
+        Assert.False(itens["Alheia"]);
+
+        Assert.True((await Json(await Enviar(c.C, HttpMethod.Get, $"{Rota}/{minha}", locutor))).GetProperty("podeEditar").GetBoolean());
+        Assert.False((await Json(await Enviar(c.C, HttpMethod.Get, $"{Rota}/{alheia}", locutor))).GetProperty("podeEditar").GetBoolean());
+        Assert.True((await Json(await Enviar(c.C, HttpMethod.Get, $"{Rota}/{alheia}", await TokenDe(c.C, "admin@example.com")))).GetProperty("podeEditar").GetBoolean());
+    }
+
+    [Fact]
     public async Task Patch_de_midia_de_outro_locutor_e_403_e_o_admin_pode()
     {
         var c = NovaCena();

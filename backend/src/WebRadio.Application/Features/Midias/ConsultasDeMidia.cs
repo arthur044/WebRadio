@@ -13,7 +13,7 @@ namespace WebRadio.Application.Features.Midias;
 /// <c>GET /midias?tipo=&amp;status=&amp;ativo=&amp;busca=&amp;pagina=&amp;tamanho=</c> (02 §6). <c>Ativo</c> só vale para o Admin: o Locutor vê só as ativas.
 /// <c>Busca</c> é texto literal em Título, Artista e NomeOriginal (<c>%</c>, <c>_</c>, <c>[</c> e <c>\</c> são escapados).
 /// </summary>
-public sealed record ListarMidiasQuery(TipoMidia? Tipo, StatusSanitizacao? Status, bool? Ativo, string? Busca, int Pagina, int Tamanho, bool EhAdmin)
+public sealed record ListarMidiasQuery(TipoMidia? Tipo, StatusSanitizacao? Status, bool? Ativo, string? Busca, int Pagina, int Tamanho, bool EhAdmin, Guid UsuarioId = default)
     : IRequest<ResultadoPaginado<MidiaDto>>;
 
 public sealed class ListarMidiasValidator : AbstractValidator<ListarMidiasQuery>
@@ -66,13 +66,13 @@ public sealed class ListarMidiasHandler(IRadioDbContext db) : IRequestHandler<Li
         var linhas = await ConsultaDeMidia.ComNome(db, midias.OrderByDescending(m => m.DataUploadUtc).ThenBy(m => m.Id).Skip((q.Pagina - 1) * q.Tamanho).Take(q.Tamanho))
             .ToListAsync(ct);
         // O join não preserva a ordem garantida: reaplica a mesma ordem em memória (a página já é pequena, ≤ 100).
-        var itens = linhas.OrderByDescending(l => l.Midia.DataUploadUtc).ThenBy(l => l.Midia.Id).Select(l => MidiaDto.De(l.Midia, l.Nome, q.EhAdmin)).ToList();
+        var itens = linhas.OrderByDescending(l => l.Midia.DataUploadUtc).ThenBy(l => l.Midia.Id).Select(l => MidiaDto.De(l.Midia, l.Nome, q.EhAdmin, q.UsuarioId)).ToList();
         return new ResultadoPaginado<MidiaDto>(itens, total, q.Pagina, q.Tamanho);
     }
 }
 
 /// <summary><c>GET /midias/{id}</c> + <c>ETag</c>. O Locutor não vê uma mídia desativada (404, como na lista).</summary>
-public sealed record MidiaPorIdQuery(Guid Id, bool EhAdmin) : IRequest<MidiaDto>;
+public sealed record MidiaPorIdQuery(Guid Id, bool EhAdmin, Guid UsuarioId = default) : IRequest<MidiaDto>;
 
 public sealed class MidiaPorIdHandler(IRadioDbContext db) : IRequestHandler<MidiaPorIdQuery, MidiaDto>
 {
@@ -80,7 +80,7 @@ public sealed class MidiaPorIdHandler(IRadioDbContext db) : IRequestHandler<Midi
     {
         var linha = await ConsultaDeMidia.ComNome(db, db.ArquivosMidia.AsNoTracking().Where(m => m.Id == q.Id && (q.EhAdmin || m.Ativo))).FirstOrDefaultAsync(ct)
             ?? throw new NaoEncontradoException("Mídia");
-        return MidiaDto.De(linha.Midia, linha.Nome, q.EhAdmin);
+        return MidiaDto.De(linha.Midia, linha.Nome, q.EhAdmin, q.UsuarioId);
     }
 }
 

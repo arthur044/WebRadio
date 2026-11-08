@@ -39,13 +39,42 @@ public sealed class StorageDeMidia : IObjectStorage
         return Task.FromResult($"http://localhost/storage/{bucket}/{chave}?X-Amz-Signature=abc");
     }
 
-    public Task<long> BaixarAsync(string bucket, string chave, string etagEsperado, long limiteBytes, Stream destino, CancellationToken ct = default) => throw new NotSupportedException();
+    public async Task<long> BaixarAsync(string bucket, string chave, string etagEsperado, long limiteBytes, Stream destino, CancellationToken ct = default)
+    {
+        if (ErroNoBaixar is not null) throw ErroNoBaixar;
+        var bytes = Conteudos[$"{bucket}/{chave}"];
+        var n = (int)Math.Min(bytes.Length, limiteBytes + 1);
+        await destino.WriteAsync(bytes.AsMemory(0, n), ct);
+        return n > limiteBytes ? throw new ObjetoGrandeDemaisException("grande") : n;
+    }
 
     public Task<bool> VerificarAsync(CancellationToken ct = default) => Task.FromResult(true);
 
-    public Task PutAsync(string bucket, string chave, Stream conteudo, long tamanhoBytes, string contentType, CancellationToken ct = default) => throw new NotSupportedException();
+    /// <summary>Conteúdo dos objetos (bucket/chave) para o BaixarAsync; HeadAsync usa <see cref="Objetos"/>.</summary>
+    public Dictionary<string, byte[]> Conteudos { get; } = [];
 
-    public Task DeleteAsync(string bucket, string chave, CancellationToken ct = default) => throw new NotSupportedException();
+    public List<(string Bucket, string Chave, byte[] Bytes, string ContentType)> Puts { get; } = [];
+
+    public List<string> Apagados { get; } = [];
+
+    public Exception? ErroNoPut { get; set; }
+
+    public Exception? ErroNoBaixar { get; set; }
+
+    public Task PutAsync(string bucket, string chave, Stream conteudo, long tamanhoBytes, string contentType, CancellationToken ct = default)
+    {
+        if (ErroNoPut is not null) throw ErroNoPut;
+        using var m = new MemoryStream();
+        conteudo.CopyTo(m);
+        Puts.Add((bucket, chave, m.ToArray(), contentType));
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAsync(string bucket, string chave, CancellationToken ct = default)
+    {
+        Apagados.Add($"{bucket}/{chave}");
+        return Task.CompletedTask;
+    }
 
     public Task<IReadOnlyList<ObjetoListado>> ListarAsync(string bucket, string prefixo, CancellationToken ct = default) => throw new NotSupportedException();
 

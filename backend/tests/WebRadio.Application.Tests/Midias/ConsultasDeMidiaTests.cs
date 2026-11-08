@@ -8,8 +8,8 @@ namespace WebRadio.Application.Tests.Midias;
 /// <summary>E4-F03: <c>GET /midias</c>, <c>GET /midias/{id}</c> e <c>GET /midias/{id}/preview</c> (02 §6, S-M07).</summary>
 public sealed class ConsultasDeMidiaTests
 {
-    private static ListarMidiasQuery Lista(bool admin = true, TipoMidia? tipo = null, StatusSanitizacao? status = null, bool? ativo = null, string? busca = null, int pagina = 1, int tamanho = 20)
-        => new(tipo, status, ativo, busca, pagina, tamanho, admin);
+    private static ListarMidiasQuery Lista(bool admin = true, TipoMidia? tipo = null, StatusSanitizacao? status = null, bool? ativo = null, string? busca = null, int pagina = 1, int tamanho = 20, Guid? usuario = null)
+        => new(tipo, status, ativo, busca, pagina, tamanho, admin, usuario ?? Guid.Empty);
 
     [Fact]
     public async Task Lista_filtra_por_tipo_e_por_status()
@@ -104,6 +104,27 @@ public sealed class ConsultasDeMidiaTests
         Assert.Equal("Ana Locutora", admin.EnviadoPorNome);
     }
 
+    [Fact]
+    public async Task PodeEditar_admin_sempre_dono_so_com_a_midia_ativa_e_outro_locutor_nunca()
+    {
+        var f = new MidiasFixture();
+        var outro = Guid.NewGuid();
+        f.SemearAprovada(titulo: "Minha ativa");
+        f.SemearAprovada(titulo: "Minha desativada", ativo: false);
+        f.SemearAprovada(titulo: "De outro", usuario: outro);
+
+        var admin = (await f.Listar.Handle(Lista(admin: true, usuario: Guid.NewGuid()), default)).Itens;
+        Assert.All(admin, i => Assert.True(i.PodeEditar));
+
+        var dono = (await f.Listar.Handle(Lista(admin: false, usuario: f.Usuario), default)).Itens.ToDictionary(i => i.Titulo!);
+        Assert.True(dono["Minha ativa"].PodeEditar);
+        Assert.False(dono["De outro"].PodeEditar);
+        Assert.DoesNotContain("Minha desativada", dono.Keys); // o Locutor nem vê a desativada
+
+        var porId = await f.PorId.Handle(new MidiaPorIdQuery(f.Db.ArquivosMidia.Single(m => m.Titulo == "De outro").Id, false, f.Usuario), default);
+        Assert.False(porId.PodeEditar);
+    }
+
     [Theory]
     [InlineData(0, 20)]
     [InlineData(1, 0)]
@@ -121,7 +142,7 @@ public sealed class ConsultasDeMidiaTests
         var f = new MidiasFixture();
         var m = f.SemearAprovada();
 
-        var dto = await f.PorId.Handle(new MidiaPorIdQuery(m.Id, true), default);
+        var dto = await f.PorId.Handle(new MidiaPorIdQuery(m.Id, true, Guid.NewGuid()), default);
         Assert.Equal(m.Id, dto.Id);
         Assert.Equal(Convert.ToBase64String(m.RowVersion), dto.Versao);
         await Assert.ThrowsAsync<NaoEncontradoException>(() => f.PorId.Handle(new MidiaPorIdQuery(Guid.NewGuid(), true), default));
@@ -133,7 +154,7 @@ public sealed class ConsultasDeMidiaTests
         var f = new MidiasFixture();
         var m = f.SemearAprovada(ativo: false);
         await Assert.ThrowsAsync<NaoEncontradoException>(() => f.PorId.Handle(new MidiaPorIdQuery(m.Id, false), default));
-        await f.PorId.Handle(new MidiaPorIdQuery(m.Id, true), default);
+        await f.PorId.Handle(new MidiaPorIdQuery(m.Id, true, Guid.NewGuid()), default);
     }
 
     // ---- preview (S-M07, S-A03) ----

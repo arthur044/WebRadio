@@ -57,7 +57,7 @@ public sealed class EditarMidiaHandler(IRadioDbContext db) : IRequestHandler<Edi
         }
 
         var nome = await db.Usuarios.AsNoTracking().Where(u => u.Id == midia.EnviadoPorUsuarioId).Select(u => u.Nome).FirstOrDefaultAsync(ct);
-        return MidiaDto.De(midia, nome, cmd.EhAdmin);
+        return MidiaDto.De(midia, nome, cmd.EhAdmin, cmd.UsuarioId);
     }
 
     private static string? Normalizar(string? texto) => string.IsNullOrWhiteSpace(texto) ? null : TextoSeguro.Normalizar(texto);
@@ -84,7 +84,7 @@ public sealed class ExcluirMidiaHandler(IRadioDbContext db, ILogger<ExcluirMidia
         {
             midia.Desativar();
             await db.SaveChangesAsync(ct);
-            return new ResultadoDaExclusao(false, MidiaDto.De(midia, null, admin: true));
+            return new ResultadoDaExclusao(false, MidiaDto.De(midia, null, admin: true, cmd.SolicitanteId));
         }
 
         // Os valores são capturados ANTES do DELETE (depois dele a entidade some do tracker), mas a auditoria só sai DEPOIS de o SaveChanges dar certo: a trilha nunca

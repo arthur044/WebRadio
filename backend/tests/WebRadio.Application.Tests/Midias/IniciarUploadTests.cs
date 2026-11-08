@@ -26,7 +26,7 @@ public sealed class IniciarUploadTests
         Assert.Equal(123_456, m.TamanhoBytes);
 
         var p = Assert.Single(f.Storage.Policies);
-        Assert.Equal(("quarentena", m.ChaveStorage, "audio/mpeg", 123_456L, TimeSpan.FromHours(1)), p);
+        Assert.Equal(("quarentena", m.ChaveStorage, "audio/mpeg", 123_456L, TimeSpan.FromMinutes(15)), p);
         Assert.Equal(m.ChaveStorage, r.Upload.Campos["key"]);
         Assert.StartsWith("http", r.Upload.Url);
     }

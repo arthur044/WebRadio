@@ -28,6 +28,21 @@ public sealed class MidiaOptions
 
     public LimiteDoTipo Musica { get; set; } = new() { TamanhoMaximoBytes = 250 * MiB, DuracaoMinimaSegundos = 30, DuracaoMaximaSegundos = 20 * 60 };
 
+    /// <summary><c>Midia:Sanitizacao:TimeoutSegundos</c>: troca o timeout do sanitizer por tipo (E4-D15). Nulo = <c>max(60 s, ¼ da duração máxima do tipo)</c>.</summary>
+    public SanitizacaoOptions Sanitizacao { get; set; } = new();
+
+    /// <summary>E4-D15: o decode roda dezenas de vezes mais rápido que o tempo real, então o orçamento é ¼ da duração máxima (Vinheta e Comercial 60 s, Música 300 s).</summary>
+    public TimeSpan TimeoutDoSanitizer(TipoMidia tipo) =>
+        Sanitizacao.TimeoutSegundos is { } t ? TimeSpan.FromSeconds(t) : TimeSpan.FromSeconds(Math.Max(60, Limite(tipo).DuracaoMaxima.TotalSeconds / 4));
+
+    /// <summary>
+    /// E4-D15: o LEASE é o orçamento do pipeline inteiro: download (a 10 MB/s), scan, sanitizer e upload, mais 60 s. Um lease menor que isso devolveria o item à fila com o Worker
+    /// ainda trabalhando.
+    /// </summary>
+    public TimeSpan LeaseDoPipeline(TipoMidia tipo, int timeoutDoScanSegundos) =>
+        TimeSpan.FromSeconds(Limite(tipo).TamanhoMaximoBytes / (10d * 1024 * 1024)) + TimeSpan.FromSeconds(timeoutDoScanSegundos) + TimeoutDoSanitizer(tipo)
+        + TimeSpan.FromSeconds(Limite(tipo).TamanhoMaximoBytes / (10d * 1024 * 1024)) + TimeSpan.FromSeconds(60);
+
     public LimiteMidia Limite(TipoMidia tipo)
     {
         var l = tipo switch
@@ -39,6 +54,11 @@ public sealed class MidiaOptions
         };
         return new LimiteMidia(l.TamanhoMaximoBytes, TimeSpan.FromSeconds(l.DuracaoMinimaSegundos), TimeSpan.FromSeconds(l.DuracaoMaximaSegundos));
     }
+}
+
+public sealed class SanitizacaoOptions
+{
+    public int? TimeoutSegundos { get; set; }
 }
 
 public sealed class LimiteDoTipo
@@ -60,6 +80,7 @@ public sealed class MidiaOptionsValidator : IValidateOptions<MidiaOptions>
         var erros = new List<string>();
         if (o.UploadsPorHora is < 1 or > 1000) erros.Add("Midia:UploadsPorHora deve estar entre 1 e 1000.");
         if (o.MaximoAbertos is < 1 or > 100) erros.Add("Midia:MaximoAbertos deve estar entre 1 e 100.");
+        if (o.Sanitizacao.TimeoutSegundos is < 5 or > 3600) erros.Add("Midia:Sanitizacao:TimeoutSegundos deve estar entre 5 e 3600.");
         foreach (var (nome, l) in new[] { ("Vinheta", o.Vinheta), ("Comercial", o.Comercial), ("Musica", o.Musica) })
         {
             if (l.TamanhoMaximoBytes is < 1 or > TetoDoBanco) erros.Add($"Midia:{nome}:TamanhoMaximoBytes deve estar entre 1 e {TetoDoBanco}.");

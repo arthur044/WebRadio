@@ -37,10 +37,14 @@ public sealed class MidiasEndpoints : IEndpointModule
         });
 
         g.MapGet("", async (TipoMidia? tipo, StatusSanitizacao? status, bool? ativo, string? busca, int? pagina, int? tamanho, ClaimsPrincipal user, IMediator mediator, CancellationToken ct) =>
-            Results.Ok(await mediator.Send(new ListarMidiasQuery(tipo, status, ativo, busca, pagina ?? 1, tamanho ?? 20, user.IsInRole("Admin")), ct)));
+            Guid.TryParse(user.FindFirstValue("sub"), out var usuario)
+                ? Results.Ok(await mediator.Send(new ListarMidiasQuery(tipo, status, ativo, busca, pagina ?? 1, tamanho ?? 20, user.IsInRole("Admin"), usuario), ct))
+                : Results.Unauthorized());
 
         g.MapGet("/{id:guid}", async (Guid id, HttpContext http, ClaimsPrincipal user, IMediator mediator, CancellationToken ct) =>
-            ComETag(http, await mediator.Send(new MidiaPorIdQuery(id, user.IsInRole("Admin")), ct), StatusCodes.Status200OK));
+            Guid.TryParse(user.FindFirstValue("sub"), out var usuario)
+                ? ComETag(http, await mediator.Send(new MidiaPorIdQuery(id, user.IsInRole("Admin"), usuario), ct), StatusCodes.Status200OK)
+                : Results.Unauthorized());
 
         // O <audio src> não manda Bearer: com ?formato=url o cliente (que tem o Bearer) pega a URL pré-assinada em JSON e a usa direto. Sem o parâmetro, 302.
         g.MapGet("/{id:guid}/preview", async (Guid id, string? formato, HttpContext http, ClaimsPrincipal user, IMediator mediator, CancellationToken ct) =>

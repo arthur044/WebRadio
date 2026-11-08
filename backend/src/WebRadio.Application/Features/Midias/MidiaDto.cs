@@ -25,16 +25,24 @@ public sealed record MidiaDto(
     string? EnviadoPorNome,
     string? HashSha256,
     string? HashOriginalSha256,
+    bool PodeEditar,
     [property: JsonIgnore] string Versao)
 {
     // Hashes, nome do arquivo e do autor não vão para o log com {Obj}.
     public override string ToString() => nameof(MidiaDto);
 
-    public static MidiaDto De(ArquivoMidia m, string? enviadoPorNome, bool admin) =>
+    /// <summary>
+    /// <c>podeEditar</c> é calculado para quem chama (E4-F03, E4-P03): o Admin sempre; o Locutor só a PRÓPRIA mídia e só se ela estiver ativa. É a mesma regra do <c>PATCH</c>
+    /// (<see cref="PodeEditarA"/>), num lugar só, e o front não precisa do id de quem enviou.
+    /// </summary>
+    public static bool PodeEditarA(ArquivoMidia m, bool admin, Guid usuarioId) => admin || (m.EnviadoPorUsuarioId == usuarioId && m.Ativo);
+
+    public static MidiaDto De(ArquivoMidia m, string? enviadoPorNome, bool admin, Guid usuarioId = default) =>
         new(m.Id, m.NomeOriginal, m.Titulo, m.Artista, m.TipoMidia, m.MimeType, m.TamanhoBytes, m.DuracaoSegundos, m.StatusSanitizacao, m.MotivoRejeicao,
             m.DataUploadUtc, m.Ativo, enviadoPorNome,
             admin && m.HashSHA256 is { } h ? Convert.ToHexStringLower(h) : null,
             admin && m.HashOriginalSHA256 is { } ho ? Convert.ToHexStringLower(ho) : null,
+            PodeEditarA(m, admin, usuarioId),
             Convert.ToBase64String(m.RowVersion));
 }
 

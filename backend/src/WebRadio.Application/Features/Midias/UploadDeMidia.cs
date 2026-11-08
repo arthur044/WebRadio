@@ -122,7 +122,8 @@ public sealed class IniciarUploadHandler(
     IObjectStorage? storage = null) : IRequestHandler<IniciarUploadCommand, UploadIniciadoDto>
 {
     public static readonly TimeSpan EsperaDaTrava = TimeSpan.FromMilliseconds(2000);
-    public static readonly TimeSpan ValidadeDaPolicy = TimeSpan.FromHours(1);
+    /// <summary>15 min (S-M02): é a janela em que o POST na mesma chave ainda é aceito. A validade é checada quando o POST CHEGA ao storage, então um upload lento que já começou termina.</summary>
+    public static readonly TimeSpan ValidadeDaPolicy = TimeSpan.FromMinutes(15);
     public static readonly TimeSpan EsperaComAbertosNoLimite = TimeSpan.FromSeconds(60);
 
     private static readonly StatusSanitizacao[] Abertos = [StatusSanitizacao.AguardandoUpload, StatusSanitizacao.Pendente, StatusSanitizacao.EmAnalise];

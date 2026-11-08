@@ -99,6 +99,9 @@ public static class EventosDoOutbox
     /// </summary>
     public const string AlertaHarborFalhas = "AlertaHarborFalhas";
 
+    /// <summary>Carga <c>{ midiaId, statusSanitizacao, motivoRejeicao? }</c> (02 §10): para <c>locutores</c>. Gravado pelo Worker quando a mídia chega a Aprovado, Rejeitado ou Quarentena (E4-F05).</summary>
+    public const string MidiaSanitizada = "MidiaSanitizada";
+
     /// <summary>Carga <c>PedidoDto</c> (02 §10): só para <c>locutores</c>. Leva nome e dedicatória do ouvinte, por isso nunca vai para todos.</summary>
     public const string PedidoCriado = "PedidoCriado";
 
