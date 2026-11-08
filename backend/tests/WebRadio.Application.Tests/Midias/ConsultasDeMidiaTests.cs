@@ -144,7 +144,7 @@ public sealed class ConsultasDeMidiaTests
         var f = new MidiasFixture();
         var m = f.SemearAprovada();
 
-        var p = await f.Preview.Handle(new PreviewDaMidiaQuery(m.Id), default);
+        var p = await f.Preview.Handle(new PreviewDaMidiaQuery(m.Id, true), default);
 
         var chamada = Assert.Single(f.Storage.Previews);
         Assert.Equal(("midia", m.ChaveStorage, TimeSpan.FromMinutes(5), "audio/mpeg"), (chamada.Bucket, chamada.Chave, chamada.Validade, chamada.ContentType));
@@ -163,14 +163,24 @@ public sealed class ConsultasDeMidiaTests
         var f = new MidiasFixture();
         var m = f.Semear(status);
 
-        await Assert.ThrowsAsync<NaoEncontradoException>(() => f.Preview.Handle(new PreviewDaMidiaQuery(m.Id), default));
+        await Assert.ThrowsAsync<NaoEncontradoException>(() => f.Preview.Handle(new PreviewDaMidiaQuery(m.Id, true), default));
         Assert.Empty(f.Storage.Previews);
+    }
+
+    [Fact]
+    public async Task Preview_de_desativada_e_404_para_o_locutor_e_funciona_para_o_admin()
+    {
+        var f = new MidiasFixture();
+        var m = f.SemearAprovada(ativo: false);
+        await Assert.ThrowsAsync<NaoEncontradoException>(() => f.Preview.Handle(new PreviewDaMidiaQuery(m.Id, false), default));
+        Assert.Empty(f.Storage.Previews);
+        await f.Preview.Handle(new PreviewDaMidiaQuery(m.Id, true), default);
     }
 
     [Fact]
     public async Task Preview_de_id_inexistente_e_404()
     {
         var f = new MidiasFixture();
-        await Assert.ThrowsAsync<NaoEncontradoException>(() => f.Preview.Handle(new PreviewDaMidiaQuery(Guid.NewGuid()), default));
+        await Assert.ThrowsAsync<NaoEncontradoException>(() => f.Preview.Handle(new PreviewDaMidiaQuery(Guid.NewGuid(), true), default));
     }
 }

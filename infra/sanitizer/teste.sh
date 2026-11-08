@@ -167,8 +167,13 @@ confere "WAV de 40 s com limite de 10 s: a saída é cortada em ~11 s (duração
 ID="$(novo_id)"
 job "$P-san" "$ID" wav "$TMP/fix/longo.wav" 100 30000 60
 RES="$(espera_resultado "$P-san" "$ID" 60)" || RES=""
-TAM="$(docker exec "$P-san" sh -c "wc -c < /jobs/$ID/out.mp3" 2>/dev/null || echo 99999999)"
-confere "-fs limita o tamanho da saída (30000 bytes + uma margem de um quadro; veio $TAM)" test "$TAM" -le 31000
+confere "-fs: a saída que bateu no limite de tamanho é RECUSADA (saida_grande_demais), nunca ok com a música cortada" \
+  test "$(echo "$RES" | campo ok)|$(echo "$RES" | campo motivo)" = "false|saida_grande_demais"
+confere "-fs: não sobra out.mp3" bash -c "! docker exec '$P-san' test -e /jobs/$ID/out.mp3"
+ID="$(novo_id)"
+job "$P-san" "$ID" wav "$TMP/fix/longo.wav" 100 5000000 60
+RES="$(espera_resultado "$P-san" "$ID" 60)" || RES=""
+confere "com folga no limite de tamanho o mesmo arquivo é aprovado" test "$(echo "$RES" | campo ok)" = "true"
 
 echo "== job inválido e diretório estranho"
 for ruim in \
@@ -177,6 +182,7 @@ for ruim in \
   '{"formato":"mp3","duracaoMaxSegundos":99999999,"tamanhoMaxSaidaBytes":1000,"timeoutSegundos":5}' \
   '{"formato":"mp3","duracaoMaxSegundos":10,"tamanhoMaxSaidaBytes":1000,"timeoutSegundos":5,"extra":"x"}' \
   '{"formato":"mp3","duracaoMaxSegundos":0,"tamanhoMaxSaidaBytes":1000,"timeoutSegundos":5}' \
+  $'{"formato":"mp3","duracaoMaxSegundos":10,"tamanhoMaxSaidaBytes":1000,"timeoutSegundos":5}\n{"formato":"mp3","duracaoMaxSegundos":10,"tamanhoMaxSaidaBytes":1000,"timeoutSegundos":5}' \
   'não é json'; do
   ID="$(novo_id)"
   docker exec -i "$P-san" sh -c "mkdir /jobs/$ID && cat > /jobs/$ID/in.bin" < "$TMP/fix/a.mp3"

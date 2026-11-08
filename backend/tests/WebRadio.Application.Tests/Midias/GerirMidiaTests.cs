@@ -11,8 +11,8 @@ namespace WebRadio.Application.Tests.Midias;
 public sealed class GerirMidiaTests
 {
     private static EditarMidiaCommand Patch(ArquivoMidia m, string? titulo = null, string? artista = null, bool? ativo = null, bool admin = false, byte[]? versao = null,
-        bool tituloPresente = false, bool artistaPresente = false)
-        => new(m.Id, versao ?? m.RowVersion, titulo, artista, ativo, admin, tituloPresente || titulo is not null, artistaPresente || artista is not null);
+        bool tituloPresente = false, bool artistaPresente = false, Guid? usuario = null)
+        => new(m.Id, versao ?? m.RowVersion, titulo, artista, ativo, admin, tituloPresente || titulo is not null, artistaPresente || artista is not null, usuario ?? m.EnviadoPorUsuarioId);
 
     [Fact]
     public async Task Edita_titulo_e_artista_normalizados_e_devolve_o_dto()
@@ -74,6 +74,30 @@ public sealed class GerirMidiaTests
         var recarregada = f.Db.ArquivosMidia.Single();
         var reativada = await f.Editar.Handle(Patch(recarregada, ativo: true, admin: true), default);
         Assert.True(reativada.Ativo);
+    }
+
+    [Fact]
+    public async Task Locutor_so_edita_a_propria_midia_o_admin_edita_qualquer_uma()
+    {
+        var f = new MidiasFixture();
+        var m = f.SemearAprovada();
+        var outro = Guid.NewGuid();
+
+        await Assert.ThrowsAsync<AcessoNegadoException>(() => f.Editar.Handle(Patch(m, titulo: "Roubado", usuario: outro), default));
+        Assert.Equal("Aurora", f.Db.ArquivosMidia.Single().Titulo);
+
+        await f.Editar.Handle(Patch(m, titulo: "Do dono"), default);
+        await f.Editar.Handle(Patch(f.Db.ArquivosMidia.Single(), titulo: "Do admin", admin: true, usuario: outro), default);
+        Assert.Equal("Do admin", f.Db.ArquivosMidia.Single().Titulo);
+    }
+
+    [Fact]
+    public async Task Locutor_nao_edita_nem_a_propria_midia_se_ela_foi_desativada()
+    {
+        var f = new MidiasFixture();
+        var m = f.SemearAprovada(ativo: false);
+        await Assert.ThrowsAsync<AcessoNegadoException>(() => f.Editar.Handle(Patch(m, titulo: "x"), default));
+        await f.Editar.Handle(Patch(m, titulo: "x", admin: true), default);
     }
 
     [Fact]
@@ -144,6 +168,47 @@ public sealed class GerirMidiaTests
         var m = f.Semear(StatusSanitizacao.EmAnalise);
         await Assert.ThrowsAsync<TransicaoInvalidaException>(() => f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid()), default));
         Assert.Single(f.Db.ArquivosMidia);
+    }
+
+    /// <summary>Um IRadioDbContext que delega ao real e falha o SaveChanges como o SQL falharia (concorrência ou FK).</summary>
+    private sealed class DbQueFalhaAoSalvar(WebRadio.Application.Abstracoes.IRadioDbContext real, Exception erro) : WebRadio.Application.Abstracoes.IRadioDbContext
+    {
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Usuarios.Usuario> Usuarios => real.Usuarios;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Autenticacao.RefreshToken> RefreshTokens => real.RefreshTokens;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Transmissao.CredencialTransmissao> CredenciaisTransmissao => real.CredenciaisTransmissao;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Grade.Programa> Programas => real.Programas;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Interacao.PedidoMusica> PedidosMusica => real.PedidosMusica;
+        public Microsoft.EntityFrameworkCore.DbSet<ArquivoMidia> ArquivosMidia => real.ArquivosMidia;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Interacao.Divulgacao> Divulgacoes => real.Divulgacoes;
+        public Microsoft.EntityFrameworkCore.DbSet<Reproducao> Reproducoes => real.Reproducoes;
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => throw erro;
+    }
+
+    [Fact]
+    public async Task Concorrencia_com_o_Worker_no_DELETE_e_409_de_status_e_nao_audita_uma_exclusao_que_nao_aconteceu()
+    {
+        var f = new MidiasFixture();
+        var m = f.SemearAprovada();
+        var handler = new ExcluirMidiaHandler(new DbQueFalhaAoSalvar(f.Db, new DbUpdateConcurrencyException("RowVersion")), f.Logs.Logger<ExcluirMidiaHandler>());
+
+        var e = await Assert.ThrowsAsync<TransicaoInvalidaException>(() => handler.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid()), default));
+
+        Assert.Contains("mudou de status", e.Message);
+        Assert.DoesNotContain(f.Logs.Linhas, l => l.Contains("MIDIA_EXCLUIDA"));
+    }
+
+    [Fact]
+    public async Task FK_da_reproducao_no_DELETE_e_409_de_comecou_a_tocar_e_nao_audita()
+    {
+        var f = new MidiasFixture();
+        var m = f.SemearAprovada();
+        var handler = new ExcluirMidiaHandler(new DbQueFalhaAoSalvar(f.Db, new DbUpdateException("FK")), f.Logs.Logger<ExcluirMidiaHandler>());
+
+        var e = await Assert.ThrowsAsync<TransicaoInvalidaException>(() => handler.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid()), default));
+
+        Assert.Contains("começou a tocar", e.Message);
+        Assert.DoesNotContain(f.Logs.Linhas, l => l.Contains("MIDIA_EXCLUIDA"));
     }
 
     [Fact]

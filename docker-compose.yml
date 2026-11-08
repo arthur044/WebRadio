@@ -311,7 +311,7 @@ services:
       retries: 3
       start_period: 180s
 
-  # Único contêiner do Épico 4 com saída à internet (os espelhos de assinatura). Não tem dado, segredo nem acesso à rede interna; grava a base no
+  # Único contêiner do Épico 4 com saída à internet (os espelhos de assinatura), numa rede só dele. Não tem dado, segredo nem acesso à rede interna; grava a base no
   # volume clamav-db, que o clamd monta só leitura.
   freshclam:
     image: clamav/clamav@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a
@@ -323,7 +323,7 @@ services:
       - clamav-db:/var/lib/clamav
       - ./infra/clamav/freshclam.conf:/etc/clamav-projeto/freshclam.conf:ro
     tmpfs: ["/tmp:uid=100,gid=101"]
-    networks: [borda]
+    networks: [saida-freshclam]
     cpus: 1
     mem_limit: 512m
     pids_limit: 50
@@ -451,6 +451,9 @@ networks:
     internal: true
     ipam:
       config: [{ subnet: 172.30.4.0/24 }]
+  # E4-F06: rede SÓ do freshclam, com saída à internet (espelhos de assinatura) e mais ninguém: o freshclam faz o parse do que baixa, e na `borda` ele alcançaria as portas
+  # do web e do harbor-borda (multi-homed para app e playout).
+  saida-freshclam: {}
   # E4-D7: só o worker e o clamd (INSTREAM na 3310).
   antivirus:
     internal: true

@@ -12,9 +12,9 @@ namespace WebRadio.Application.Features.Midias;
 
 /// <summary>
 /// <c>PATCH /midias/{id}</c> + <c>If-Match</c> (02 §6). <c>TituloPresente</c>/<c>ArtistaPresente</c> distinguem "campo ausente" (não muda) de "vazio" (limpa; a
-/// Música não pode ficar sem título). <c>ativo</c> só o Admin altera (<see cref="AcessoNegadoException"/> → 403).
+/// Música não pode ficar sem título). <c>ativo</c> só o Admin altera e o Locutor só edita a PRÓPRIA mídia (<see cref="AcessoNegadoException"/> → 403).
 /// </summary>
-public sealed record EditarMidiaCommand(Guid MidiaId, byte[] Versao, string? Titulo, string? Artista, bool? Ativo, bool EhAdmin, bool TituloPresente, bool ArtistaPresente)
+public sealed record EditarMidiaCommand(Guid MidiaId, byte[] Versao, string? Titulo, string? Artista, bool? Ativo, bool EhAdmin, bool TituloPresente, bool ArtistaPresente, Guid UsuarioId = default)
     : IRequest<MidiaDto>;
 
 public sealed class EditarMidiaValidator : AbstractValidator<EditarMidiaCommand>
@@ -31,6 +31,8 @@ public sealed class EditarMidiaHandler(IRadioDbContext db) : IRequestHandler<Edi
     public async Task<MidiaDto> Handle(EditarMidiaCommand cmd, CancellationToken ct)
     {
         var midia = await db.ArquivosMidia.FirstOrDefaultAsync(m => m.Id == cmd.MidiaId, ct) ?? throw new NaoEncontradoException("Mídia");
+        // Dono ou Admin (como o concluir): um Locutor não edita a mídia de outro (Guardian Q1 do #112). Mídia desativada some para o Locutor, então é 404 também.
+        if (!cmd.EhAdmin && (midia.EnviadoPorUsuarioId != cmd.UsuarioId || !midia.Ativo)) throw new AcessoNegadoException("Só quem enviou a mídia (ou o Admin) pode editá-la.");
         if (!midia.RowVersion.AsSpan().SequenceEqual(cmd.Versao)) throw new VersaoDesatualizadaException();
         if (cmd.Ativo is not null && !cmd.EhAdmin) throw new AcessoNegadoException("Só o Admin ativa ou desativa uma mídia.");
 
@@ -67,7 +69,7 @@ public sealed record ExcluirMidiaCommand(Guid MidiaId, Guid SolicitanteId) : IRe
 public sealed record ResultadoDaExclusao(bool Excluida, MidiaDto? Midia);
 
 /// <summary>
-/// A auditoria <c>MIDIA_EXCLUIDA</c> sai pelo log estruturado ANTES do <c>DELETE</c> (como as outras trilhas do projeto): id, os dois hashes em hex, o autor
+/// A auditoria <c>MIDIA_EXCLUIDA</c> sai pelo log estruturado DEPOIS do <c>DELETE</c> confirmado (como as outras trilhas do projeto): id, os dois hashes em hex, o autor
 /// do envio, quem excluiu e o status na hora — o S-M03 guarda os hashes e o autor para inteligência de malware mesmo depois de o registro sumir. O arquivo em
 /// <c>midia/</c> é apagado pelo Worker como órfão (E4-D11): a API não tem <c>s3:DeleteObject</c> lá (S-A04). Mídia em análise não se exclui (o Worker a tem).
 /// </summary>
@@ -85,13 +87,18 @@ public sealed class ExcluirMidiaHandler(IRadioDbContext db, ILogger<ExcluirMidia
             return new ResultadoDaExclusao(false, MidiaDto.De(midia, null, admin: true));
         }
 
-        logger.LogInformation(
-            "MIDIA_EXCLUIDA midia {MidiaId} status {Status} hashSha256 {HashSha256} hashOriginalSha256 {HashOriginalSha256} enviadoPor {EnviadoPorUsuarioId} excluidaPor {SolicitanteId}",
-            midia.Id, midia.StatusSanitizacao, Hex(midia.HashSHA256), Hex(midia.HashOriginalSHA256), midia.EnviadoPorUsuarioId, cmd.SolicitanteId);
+        // Os valores são capturados ANTES do DELETE (depois dele a entidade some do tracker), mas a auditoria só sai DEPOIS de o SaveChanges dar certo: a trilha nunca
+        // registra uma exclusão que não aconteceu.
+        var (id, status, hashSha, hashOriginal, enviadoPor) = (midia.Id, midia.StatusSanitizacao, Hex(midia.HashSHA256), Hex(midia.HashOriginalSHA256), midia.EnviadoPorUsuarioId);
         db.ArquivosMidia.Remove(midia);
         try
         {
             await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // O mais provável: o Worker capturou o item (Pendente -> EmAnalise) e trocou o RowVersion entre a leitura e o DELETE.
+            throw new TransicaoInvalidaException("A mídia mudou de status enquanto era excluída; tente de novo.");
         }
         catch (DbUpdateException)
         {
@@ -99,6 +106,9 @@ public sealed class ExcluirMidiaHandler(IRadioDbContext db, ILogger<ExcluirMidia
             throw new TransicaoInvalidaException("A mídia começou a tocar agora; desative-a em vez de excluir.");
         }
 
+        logger.LogInformation(
+            "MIDIA_EXCLUIDA midia {MidiaId} status {Status} hashSha256 {HashSha256} hashOriginalSha256 {HashOriginalSha256} enviadoPor {EnviadoPorUsuarioId} excluidaPor {SolicitanteId}",
+            id, status, hashSha, hashOriginal, enviadoPor, cmd.SolicitanteId);
         return new ResultadoDaExclusao(true, null);
     }
 

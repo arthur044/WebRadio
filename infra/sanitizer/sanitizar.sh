@@ -3,8 +3,8 @@
 # Entrada: in.bin (o original, NÃO confiável) e job.json ({ formato, duracaoMaxSegundos, tamanhoMaxSaidaBytes, timeoutSegundos }).
 # Saída: out.mp3 e result.json ({ ok, motivo?, duracaoSegundos?, streamsAudio, codec }), cada um escrito em arquivo temporário e movido com rename (atômico);
 # no fim apaga in.bin. `motivo` é de uma LISTA FECHADA de códigos; nunca texto do stderr do ffmpeg (o Worker troca o código pela mensagem fixa).
-# Códigos de `motivo` (lista fechada): job_invalido, formato_invalido, streams_audio_invalido, stream_nao_audio, codec_nao_permitido, falha_na_decodificacao, timeout.
-# Os seis primeiros são do ARQUIVO (rejeição determinística); `timeout` é falha de processamento (o Worker conta a tentativa, E4-D13). A duração mínima e máxima
+# Códigos de `motivo` (lista fechada): job_invalido, formato_invalido, streams_audio_invalido, stream_nao_audio, codec_nao_permitido, falha_na_decodificacao,
+# saida_grande_demais, timeout. Os sete primeiros são do ARQUIVO (rejeição determinística); `timeout` é falha de processamento (o Worker conta a tentativa, E4-D13). A duração mínima e máxima
 # do tipo são conferidas pelo Worker sobre a SAÍDA: aqui o `-t` só corta em duração máxima + 1 s.
 # Nada do conteúdo do arquivo é interpolado em comando: formato e números são validados antes de qualquer uso.
 set -u
@@ -22,7 +22,7 @@ escrever_resultado() {
 rejeitar() { # $1 = diretório, $2 = código do motivo (lista fechada), $3 = streams de áudio, $4 = codec (já validado por regex)
   rm -f "$1/in.bin" "$1/out.tmp.mp3" "$1/out.mp3"
   escrever_resultado "$1" "{\"ok\":false,\"motivo\":\"$2\",\"streamsAudio\":${3:-0},\"codec\":\"${4:-}\"}"
-  echo "sanitizer: job $(basename "$1") recusado: $2"
+  echo "sanitizer: job $(basename "$1") recusado: $2${5:+ (rc=$5)}"
 }
 
 processar() {
@@ -45,7 +45,8 @@ processar() {
 
   # job.json: UMA linha, exatamente neste formato (o Worker o escreve assim); qualquer desvio é job inválido.
   job="$(head -c 512 "$d/job.json")"
-  if ! echo "$job" | grep -Eq '^\{"formato":"(mp3|ogg|wav|flac)","duracaoMaxSegundos":[0-9]{1,5},"tamanhoMaxSaidaBytes":[0-9]{1,10},"timeoutSegundos":[0-9]{1,4}\}$'; then
+  # O grep casa POR LINHA: um job.json de várias linhas passaria nele e só cairia depois. Uma linha só.
+  if [ "$(printf '%s\n' "$job" | wc -l)" -gt 1 ] || ! echo "$job" | grep -Eq '^\{"formato":"(mp3|ogg|wav|flac)","duracaoMaxSegundos":[0-9]{1,5},"tamanhoMaxSaidaBytes":[0-9]{1,10},"timeoutSegundos":[0-9]{1,4}\}$'; then
     rejeitar "$d" job_invalido 0 ""
     return 0
   fi
@@ -88,9 +89,15 @@ processar() {
     -map 0:a:0 -vn -sn -dn -map_metadata -1 -map_chapters -1 -fflags +bitexact -flags:a +bitexact \
     -c:a libmp3lame -b:a 192k -ar 44100 -ac 2 -t "$((duracao_max + 1))" -fs "$tamanho_max" -f mp3 -y "$d/out.tmp.mp3" >/dev/null 2>&1
   rc=$?
-  if [ "$rc" -ge 124 ]; then rejeitar "$d" timeout "$audio" "$codec"; return 0; fi
+  # rc >= 124: timeout (124), SIGKILL do timeout (137), SIGSEGV (139)... Conta como falha de processamento; o rc vai ao log para o diagnóstico.
+  if [ "$rc" -ge 124 ]; then rejeitar "$d" timeout "$audio" "$codec" "$rc"; return 0; fi
   if [ "$rc" -ne 0 ] || [ ! -s "$d/out.tmp.mp3" ] || [ -L "$d/out.tmp.mp3" ]; then
-    rejeitar "$d" falha_na_decodificacao "$audio" "$codec"
+    rejeitar "$d" falha_na_decodificacao "$audio" "$codec" "$rc"
+    return 0
+  fi
+  # O -fs PARA de escrever ao atingir o limite e o ffmpeg sai com 0: uma música cortada no meio não pode virar "ok". Saída que chegou ao limite é recusada.
+  if [ "$(wc -c < "$d/out.tmp.mp3")" -ge "$tamanho_max" ]; then
+    rejeitar "$d" saida_grande_demais "$audio" "$codec"
     return 0
   fi
 

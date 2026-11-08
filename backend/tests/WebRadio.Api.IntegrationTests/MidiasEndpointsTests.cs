@@ -95,6 +95,7 @@ public class MidiasEndpointsTests
         var r = await Post(c.C, Rota + "/uploads", await TokenDe(c.C, "locutor@example.com"), Corpo());
 
         Assert.Equal(HttpStatusCode.Created, r.StatusCode);
+        Assert.Equal("no-store", r.Headers.CacheControl!.ToString()); // a policy assinada nunca fica em cache
         var j = await Json(r);
         var id = j.GetProperty("midiaId").GetGuid();
         var upload = j.GetProperty("upload");
@@ -168,12 +169,12 @@ public class MidiasEndpointsTests
 
     // ---- E4-F03: consultas e manutenção ----
 
-    private static Guid Semear(Cena c, StatusSanitizacao status = StatusSanitizacao.Aprovado, string titulo = "Aurora", TipoMidia tipo = TipoMidia.Musica, bool ativo = true, bool comReproducao = false)
+    private static Guid Semear(Cena c, StatusSanitizacao status = StatusSanitizacao.Aprovado, string titulo = "Aurora", TipoMidia tipo = TipoMidia.Musica, bool ativo = true, bool comReproducao = false, string donoEmail = "locutor@example.com")
     {
         using var escopo = c.F.Services.CreateScope();
         var db = escopo.ServiceProvider.GetRequiredService<WebRadio.Application.Abstracoes.IRadioDbContext>();
         var agora = DateTime.UtcNow;
-        var dono = db.Usuarios.First().Id;
+        var dono = db.Usuarios.First(u => u.Email == donoEmail).Id;
         var m = new WebRadio.Domain.Midia.ArquivoMidia(Guid.NewGuid(), "aurora.mp3", titulo, "Banda", tipo, "audio/mpeg", 1000, dono, agora);
         if (status >= StatusSanitizacao.Pendente) m.ConcluirUpload(1000, "etag", agora);
         if (status >= StatusSanitizacao.EmAnalise) m.IniciarAnalise(agora);
@@ -265,6 +266,15 @@ public class MidiasEndpointsTests
         Assert.Equal(HttpStatusCode.BadRequest, (await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}/preview?formato=outro", token)).StatusCode);
     }
 
+    [Fact]
+    public async Task Preview_de_midia_desativada_so_o_admin_ve_como_na_lista_e_no_por_id()
+    {
+        var c = NovaCena();
+        var id = Semear(c, ativo: false);
+        Assert.Equal(HttpStatusCode.NotFound, (await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}/preview?formato=url", await TokenDe(c.C, "locutor@example.com"))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}/preview?formato=url", await TokenDe(c.C, "admin@example.com"))).StatusCode);
+    }
+
     [Theory]
     [InlineData(StatusSanitizacao.AguardandoUpload)]
     [InlineData(StatusSanitizacao.Pendente)]
@@ -294,6 +304,18 @@ public class MidiasEndpointsTests
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
         Assert.Equal("Novo título", (await Json(ok)).GetProperty("titulo").GetString());
         // (O ETag velho deixar de valer depois do PATCH depende do RowVersion do SQL Server: MidiasSqlTests.)
+    }
+
+    [Fact]
+    public async Task Patch_de_midia_de_outro_locutor_e_403_e_o_admin_pode()
+    {
+        var c = NovaCena();
+        var id = Semear(c, donoEmail: "admin@example.com");
+        var admin = await TokenDe(c.C, "admin@example.com");
+        var etag = (await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}", admin)).Headers.ETag!.ToString();
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await Enviar(c.C, HttpMethod.Patch, $"{Rota}/{id}", await TokenDe(c.C, "locutor@example.com"), new { titulo = "Roubado" }, etag)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Enviar(c.C, HttpMethod.Patch, $"{Rota}/{id}", admin, new { titulo = "Do admin" }, etag)).StatusCode);
     }
 
     [Fact]

@@ -162,8 +162,8 @@ def redes(nome):
     return set((servicos[nome].get("networks") or {}).keys())
 
 # --- redes e portas (04 §Redes, S-M15)
-confere("redes da base: exatamente borda, app, dados, playout, midia-borda e antivirus (nenhuma diag-*)",
-        set(prod["networks"]) == {"borda", "app", "dados", "playout", "midia-borda", "antivirus"}, str(sorted(prod["networks"])))
+confere("redes da base: exatamente borda, app, dados, playout, midia-borda, antivirus e saida-freshclam (nenhuma diag-*)",
+        set(prod["networks"]) == {"borda", "app", "dados", "playout", "midia-borda", "antivirus", "saida-freshclam"}, str(sorted(prod["networks"])))
 publicadas = {n: [(p.get("published"), p.get("target"), p.get("host_ip")) for p in s.get("ports", [])] for n, s in servicos.items() if s.get("ports")}
 confere("só o web publica porta, e só a 8080", publicadas == {"web": [("8080", 8080, None)]}, str(publicadas))
 confere("web nas redes borda, app e midia-borda, e NÃO na playout", redes("web") == {"borda", "app", "midia-borda"}, str(sorted(redes("web"))))
@@ -187,7 +187,9 @@ confere("api em app, dados e playout", redes("api") == {"app", "dados", "playout
 confere("worker na dados e na antivirus", redes("worker") == {"dados", "antivirus"}, str(sorted(redes("worker"))))
 # --- E4-F06: o antivírus. O clamd só na rede interna antivirus (com o worker); o freshclam é o único com saída à internet (borda) e não toca a rede interna.
 confere("clamd só na rede antivirus", redes("clamd") == {"antivirus"}, str(sorted(redes("clamd"))))
-confere("freshclam só na rede borda (espelhos de assinatura)", redes("freshclam") == {"borda"}, str(sorted(redes("freshclam"))))
+confere("freshclam só na rede saida-freshclam (internet, e mais ninguém nela)", redes("freshclam") == {"saida-freshclam"}
+        and sorted(n for n in servicos if "saida-freshclam" in redes(n)) == ["freshclam"], str(sorted(redes("freshclam"))))
+confere("saida-freshclam NÃO é internal (é o freshclam que sai à internet)", not prod["networks"]["saida-freshclam"].get("internal"))
 confere("rede antivirus: só o worker e o clamd",
         sorted(n for n in servicos if "antivirus" in redes(n)) == ["clamd", "worker"], str(sorted(n for n in servicos if "antivirus" in redes(n))))
 confere("clamd lê a base só em leitura; o freshclam a escreve",

@@ -22,7 +22,7 @@ public sealed class MidiasEndpoints : IEndpointModule
     {
         var g = app.MapGroup("/api/v1/midias").RequireAuthorization("PodeModerar");
 
-        g.MapPost("/uploads", async (IniciarUploadRequest req, ClaimsPrincipal user, IMediator mediator, CancellationToken ct) =>
+        g.MapPost("/uploads", async (IniciarUploadRequest req, HttpContext http, ClaimsPrincipal user, IMediator mediator, CancellationToken ct) =>
         {
             if (!Guid.TryParse(user.FindFirstValue("sub"), out var usuario)) return Results.Unauthorized();
             List<ValidationFailure> faltas = [];
@@ -32,6 +32,7 @@ public sealed class MidiasEndpoints : IEndpointModule
 
             var iniciado = await mediator.Send(new IniciarUploadCommand(
                 usuario, req.NomeOriginal ?? "", req.Titulo, req.Artista, req.TipoMidia!.Value, req.MimeTypeDeclarado ?? "", req.TamanhoBytes!.Value), ct);
+            http.Response.Headers.CacheControl = "no-store"; // o corpo leva a POST policy ASSINADA (1 h): nunca fica em cache
             return Results.Json(iniciado, statusCode: StatusCodes.Status201Created);
         });
 
@@ -42,11 +43,11 @@ public sealed class MidiasEndpoints : IEndpointModule
             ComETag(http, await mediator.Send(new MidiaPorIdQuery(id, user.IsInRole("Admin")), ct), StatusCodes.Status200OK));
 
         // O <audio src> não manda Bearer: com ?formato=url o cliente (que tem o Bearer) pega a URL pré-assinada em JSON e a usa direto. Sem o parâmetro, 302.
-        g.MapGet("/{id:guid}/preview", async (Guid id, string? formato, HttpContext http, IMediator mediator, CancellationToken ct) =>
+        g.MapGet("/{id:guid}/preview", async (Guid id, string? formato, HttpContext http, ClaimsPrincipal user, IMediator mediator, CancellationToken ct) =>
         {
             if (formato is not null && !formato.Equals("url", StringComparison.Ordinal))
                 throw new ValidationException([new ValidationFailure("formato", "formato só aceita \"url\".")]);
-            var preview = await mediator.Send(new PreviewDaMidiaQuery(id), ct);
+            var preview = await mediator.Send(new PreviewDaMidiaQuery(id, user.IsInRole("Admin")), ct);
             http.Response.Headers.CacheControl = "no-store"; // a URL é assinada e curta: nunca fica em cache
             return formato is null ? Results.Redirect(preview.Url) : Results.Json(preview);
         });
@@ -66,7 +67,8 @@ public sealed class MidiasEndpoints : IEndpointModule
                 ativo = a.GetBoolean();
             }
 
-            var dto = await mediator.Send(new EditarMidiaCommand(id, versao!, titulo, artista, ativo, user.IsInRole("Admin"), tituloPresente, artistaPresente), ct);
+            if (!Guid.TryParse(user.FindFirstValue("sub"), out var usuario)) return Results.Unauthorized();
+            var dto = await mediator.Send(new EditarMidiaCommand(id, versao!, titulo, artista, ativo, user.IsInRole("Admin"), tituloPresente, artistaPresente, usuario), ct);
             return ComETag(http, dto, StatusCodes.Status200OK);
         });
 

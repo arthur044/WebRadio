@@ -88,7 +88,7 @@ public sealed class MidiaPorIdHandler(IRadioDbContext db) : IRequestHandler<Midi
 /// <c>GET /midias/{id}/preview</c> (S-M07): a URL pré-assinada de GET (5 min) em <c>midia/</c>, com <c>response-content-type=audio/mpeg</c> e
 /// <c>inline; filename*=UTF-8''{id}.mp3</c>. Só <c>Aprovado</c>: nunca há URL para a quarentena (a mídia fora desse status é 404, sem assinar nada).
 /// </summary>
-public sealed record PreviewDaMidiaQuery(Guid Id) : IRequest<PreviewDto>;
+public sealed record PreviewDaMidiaQuery(Guid Id, bool EhAdmin) : IRequest<PreviewDto>;
 
 public sealed class PreviewDaMidiaHandler(IRadioDbContext db, IClock clock, IObjectStorage? storage = null) : IRequestHandler<PreviewDaMidiaQuery, PreviewDto>
 {
@@ -97,7 +97,7 @@ public sealed class PreviewDaMidiaHandler(IRadioDbContext db, IClock clock, IObj
     public async Task<PreviewDto> Handle(PreviewDaMidiaQuery q, CancellationToken ct)
     {
         var destino = storage ?? throw new InvalidOperationException("Storage não configurado.");
-        var midia = await db.ArquivosMidia.AsNoTracking().Where(m => m.Id == q.Id && m.StatusSanitizacao == StatusSanitizacao.Aprovado && m.Bucket == Buckets.Midia)
+        var midia = await db.ArquivosMidia.AsNoTracking().Where(m => m.Id == q.Id && m.StatusSanitizacao == StatusSanitizacao.Aprovado && m.Bucket == Buckets.Midia && (q.EhAdmin || m.Ativo))
             .Select(m => new { m.Id, m.ChaveStorage }).FirstOrDefaultAsync(ct) ?? throw new NaoEncontradoException("Mídia");
 
         var url = await destino.UrlGetPreAssinadaAsync(Buckets.Midia, midia.ChaveStorage, Validade, "audio/mpeg", $"inline; filename*=UTF-8''{midia.Id}.mp3", ct);

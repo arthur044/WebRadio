@@ -161,14 +161,14 @@ public class MidiasSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
 
         await using (var db = _c.NovoDb())
         {
-            var dto = await new EditarMidiaHandler(db).Handle(new EditarMidiaCommand(id, versaoLida, "Depois", null, null, false, true, false), default);
+            var dto = await new EditarMidiaHandler(db).Handle(new EditarMidiaCommand(id, versaoLida, "Depois", null, null, false, true, false, usuario), default);
             Assert.Equal("Depois", dto.Titulo);
             Assert.NotEqual(Convert.ToBase64String(versaoLida), dto.Versao);
         }
 
         await using var velho = _c.NovoDb();
         await Assert.ThrowsAsync<VersaoDesatualizadaException>(() =>
-            new EditarMidiaHandler(velho).Handle(new EditarMidiaCommand(id, versaoLida, "Outro", null, null, false, true, false), default));
+            new EditarMidiaHandler(velho).Handle(new EditarMidiaCommand(id, versaoLida, "Outro", null, null, false, true, false, usuario), default));
     }
 
     [SqlFact]
