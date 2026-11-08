@@ -12,7 +12,7 @@ const canal = process.env.E2E_CHANNEL ?? 'chromium'
 export default defineConfig({
   testDir: './e2e',
   testIgnore: stackURL
-    ? /(refresh-cross-tab|pedir-musica|mural)\.spec\.ts$/
+    ? /(refresh-cross-tab|pedir-musica|mural|biblioteca|mais-tocadas)\.spec\.ts$/
     : /(admin-grade|grade-ao-vivo|pedidos-moderacao)\.spec\.ts$/,
   globalSetup: stackURL ? './e2e/global-setup.ts' : undefined,
   fullyParallel: !stackURL,
