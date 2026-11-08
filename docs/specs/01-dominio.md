@@ -97,7 +97,8 @@ Agendado ──(worker: Inicio ≤ agora < Fim)──► AoVivo ──(worker: F
 | ModeradoPorUsuarioId | Guid? | |
 | ModeradoEmUtc | DateTime? | |
 | MotivoRejeicao | string(280)? | obrigatório se Rejeitado |
-| EnviadoPlayoutEmUtc | DateTime? | quando o Liquidsoap retirou o pedido da fila; regravado no reenvio de um pedido que não tocou em 30 min (`08`, E4-D5) |
+| EnviadoPlayoutEmUtc | DateTime? | quando o Liquidsoap retirou o pedido da fila; regravado no reenvio (`08`, E4-D5) |
+| EnviadoPlayoutInstancia | Guid? | instância do Liquidsoap (UUID do boot, cabeçalho `X-Playout-Instancia`) que recebeu o pedido; o pedido só é reenviado a uma instância diferente, ou seja, depois de um reinício (`08`, E4-D5) |
 | TocadoEmUtc | DateTime? | |
 | CriadoEmUtc / RowVersion | | |
 
@@ -134,6 +135,7 @@ Moderar um pedido que não está `Pendente` → erro de domínio `PedidoJaModera
 | UploadExpiraEmUtc | DateTime | criação + 1 h (limpeza de `AguardandoUpload`) |
 | SanitizadoEmUtc | DateTime? | |
 | Ativo | bool | desativar tira da rotação sem apagar o histórico |
+| Sorteio | int | coluna calculada persistida `CHECKSUM(Id)`, chave do sorteio da rotação (`08`, E4-D4); nunca gravada pela aplicação |
 | RowVersion | byte[] | |
 
 Limites por tipo (configuráveis em `Midia:Limites`):

@@ -139,20 +139,20 @@ A regra de dependência é garantida por **teste de arquitetura** (NetArchTest),
 ### Fluxo C — Upload e sanitização de mídia
 1. `POST /midias/uploads` (Locutor/Admin; 20/h por usuário e no máximo 5 abertos por usuário, S-M06) → cria `ArquivoMidia` em `AguardandoUpload` e devolve a presigned POST policy, com as condições **exatas** do S-M01: `bucket` eq `quarentena`, `key` eq `{yyyy}/{MM}/{id}`, `content-length-range [1, limiteDoTipo]`, `Content-Type` eq e validade de 15 min. A URL é `<origem>/storage/quarentena` (D18).
 2. O browser envia o arquivo e depois chama `POST /midias/{id}/concluir`. A API faz o `HEAD` do objeto (existe e o tamanho bate), grava `EtagUpload` → `Pendente`.
-3. O Worker pega o arquivo (`UPDATE TOP(1) ... WITH (READPAST)` → `EmAnalise`, `EmAnaliseDesdeUtc`, `TentativasSanitizacao + 1`; um lease vencido volta para a fila; na 3ª falha → `Rejeitado`):
-   1. `stat` do objeto: tamanho acima do limite ou `ETag` ≠ `EtagUpload` → `Rejeitado`. Baixa **uma única vez** para o `tmpfs`; daqui em diante tudo roda sobre essa cópia (S-M02, S-A01);
+3. O Worker pega o arquivo (CTE `SELECT TOP (1) ... WITH (UPDLOCK, READPAST, ROWLOCK) ORDER BY DataUploadUtc` → `EmAnalise`, `EmAnaliseDesdeUtc`, `TentativasSanitizacao + 1`; um lease vencido volta para a fila; na 3ª falha atribuível ao arquivo → `Rejeitado`; falha de infraestrutura devolve a tentativa, `08` E4-D13). Ordem a partir do Épico 4 (`08`, E4-F05):
+   1. `stat` do objeto: tamanho acima do limite ou `ETag` ≠ `EtagUpload` → `Rejeitado`. Baixa **uma única vez**, com `GET` condicional (`If-Match: <EtagUpload>`, 412 → `Rejeitado`) e corte em `tamanhoBytes + 1`, direto para o `tmpfs` do job; daqui em diante tudo roda sobre essa cópia (S-M02, S-A01);
    2. `HashOriginalSHA256` do arquivo recebido (auditoria, reenvio);
    3. **magic bytes** decidem o formato (`ID3`/sync → mp3, `OggS` → ogg, `RIFF…WAVE` → wav, `fLaC` → flac). Qualquer outro → `Rejeitado`, **sem** ffmpeg;
-   4. o Worker entrega o job ao **`sanitizer`** (D16): `ffprobe -protocol_whitelist file -f <fmt>` → whitelist de codec e exatamente 1 stream de áudio → `ffmpeg … -map 0:a:0 -map_metadata -1 -fflags +bitexact … -t <max+1> -fs <max>` → MP3 CBR 192k 44.1 kHz, com timeout duro e kill (comando exato no S-C01);
-   5. `DuracaoSegundos` e `MimeType` vêm do **arquivo de saída** (o cabeçalho de entrada não é confiável, S-A01); limites por tipo aplicados sobre ela;
-   6. `HashSHA256` da **saída** → duplicata de uma mídia aprovada = `Rejeitado` ("duplicado de {id}");
-   7. antivírus (ClamAV no Épico 4). No Épico 1 existe o `NoOpMalwareScanner` só com `IsDevelopment()` **e** `Seguranca:PermitirScannerNoOp=true`. Fora disso, sem scanner o Worker **não sobe**. Falha ou timeout do scan = continua `Pendente` (S-A02);
+   4. **antivírus sobre o original** (S-A02 item 5): malware → `Quarentena`, sem passar pelo ffmpeg; falha ou timeout do scanner → continua `Pendente`. Fora de Development, sem scanner o Worker **não sobe**; o `NoOpMalwareScanner` só vale com `IsDevelopment()` **e** `Seguranca:PermitirScannerNoOp=true`;
+   5. o Worker entrega o job ao **`sanitizer`** (D16): `ffprobe -protocol_whitelist file -f <fmt>` → whitelist de codec e exatamente 1 stream de áudio → `ffmpeg … -map 0:a:0 -map_metadata -1 -fflags +bitexact … -t <max+1> -fs <max>` → MP3 CBR 192k 44.1 kHz, com timeout duro e kill (comando exato no S-C01);
+   6. `DuracaoSegundos` e `MimeType` vêm do **arquivo de saída** (o cabeçalho de entrada não é confiável, S-A01); limites por tipo aplicados sobre ela;
+   7. `HashSHA256` da **saída** → duplicata de uma mídia aprovada = `Rejeitado` ("duplicado de {id}");
    8. grava **só a saída** em `midia/`, apaga o original da quarentena → `Aprovado`. `Rejeitado` apaga o objeto na hora; `Quarentena` guarda por 30 dias, isolada, e avisa o Admin (S-B06).
 4. O Worker apaga registros em `AguardandoUpload` com mais de 1 h e seus objetos.
 5. As imagens de divulgação **não** usam POST policy: passam pela API (multipart ≤ 2 MB), que recodifica, tira o EXIF, limita a 4096 px e grava em `publico/` com `Content-Type` definido pelo servidor (S-A05).
 
 ### Fluxo D — Playout (contrato definido agora, implementação no Épico 2)
-- Script do Liquidsoap: `fallback(track_sensitive=false, [ao_vivo_harbor, fila_api, rotacao, silencio_emergencia])`, com `rotate(weights=[1,4], [vinhetas, musicas])` na rotação.
+- Script do Liquidsoap: `fallback(track_sensitive=false, [ao_vivo_harbor, fila_api, rotacao, silencio_emergencia])`. A `rotacao` é a playlist local (fallback com a API fora); a partir do Épico 4 os pesos entre música, vinheta e comercial ficam na API, que escolhe a faixa da rotação pela `fila_api` (`08`, E4-D4).
 - O Liquidsoap fala **só** com `http://api:8081` (porta interna, D17) pela rede `playout`. Ele valida o prefixo da `url` recebida (`http://minio:9000/midia/`) e aplica os metadados com `metadata.map`, nunca concatenando dentro de `annotate:` (S-A09).
 - `fila_api` = `request.dynamic` → `GET /internal/playout/proxima` → a API faz `UPDATE TOP(1) ... WITH (UPDLOCK, READPAST) SET EnviadoPlayoutEmUtc` no pedido aprovado mais antigo que tenha mídia e devolve uma URL pré-assinada **interna** (`minio:9000`). Sem pedido na fila, a partir do Épico 4 a API devolve uma faixa da rotação da biblioteca (`08`, E4-D4); com a biblioteca vazia responde 204 e a rotação local assume.
 - `on_track` → `POST /internal/playout/eventos` → grava `midia.Reproducao`, marca o pedido como `Tocado` e publica `TocandoAgora`.
