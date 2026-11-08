@@ -94,6 +94,12 @@ public sealed class ArquivoMidiaConfiguration : IEntityTypeConfiguration<Arquivo
             .HasDefaultConstraintName("DF_ArquivoMidia_Ativo");
         builder.Property(m => m.RowVersion).IsRowVersion();
 
+        // E4-A01a (08, E4-D4): chave do sorteio da rotação. Propriedade de sombra, calculada e persistida: nunca gravada pela aplicação
+        // (gravar trocaria o RowVersion e daria 412 na edição do Admin); o Forge a consulta por SQL no E4-F08. Os 4 primeiros bytes do
+        // SHA-256 do Id: uniforme e sem colisão. CHECKSUM([Id]) NÃO serve: com NEWSEQUENTIALID() dá 4.086 valores para 40.000 mídias.
+        builder.Property<int>("Sorteio")
+            .HasComputedColumnSql("CONVERT(int, SUBSTRING(HASHBYTES('SHA2_256', CONVERT(binary(16), [Id])), 1, 4))", stored: true);
+
         builder.HasOne<Usuario>()
             .WithMany()
             .HasForeignKey(m => m.EnviadoPorUsuarioId)
@@ -116,6 +122,11 @@ public sealed class ArquivoMidiaConfiguration : IEntityTypeConfiguration<Arquivo
         builder.HasIndex(m => new { m.TipoMidia, m.StatusSanitizacao })
             .IncludeProperties(m => new { m.Titulo, m.Artista, m.DuracaoSegundos, m.Ativo })
             .HasDatabaseName("IX_ArquivoMidia_Biblioteca");
+
+        builder.HasIndex("TipoMidia", "Sorteio")
+            .IncludeProperties(nameof(ArquivoMidia.Titulo), nameof(ArquivoMidia.Artista))
+            .HasFilter("StatusSanitizacao = 4 AND Ativo = 1")
+            .HasDatabaseName("IX_ArquivoMidia_Rotacao");
 
         builder.HasIndex(m => new { m.StatusSanitizacao, m.DataUploadUtc })
             .IncludeProperties(m => new { m.UploadExpiraEmUtc, m.TentativasSanitizacao, m.EmAnaliseDesdeUtc })
