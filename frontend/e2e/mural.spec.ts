@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 /**
- * E3-P05 (DoD 7 do Épico 3), no preview com a API mockada: o Mural mostra as divulgações na ordem que o servidor mandou
+ * E3-P05 (DoD 8 do Épico 3), no preview com a API mockada: o Mural mostra as divulgações na ordem que o servidor mandou
  * (prioridade e depois id), a mensagem como texto puro (HTML não vira elemento nem executa) e o link com
  * `rel="noopener noreferrer"`.
  */

@@ -91,6 +91,36 @@ export interface MidiaDto {
   motivoRejeicao: string | null
   dataUploadUtc: string
   ativo: boolean
+  /** A partir do Épico 4 (02 §6). */
+  enviadoPorNome: string | null
+}
+
+/** Corpo de `POST /midias/uploads` (02 §6). `titulo` é obrigatório para `Musica` (a API devolve 400 sem ele). */
+export interface UploadMidiaRequest {
+  nomeOriginal: string
+  tipoMidia: TipoMidia
+  tamanhoBytes: number
+  mimeTypeDeclarado: string
+  titulo: string | null
+  artista: string | null
+}
+
+/**
+ * Resposta 201 de `POST /midias/uploads`: a POST policy do storage (D10). O browser faz `multipart/form-data` para `url`
+ * com os `campos` e o `file` por último.
+ */
+export interface UploadMidiaDto {
+  midiaId: string
+  upload: { url: string; campos: Record<string, string>; expiraEmUtc: string }
+}
+
+/** Item de `GET /relatorios/mais-tocadas` (02 §11). */
+export interface MidiaMaisTocadaDto {
+  midiaId: string
+  titulo: string | null
+  artista: string | null
+  tipoMidia: TipoMidia
+  reproducoes: number
 }
 
 export interface DivulgacaoDto {

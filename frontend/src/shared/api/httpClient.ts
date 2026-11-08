@@ -217,3 +217,13 @@ export async function apiFetchComEtag<T>(
   const response = await fetchComSessao(path, options)
   return { data: await lerCorpo<T>(response), etag: response.headers.get('ETag') }
 }
+
+/**
+ * Só o status da resposta (o corpo não é lido): para o `DELETE /midias/{id}`, que responde 204 (apagou) ou 200 (só
+ * desativou, porque há reprodução) e a tela precisa saber qual dos dois foi.
+ */
+export async function apiFetchStatus(path: string, options: RequestOptions = {}): Promise<number> {
+  const response = await fetchComSessao(path, options)
+  void response.body?.cancel()
+  return response.status
+}
