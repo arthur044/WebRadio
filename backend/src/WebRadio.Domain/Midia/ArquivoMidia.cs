@@ -172,6 +172,23 @@ public sealed class ArquivoMidia : Entidade
         TransicaoPorFalha(agora);
     }
 
+    /// <summary>
+    /// Falha de INFRAESTRUTURA (E4-D13: clamd fora, assinatura velha, MinIO ou SQL fora): volta a Pendente e a tentativa é DEVOLVIDA. Quem consome a fila não pode
+    /// rejeitar um arquivo legítimo só porque o antivírus esteve parado por três ciclos.
+    /// </summary>
+    public void DevolverPorFalhaDeInfraestrutura()
+    {
+        GarantirStatus(StatusSanitizacao.EmAnalise);
+
+        if (TentativasSanitizacao > 0)
+        {
+            TentativasSanitizacao--;
+        }
+
+        StatusSanitizacao = StatusSanitizacao.Pendente;
+        EmAnaliseDesdeUtc = null;
+    }
+
     /// <summary>Hash do arquivo recebido, antes da recodificação — auditoria; escrita única, não muda o status.</summary>
     public void RegistrarHashOriginal(byte[] hashOriginalSha256)
     {

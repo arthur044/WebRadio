@@ -1,14 +1,60 @@
-using WebRadio.Domain.Enums;
-
 namespace WebRadio.Application.Abstracoes;
 
-/// <summary>Recodifica o áudio enviado (S-C01). Só o contrato no Épico 1; a implementação (ffmpeg isolado) é do Épico 4.</summary>
-public interface IAudioSanitizer
+/// <summary>Formato do contêiner do original, decidido SÓ pelos magic bytes (S-C01 item 1): é o <c>-f</c> forçado do ffprobe e do ffmpeg.</summary>
+public enum FormatoDeAudio
 {
-    Task<ResultadoSanitizacao> SanitizarAsync(Stream original, TipoMidia tipo, CancellationToken ct = default);
+    Mp3 = 1,
+    Ogg = 2,
+    Wav = 3,
+    Flac = 4,
 }
 
-public sealed record ResultadoSanitizacao(bool Aprovado, string? MotivoRejeicao, Stream? Saida, int? DuracaoSegundos);
+/// <summary>
+/// Códigos de <c>motivo</c> do sanitizer (lista fechada, 08 E4-D1). Nunca é texto do stderr do ffmpeg: o Worker troca o código pela mensagem fixa da biblioteca.
+/// <see cref="Timeout"/> e <see cref="ResultadoInvalido"/> são falha de PROCESSAMENTO; <see cref="SaidaGrandeDemais"/> (a saída bateu no -fs: música cortada) é do arquivo. Os outros (contam tentativa, E4-D13); os demais são do arquivo (rejeição determinística).
+/// </summary>
+public enum MotivoDaSanitizacao
+{
+    JobInvalido = 1,
+    FormatoInvalido = 2,
+    StreamsAudioInvalido = 3,
+    StreamNaoAudio = 4,
+    CodecNaoPermitido = 5,
+    FalhaNaDecodificacao = 6,
+    Timeout = 7,
+    ResultadoInvalido = 8,
+    SaidaGrandeDemais = 9,
+}
+
+/// <summary>
+/// Saída lida UMA vez do sanitizer (S-B09). <c>Saida</c> já está na memória (≤ limite do tipo); <c>DuracaoSegundos</c> é a do <c>ffprobe</c> da SAÍDA, e <c>Codec</c> é o do
+/// original, já validado por regex (vai ao log).
+/// </summary>
+public sealed record ResultadoSanitizacao(bool Aprovado, MotivoDaSanitizacao? Motivo, byte[]? Saida, decimal? DuracaoSegundos, int StreamsAudio, string? Codec);
+
+/// <summary>
+/// Isolamento do ffmpeg (S-C01, 08 E4-D1): um job é um diretório no volume compartilhado com o contêiner <c>sanitizer</c> (sem rede, sem segredo). O Worker baixa o original
+/// DIRETO no job (<see cref="AbrirOriginalParaEscrita"/>), depois chama <see cref="ExecutarAsync"/>; descartar o job apaga o diretório. Um job por vez.
+/// </summary>
+public interface IAudioSanitizer
+{
+    Task<IJobDeSanitizacao> CriarJobAsync(Guid midiaId, CancellationToken ct = default);
+}
+
+public interface IJobDeSanitizacao : IAsyncDisposable
+{
+    /// <summary>Cria o <c>in.bin</c> (arquivo novo, sem seguir symlink) para o download.</summary>
+    Stream AbrirOriginalParaEscrita();
+
+    /// <summary>Abre o <c>in.bin</c> para leitura (hash, magic bytes e antivírus leem o mesmo arquivo).</summary>
+    Stream AbrirOriginalParaLeitura();
+
+    /// <summary>
+    /// Escreve <c>job.json</c> e <c>pronto</c>, espera o <c>result.json</c> até <paramref name="timeoutDoSanitizer"/> + 15 s e lê <c>out.mp3</c> e <c>result.json</c> sem seguir
+    /// symlink, uma vez só, com teto (<c>result.json</c> ≤ 4 KB, <c>out.mp3</c> ≤ o limite de saída). Passou do prazo: <see cref="MotivoDaSanitizacao.Timeout"/>.
+    /// </summary>
+    Task<ResultadoSanitizacao> ExecutarAsync(FormatoDeAudio formato, long duracaoMaximaSegundos, long tamanhoMaximoDaSaidaBytes, TimeSpan timeoutDoSanitizer, CancellationToken ct = default);
+}
 
 /// <summary>
 /// Antivírus sobre o arquivo original, antes do sanitizer (S-A02). Falha ou timeout nunca vira <see cref="ResultadoScan.Limpo"/>.
