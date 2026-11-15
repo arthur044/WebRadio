@@ -26,7 +26,7 @@
     <PackageVersion Include="Serilog.Formatting.Compact" Version="3.0.0" />
     <!-- SignalR (E1-F10): backplane Redis na Api; cliente só nos testes -->
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="11.0.0" />
   </ItemGroup>
 
   <!-- Teste de arquitetura (E1-F02) -->
