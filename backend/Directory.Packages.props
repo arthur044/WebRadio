@@ -38,7 +38,7 @@
   <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
     <!-- Segredos por arquivo no Worker (a Api recebe o mesmo pacote pelo shared framework do ASP.NET) -->
-    <PackageVersion Include="Microsoft.Extensions.Configuration.KeyPerFile" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.KeyPerFile" Version="11.0.0" />
     <PackageVersion Include="StackExchange.Redis" Version="3.4.29" />
     <PackageVersion Include="Minio" Version="7.0.0" />
     <!-- Recodificação da imagem de divulgação (E3-D4, S-B10): SkiaSharp (MIT). O asset NoDependencies traz o linux-musl-x64 da imagem Alpine
