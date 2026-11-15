@@ -36,7 +36,7 @@
 
   <!-- Worker (E1-F11): host generico fora do ciclo de vida da Api -->
   <ItemGroup>
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="11.0.0" />
     <!-- Segredos por arquivo no Worker (a Api recebe o mesmo pacote pelo shared framework do ASP.NET) -->
     <PackageVersion Include="Microsoft.Extensions.Configuration.KeyPerFile" Version="10.0.14" />
     <PackageVersion Include="StackExchange.Redis" Version="3.4.29" />
