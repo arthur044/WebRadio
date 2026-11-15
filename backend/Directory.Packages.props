@@ -45,7 +45,7 @@
          da API, sem fontconfig nem pacote de sistema. O job de Vulnerabilidades cobre os pacotes SkiaSharp.NativeAssets.*. -->
     <PackageVersion Include="SkiaSharp" Version="4.154.0" />
     <PackageVersion Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.154.0" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="11.0.0" />
   </ItemGroup>
 
   <!-- Infrastructure/EF (E1-F04). IRadioDbContext (Application) usa DbSet&lt;T&gt; da mesma versão. -->
@@ -53,7 +53,7 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.14" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.14" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="11.0.0" />
     <!--
       NuGetAudit (NU1903): System.Security.Cryptography.Xml 9.0.0 chega transitivo via
       Microsoft.EntityFrameworkCore.Design e tem varias CVEs de severidade alta (GHSA-23rf-6693-g89p
