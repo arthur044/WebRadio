@@ -29,6 +29,9 @@ public static class DependencyInjection
         services.AddSingleton<WebRadio.Application.Features.Pedidos.CacheDoTeto>();
         services.AddScoped<WebRadio.Application.Features.Pedidos.EstadoDoThrottle>();
         services.AddScoped<WebRadio.Application.Pipeline.IThrottleDoRequest<WebRadio.Application.Features.Pedidos.CriarPedidoCommand>, WebRadio.Application.Features.Pedidos.ThrottleDePedido>();
+        // E4-F02: o validador do upload lê os limites por tipo; o limite de 20/h guarda o estado do disjuntor do Redis (singleton).
+        services.AddSingleton(sp => sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<WebRadio.Application.Features.Midias.MidiaOptions>>().Value);
+        services.AddSingleton<WebRadio.Application.Features.Midias.LimiteDeUploadDeMidia>();
         services.AddSingleton(sp => new FilaDeAlertasDoHarbor(sp.GetRequiredService<ILogger<FilaDeAlertasDoHarbor>>()));
 
         // D22: reações aos eventos de domínio, despachadas pelo interceptor da Infrastructure antes do commit.
