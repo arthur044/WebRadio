@@ -53,9 +53,13 @@ mc admin policy create wr webradio-svc-api "$P/svc-api.json"
 mc admin policy create wr webradio-svc-worker "$P/svc-worker.json"
 
 # RISCO ACEITO (igual ao migrator): o mc só recebe a secret key por argumento; o contêiner é one-shot,
-# efêmero e sem outro processo.
-mc admin user add wr "$API_KEY" "$API_SECRET"
-mc admin user add wr "$WORKER_KEY" "$WORKER_SECRET"
+# efêmero e sem outro processo. O `--` impede que uma chave começando com '-' seja lida como flag, e a saída do mc NÃO vai ao log: o erro de
+# uso dele ecoa o argumento (já imprimiu parte do segredo no CI).
+criar_usuario() {
+  mc admin user add -- wr "$1" "$2" >/dev/null 2>&1 || falhar "não consegui criar o usuário de serviço $3 (saída do mc omitida: pode conter segredo)."
+}
+criar_usuario "$API_KEY" "$API_SECRET" svc-api
+criar_usuario "$WORKER_KEY" "$WORKER_SECRET" svc-worker
 
 anexar() {
   saida="$(mc admin policy attach wr "$1" --user "$2" 2>&1)" && return 0

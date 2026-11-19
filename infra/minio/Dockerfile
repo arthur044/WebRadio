@@ -11,7 +11,7 @@
 # Última checagem: 2026-10-29, o `latest` da Chainguard (sha256:799a60aa…) ainda tinha o compress v1.18.5.
 #
 # Go >= 1.27.3 fixado por digest (o Dependabot troca). GOTOOLCHAIN=local: nunca baixa outro toolchain no build.
-FROM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS mc
+FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS mc
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
 # minio/mc, tag RELEASE.2025-08-13T08-35-41Z = commit 7394ce0dd2a80935aded936b09fa12cbb3cb8096 (hash completo: imutável).
 ADD https://github.com/minio/mc.git#7394ce0dd2a80935aded936b09fa12cbb3cb8096 /src

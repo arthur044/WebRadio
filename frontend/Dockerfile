@@ -12,9 +12,9 @@ COPY frontend/ .
 # vite.config.e2e.ts, usado pelo Playwright local, nunca por este Dockerfile.
 RUN npm run build
 
-# Fixado por digest (a tag é mutável): nginxinc/nginx-unprivileged:1.31.6-alpine3.24 (nginx mainline 1.31.6 sobre Alpine 3.24.2).
+# Fixado por digest (a tag é mutável): nginxinc/nginx-unprivileged:1.31.7-alpine3.24 (nginx mainline 1.31.7 sobre Alpine 3.24.2).
 # Era 1.27.5-alpine3.21 (jun/2025): sem imagem corrigida na linha 3.21 (B3, trivy).
-FROM nginxinc/nginx-unprivileged:1.31.6-alpine3.24@sha256:884e0b7f42f303641b0f4e78755aea647521dca0b89ca3be7992ad78b5c07434
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine3.24@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e
 # Correções que a base ainda não traz (trivy HIGH/CRITICAL, com correção disponível no Alpine 3.24):
 # libexpat CVE-2026-77214 (2.8.5-r0, corrigido em 2.9.0-r0), libx11 CVE-2026-88806 (1.8.13-r0, corrigido
 # em 1.8.14-r0), brotli-libs CVE-2026-111497 (1.2.0-r1, corrigido em 1.2.1-r0) e curl/libcurl
@@ -24,9 +24,10 @@ FROM nginxinc/nginx-unprivileged:1.31.6-alpine3.24@sha256:884e0b7f42f303641b0f4e
 # apk e o USER 101 de volta) quando a base fixada acima trouxer as versões corrigidas; num bump da base
 # (Dependabot), se o trivy estiver limpo sem o bloco, ele sai no mesmo PR. Em 2026-10-29 a tag alpine3.24
 # (nginx 1.31.7) já trazia libexpat e libx11 corrigidos, mas ainda não brotli-libs nem curl. Em 2026-11-06 a tag
-# 1.31.6-alpine3.24 continua com o digest acima (Alpine 3.24.2, musl 1.2.6-r2).
+# 1.31.6-alpine3.24 continua com o digest acima (Alpine 3.24.2, musl 1.2.6-r2). Em 2026-11-19 a 1.31.7 (digest acima, Alpine 3.24.2) ainda traz musl 1.2.6-r2,
+# curl 8.22.0-r0, brotli-libs 1.2.0-r1 e libxslt 1.1.43-r3 (3 CVEs HIGH do chromium, corrigidos em 1.1.43-r4): o bloco fica, com a libxslt.
 USER root
-RUN apk add --no-cache --upgrade 'libexpat>=2.9.0-r0' 'libx11>=1.8.14-r0' 'brotli-libs>=1.2.1-r0' 'curl>=8.23.0-r0' 'libcurl>=8.23.0-r0' 'musl>=1.2.6-r3' 'musl-utils>=1.2.6-r3'
+RUN apk add --no-cache --upgrade 'libexpat>=2.9.0-r0' 'libx11>=1.8.14-r0' 'brotli-libs>=1.2.1-r0' 'curl>=8.23.0-r0' 'libcurl>=8.23.0-r0' 'musl>=1.2.6-r3' 'musl-utils>=1.2.6-r3' 'libxslt>=1.1.43-r4'
 USER 101
 # Hosts públicos válidos (server_name aceita lista espaço-separada) — o compose
 # sobrescreve em outros ambientes; ver comentário de Host header injection em
