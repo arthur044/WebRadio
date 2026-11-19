@@ -23,7 +23,9 @@ function EsperaDoEnvio({ ateEm }: { ateEm: number }) {
   }, [ateEm, iniciar])
   return (
     <p role="status" className="text-text-muted text-sm">
-      Muitos envios em pouco tempo. Tenta de novo em {formatarEspera(espera.restante)}.
+      Limite de envios atingido (no máximo 5 abertos e 20 por hora). Tenta de novo em{' '}
+      {formatarEspera(espera.restante)}; quando o limite é o de envios abertos, a espera pode chegar
+      a 2 horas.
     </p>
   )
 }

@@ -244,6 +244,31 @@ describe('fila de envios (E4-P02)', () => {
     await vi.waitFor(() => expect(XhrFalso.instancias).toHaveLength(1))
   })
 
+  it('429 do limite de abertos: espera o Retry-After inteiro, de até 2 h, sem cortar em 1 h', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    montarApi({
+      uploads: [
+        json(429, {
+          type: '/erros/limite',
+          title: 'Muitos envios',
+          status: 429,
+          retryAfterSeconds: 7200,
+        }),
+      ],
+    })
+    useEnvios.getState().adicionar({
+      arquivo: arquivoDe('a.mp3'),
+      tipo: 'Vinheta',
+      titulo: '',
+      artista: '',
+    })
+
+    await vi.waitFor(() => expect(useEnvios.getState().envios[0].estado.fase).toBe('espera'))
+    const espera = useEnvios.getState().envios[0].estado
+    expect(espera.fase === 'espera' && espera.ateEm - Date.now()).toBeGreaterThan(7_199_000)
+    expect(XhrFalso.instancias).toEqual([])
+  })
+
   it('cancelar um envio que está enviando aborta o XHR e marca como cancelado', async () => {
     montarApi()
     useEnvios.getState().adicionar({
