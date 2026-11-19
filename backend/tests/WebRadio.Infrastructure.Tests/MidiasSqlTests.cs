@@ -182,7 +182,13 @@ public class MidiasSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         await using (var db = _c.NovoDb())
         {
             foreach (var id in new[] { comReproducao, livre })
-                db.ArquivosMidia.Add(new WebRadio.Domain.Midia.ArquivoMidia(id, "a.mp3", "T", null, TipoMidia.Musica, "audio/mpeg", 1000, usuario, DateTime.UtcNow));
+            {
+                // Pendente: fora de AguardandoUpload, onde o DELETE do Admin é a exclusão de verdade (em AguardandoUpload ele é o cancelamento do envio, que mantém a linha).
+                var m = new WebRadio.Domain.Midia.ArquivoMidia(id, "a.mp3", "T", null, TipoMidia.Musica, "audio/mpeg", 1000, usuario, DateTime.UtcNow);
+                m.ConcluirUpload(1000, "etag", DateTime.UtcNow);
+                db.ArquivosMidia.Add(m);
+            }
+
             db.Reproducoes.Add(new WebRadio.Domain.Midia.Reproducao(comReproducao, null, null, DateTime.UtcNow));
             await db.SaveChangesAsync();
         }

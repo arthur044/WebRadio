@@ -11,6 +11,9 @@ public sealed class CicloOptions
 
     public TimeSpan IntervaloDaManutencao { get; set; } = TimeSpan.FromHours(24);
 
+    /// <summary>08 E4-D11 (<c>Manutencao:Quarentena:IntervaloOrfaosMinutos</c>): a varredura dos órfãos do prefixo <c>quarentena/</c> roda a cada 30 min, fora da rodada diária.</summary>
+    public TimeSpan IntervaloDosOrfaosDaQuarentena { get; set; } = TimeSpan.FromMinutes(30);
+
     /// <summary>07 E3-F04: a expiração dos pedidos pendentes roda a cada 60 s (o tick do laço é de 10 s).</summary>
     public TimeSpan IntervaloDaExpiracao { get; set; } = TimeSpan.FromSeconds(60);
 
@@ -42,6 +45,8 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
     private int _falhasDasTransicoes;
     private int _falhasDaExpiracao;
     private int _falhasDaSanitizacao;
+    private int _falhasDaVarredura;
+    private DateTime? _ultimaVarreduraDaQuarentenaUtc;
     private DateTime? _ultimaExpiracaoUtc;
     private DateTime? _ultimaManutencaoUtc;
     private DateTime? _proximaTentativaUtc;
@@ -60,6 +65,7 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
         var transicoes = Task.CompletedTask;
         var expiracao = Task.CompletedTask;
         var midias = Task.CompletedTask;
+        var varredura = Task.CompletedTask;
         using var timer = new PeriodicTimer(opcoes.Intervalo);
         try
         {
@@ -76,6 +82,9 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
                 // E4-F05: a fila de sanitização (um item por vez, uma instância do Worker: só o líder). Roda fora do tick, em paralelo aos outros jobs.
                 if (lideranca.EhLider && midias.IsCompleted)
                     midias = SanitizarMidiasAsync(stoppingToken);
+                // E4-F09: órfãos da quarentena a cada 30 min (só o prefixo quarentena/), em paralelo e com a própria vaga.
+                if (lideranca.EhLider && varredura.IsCompleted && VarreduraDevida())
+                    varredura = VarrerQuarentenaAsync(stoppingToken);
             } while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -88,6 +97,7 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
             await transicoes; // idem
             await expiracao; // idem
             await midias; // idem
+            await varredura; // idem
         }
     }
 
@@ -152,6 +162,34 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
         }
     }
 
+    private bool VarreduraDevida() =>
+        _ultimaVarreduraDaQuarentenaUtc is not { } ultima || clock.UtcNow - ultima >= opcoes.IntervaloDosOrfaosDaQuarentena;
+
+    /// <summary>E4-F09. Falha (storage fora, sem permissão) não derruba o laço: um erro por sequência, e tenta de novo no próximo intervalo.</summary>
+    private async Task VarrerQuarentenaAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var escopo = escopos.CreateAsyncScope();
+            if (escopo.ServiceProvider.GetService<ILimpezaDeMidia>() is not { } limpeza) return;
+            await limpeza.VarrerOrfasDaQuarentenaAsync(ct);
+            _ultimaVarreduraDaQuarentenaUtc = clock.UtcNow;
+            var falhas = Interlocked.Exchange(ref _falhasDaVarredura, 0);
+            if (falhas > 0) logger.LogInformation("WORKER_LIMPEZA_QUARENTENA: voltou a funcionar depois de {Falhas} falha(s) seguida(s).", falhas);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // parada normal do host
+        }
+        catch (Exception e)
+        {
+            _ultimaVarreduraDaQuarentenaUtc = clock.UtcNow; // não gira em falso: tenta de novo só no próximo intervalo
+            if (_falhasDaVarredura == 0) logger.LogError(e, "WORKER_LIMPEZA_QUARENTENA: falhou; tenta de novo no próximo intervalo e só repete o erro depois que voltar a funcionar.");
+            else logger.LogWarning("WORKER_LIMPEZA_QUARENTENA: segue falhando ({Tipo}).", e.GetType().Name);
+            Interlocked.Increment(ref _falhasDaVarredura);
+        }
+    }
+
     private bool ExpiracaoDevida() =>
         _ultimaExpiracaoUtc is not { } ultima || clock.UtcNow - ultima >= opcoes.IntervaloDaExpiracao;
 
@@ -200,8 +238,9 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
             _proximaTentativaUtc = null;
             var falhas = Interlocked.Exchange(ref _falhasDaManutencao, 0);
             if (falhas > 0) logger.LogInformation("WORKER_MANUTENCAO: voltou a funcionar depois de {Falhas} falha(s) seguida(s).", falhas);
-            logger.LogInformation("WORKER_MANUTENCAO: {Pedidos} pedidos anonimizados, {Ips} hashes de IP e {EventosDePedido} eventos de pedido apagados, {Eventos} eventos, {Refresh} refresh tokens, {Credenciais} credenciais de transmissão e {Imagens} imagens órfãs de divulgação apagados.",
-                r.PedidosAnonimizados, r.IpsApagados, r.EventosDePedidoApagados, r.EventosApagados, r.RefreshApagados, r.CredenciaisApagadas, r.ImagensApagadas);
+            logger.LogInformation("WORKER_MANUTENCAO: {Pedidos} pedidos anonimizados, {Ips} hashes de IP e {EventosDePedido} eventos de pedido apagados, {Eventos} eventos, {Refresh} refresh tokens, {Credenciais} credenciais de transmissão e {Imagens} imagens órfãs de divulgação apagados; mídia: {Cancelados} envios cancelados, {Vencidos} AguardandoUpload vencidos e {Orfaos} objetos órfãos de midia/ apagados.",
+                r.PedidosAnonimizados, r.IpsApagados, r.EventosDePedidoApagados, r.EventosApagados, r.RefreshApagados, r.CredenciaisApagadas, r.ImagensApagadas,
+                r.MidiasCanceladasApagadas, r.AguardandoVencidoApagado, r.ObjetosOrfaosDeMidiaApagados);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

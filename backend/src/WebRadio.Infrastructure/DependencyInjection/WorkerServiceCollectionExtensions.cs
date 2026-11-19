@@ -30,6 +30,8 @@ public static class WorkerServiceCollectionExtensions
         var ciclo = new CicloOptions();
         if (!string.IsNullOrWhiteSpace(configuration["Worker:ArquivoDeHeartbeat"]))
             ciclo.ArquivoDeHeartbeat = configuration["Worker:ArquivoDeHeartbeat"];
+        if (int.TryParse(configuration["Manutencao:Quarentena:IntervaloOrfaosMinutos"], out var intervaloOrfaos) && intervaloOrfaos >= 1)
+            ciclo.IntervaloDosOrfaosDaQuarentena = TimeSpan.FromMinutes(intervaloOrfaos);
         services.AddSingleton(ciclo);
         services.AddSingleton(new LiderancaOptions());
 
@@ -77,6 +79,11 @@ public static class WorkerServiceCollectionExtensions
         services.AddScoped<IRadioDbContext>(sp => sp.GetRequiredService<WebRadio.Infrastructure.Persistencia.RadioDbContext>());
         services.AddScoped<IOutbox, WebRadio.Infrastructure.Persistencia.Outbox.OutboxEf>();
         services.AddScoped<ICapturaDeMidia, CapturaDeMidia>();
+        // E4-F09: limpezas de mídia (diária dentro da Manutencao e a varredura de órfãos da quarentena a cada 30 min).
+        var limpeza = new LimpezaDeMidiaOptions();
+        if (int.TryParse(configuration["Manutencao:Midia:LimiteExclusao"], out var limiteExclusao) && limiteExclusao > 0) limpeza.LimiteExclusaoDeObjetos = limiteExclusao;
+        services.AddSingleton(limpeza);
+        services.AddScoped<ILimpezaDeMidia, LimpezaDeMidia>();
         services.AddScoped(sp => new WebRadio.Application.Features.Midias.PipelineDeMidia(
             sp.GetRequiredService<IRadioDbContext>(), sp.GetRequiredService<ICapturaDeMidia>(), sp.GetRequiredService<IObjectStorage>(), sp.GetRequiredService<IMalwareScanner>(),
             sp.GetRequiredService<IAudioSanitizer>(), sp.GetRequiredService<IOutbox>(), sp.GetRequiredService<IClock>(), sp.GetRequiredService<IMarcadorDeDegradacao>(),
