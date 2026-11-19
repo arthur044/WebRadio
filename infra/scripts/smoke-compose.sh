@@ -228,6 +228,8 @@ confere("api: ASPNETCORE_ENVIRONMENT=Production na base e Development com o dev.
 # --- B3-11: o Worker só recebe o segredo que o código lê
 alvos = sorted(x["target"] for x in servicos["worker"].get("secrets", []))
 confere("worker: só o banco e a credencial do svc-worker no MinIO (sem JWT, pepper nem Redis)", alvos == ["Banco__Senha", "Storage__AccessKey", "Storage__SecretKey"], str(alvos))
+# O mc (Go) do minio-init passa de 128m no `policy attach`: com 128m ele morria por OOM (4 de 4 contra um MinIO novo); medido, 144m passa e 256m dá folga.
+confere("minio-init: mem_limit >= 256m (o mc morria por OOM em 128m)", int(servicos["minio-init"].get("mem_limit") or 0) >= 256 * 1024 * 1024, str(servicos["minio-init"].get("mem_limit")))
 confere("worker: depende só do migrator e do minio-init", set(servicos["worker"].get("depends_on", {})) == {"migrator", "minio-init"})
 
 print("\n".join(saida))
