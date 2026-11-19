@@ -194,7 +194,8 @@ recusa id3-playlist.mp3 Vinheta audio/mpeg "ID3 na frente e #EXTM3U no corpo"
 recusa adpcm.wav Vinheta audio/wav "WAV com codec fora da lista (ADPCM)"
 recusa teora.ogg Vinheta audio/ogg "OGG com Theora"
 recusa longo.wav Vinheta audio/wav "WAV de 90 s numa vinheta de 60 s"
-confere "o motivo da duração fala do limite" bash -c "[[ \"\$(curl -s -H 'Authorization: Bearer $LOC1' '$BASE/api/v1/midias/$LAST' | python3 -I -c 'import json,sys; print(json.loads(sys.stdin.read()).get(\"motivoRejeicao\",\"\"))')\" == *dura* ]]"
+motivo_fala_da_duracao() { [[ "$(motivo_da "$LOC1" "$LAST")" == *dura* ]]; }
+confere "o motivo da duração fala do limite" motivo_fala_da_duracao
 
 subir "$LOC1" "$FIX/capa.mp3" Vinheta audio/mpeg ""; ID_CAPA="$UP_ID"
 if [[ "$UP_POLICY" == 201 && "$UP_POST" == 201 && "$UP_CONCLUIR" == 202 ]]; then

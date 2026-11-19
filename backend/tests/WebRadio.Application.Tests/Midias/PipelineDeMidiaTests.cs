@@ -699,6 +699,23 @@ public sealed class PipelineDeMidiaTests
         Assert.Equal(1, c.Eventos("MidiaSanitizada")); // exatamente 1, não 2
     }
 
+    [Fact]
+    public async Task Falha_do_banco_ao_gravar_a_aprovacao_que_nao_e_duplicado_e_infraestrutura_e_nao_conta_tentativa()
+    {
+        var c = new Cena();
+        var m = c.Pendente();
+        c.SanitizerAprova();
+        var db = new GerirMidiaTests.DbQueFalhaAoSalvar(c.F.Db, new Microsoft.EntityFrameworkCore.DbUpdateException("FK ou conexão"));
+        var pipeline = new PipelineDeMidia(db, new CapturaDeMidia(c.F.Db, c.F.Relogio), c.F.Storage, c.Scanner, c.Sanitizer, new OutboxEf(c.F.Db), c.F.Relogio, c.Marcador,
+            Options.Create(c.F.Opcoes), c.Logs.Logger<PipelineDeMidia>());
+
+        Assert.Equal(PassoDoPipeline.InfraestruturaFora, await pipeline.ProcessarProximaAsync(default));
+
+        var r = c.Recarregar(m.Id);
+        Assert.NotEqual(StatusSanitizacao.Rejeitado, r.StatusSanitizacao); // nunca "falha de processamento" por culpa do banco
+        Assert.Contains(c.Logs.Linhas, l => l.StartsWith("PIPELINE_MIDIA_INFRAESTRUTURA"));
+    }
+
     // ---- lease ----
 
     [Fact]

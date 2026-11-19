@@ -304,19 +304,20 @@ public sealed class PipelineDeMidia(
 
         midia.Aprovar("audio/mpeg", hash, duracao.Value, saida.Length, ".mp3", limite, clock.UtcNow);
         Notificar(midia);
-        var violouODuplicado = false;
+        DbUpdateException? violacao = null;
         try
         {
             await db.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException e)
         {
-            violouODuplicado = true; // confirmado abaixo: só vale se OUTRA mídia aprovada tem o mesmo hash
+            violacao = e; // confirmado abaixo: só vale se OUTRA mídia aprovada tem o mesmo hash
         }
 
-        if (violouODuplicado)
+        if (violacao is not null)
         {
-            if (!await EhDuplicadaAsync(hash, midia.Id, ct)) throw new InvalidOperationException("Falha ao gravar a aprovação da mídia.");
+            // Não é duplicado: é falha do banco. Relança a exceção ORIGINAL (infraestrutura: o item volta sem contar tentativa), nunca uma InvalidOperationException, que contaria como falha do arquivo.
+            if (!await EhDuplicadaAsync(hash, midia.Id, ct)) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(violacao);
             // Corrida: outra mídia com a mesma saída foi aprovada entre a conferência e o INSERT (UX_ArquivoMidia_Hash_Aprovado). Vira duplicada.
             await storage.DeleteAsync(Buckets.Midia, chaveFinal, CancellationToken.None);
             await RejeitarAsync(midia, MotivoDuplicado, apagarObjeto: true, ct, jaDescartada: true);
