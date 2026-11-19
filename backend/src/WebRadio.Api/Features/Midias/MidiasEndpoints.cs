@@ -32,7 +32,7 @@ public sealed class MidiasEndpoints : IEndpointModule
 
             var iniciado = await mediator.Send(new IniciarUploadCommand(
                 usuario, req.NomeOriginal ?? "", req.Titulo, req.Artista, req.TipoMidia!.Value, req.MimeTypeDeclarado ?? "", req.TamanhoBytes!.Value), ct);
-            http.Response.Headers.CacheControl = "no-store"; // o corpo leva a POST policy ASSINADA (1 h): nunca fica em cache
+            http.Response.Headers.CacheControl = "no-store"; // o corpo leva a POST policy ASSINADA (15 min): nunca fica em cache
             return Results.Json(iniciado, statusCode: StatusCodes.Status201Created);
         });
 

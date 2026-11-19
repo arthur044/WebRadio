@@ -173,6 +173,42 @@ public sealed class IniciarUploadTests
         Assert.Equal(20, f.Db.ArquivosMidia.Count());
     }
 
+    private static async Task<(long Bytes, long Contagem)> ContadoresAsync(MidiasFixture f)
+    {
+        var bytes = await f.Redis.LerAsync($"throttle:{LimiteDeUploadDeMidia.ChaveDosBytes(f.Hasher, f.Usuario)}");
+        var contagem = await f.Redis.LerAsync($"throttle:midiaup:{LimiteDeUploadDeMidia.ChaveOpaca(f.Hasher, f.Usuario)}");
+        return (bytes, contagem);
+    }
+
+    [Fact]
+    public async Task Recusa_por_5_abertos_por_trava_ocupada_ou_por_falha_da_assinatura_devolve_os_bytes_e_a_tentativa()
+    {
+        var f = new MidiasFixture();
+        for (var i = 0; i < 5; i++) f.Semear(StatusSanitizacao.Pendente);
+        await Assert.ThrowsAsync<LimiteExcedidoException>(() => f.Iniciar.Handle(f.Comando(tamanho: 250_000), default));
+        Assert.Equal((0L, 0L), await ContadoresAsync(f)); // 5 abertos: nenhum envio nasceu, nada consumido
+
+        var g = new MidiasFixture();
+        g.Transacao.Ocupada = true;
+        await Assert.ThrowsAsync<LimiteExcedidoException>(() => g.Iniciar.Handle(g.Comando(tamanho: 250_000), default));
+        Assert.Equal((0L, 0L), await ContadoresAsync(g));
+
+        var h = new MidiasFixture();
+        h.Storage.FalharNaPolicy = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => h.Iniciar.Handle(h.Comando(tamanho: 250_000), default));
+        Assert.Equal((0L, 0L), await ContadoresAsync(h));
+    }
+
+    [Fact]
+    public async Task Envio_que_nasceu_consome_os_contadores_e_so_o_cancelamento_nunca_devolve()
+    {
+        var f = new MidiasFixture();
+        await f.Iniciar.Handle(f.Comando(tamanho: 250_000), default);
+        Assert.Equal((250_000L, 1L), await ContadoresAsync(f));
+        await f.Excluir.Handle(new ExcluirMidiaCommand(f.Db.ArquivosMidia.Single().Id, f.Usuario, EhAdmin: false), default);
+        Assert.Equal((250_000L, 1L), await ContadoresAsync(f));
+    }
+
     private static MidiaOptions ComOrcamentoDe3MiB() => new() { MaximoAbertos = 100, BytesDeclaradosPorHora = 3 * 1024 * 1024 };
 
     [Fact]

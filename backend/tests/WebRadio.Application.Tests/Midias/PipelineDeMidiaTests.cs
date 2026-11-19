@@ -589,7 +589,7 @@ public sealed class PipelineDeMidiaTests
         var c = new Cena();
         var m = c.Pendente();
         c.SanitizerAprova();
-        c.F.Storage.ErroNoPut = new InvalidOperationException("minio fora");
+        c.F.Storage.ErroNoPut = new HttpRequestException("minio fora", null, System.Net.HttpStatusCode.ServiceUnavailable);
 
         await c.Pipeline.ProcessarProximaAsync(default);
 
@@ -610,6 +610,93 @@ public sealed class PipelineDeMidiaTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => c.Pipeline.ProcessarProximaAsync(cancelar.Token));
         Assert.Equal(StatusSanitizacao.Pendente, c.Recarregar(m.Id).StatusSanitizacao); // nem chegou a capturar
+    }
+
+    // ---- Guardian rodada 4 / Atlas ----
+
+    [Fact]
+    public async Task Excecao_nao_prevista_de_um_arquivo_conta_tentativa_a_terceira_rejeita_e_o_proximo_item_e_processado()
+    {
+        var c = new Cena();
+        var veneno = c.Pendente();
+        c.Sanitizer.ErroNoJob = new InvalidOperationException("bug determinístico deste arquivo");
+
+        for (var i = 0; i < 3; i++) await c.Pipeline.ProcessarProximaAsync(default);
+
+        var r = c.Recarregar(veneno.Id);
+        Assert.Equal((StatusSanitizacao.Rejeitado, "falha de processamento"), (r.StatusSanitizacao, r.MotivoRejeicao));
+        Assert.Equal(3, r.TentativasSanitizacao);
+
+        c.Sanitizer.ErroNoJob = null;
+        c.SanitizerAprova();
+        var seguinte = c.Pendente(conteudo: [.. Mp3, .. new byte[600]]);
+        await c.Pipeline.ProcessarProximaAsync(default);
+        Assert.Equal(StatusSanitizacao.Aprovado, c.Recarregar(seguinte.Id).StatusSanitizacao);
+    }
+
+    [Theory]
+    [InlineData(typeof(HttpRequestException))]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(TimeoutException))]
+    [InlineData(typeof(Microsoft.EntityFrameworkCore.DbUpdateException))]
+    public void So_infraestrutura_conhecida_volta_a_fila_sem_contar(Type tipo) => Assert.True(PipelineDeMidia.EhInfraestrutura((Exception)Activator.CreateInstance(tipo)!));
+
+    [Fact]
+    public void Excecao_de_programacao_nao_e_infraestrutura()
+    {
+        Assert.False(PipelineDeMidia.EhInfraestrutura(new InvalidOperationException()));
+        Assert.False(PipelineDeMidia.EhInfraestrutura(new IndexOutOfRangeException()));
+        Assert.False(PipelineDeMidia.EhInfraestrutura(new FormatException()));
+    }
+
+    private sealed class DbQueFalhaUmaVez(WebRadio.Application.Abstracoes.IRadioDbContext real) : WebRadio.Application.Abstracoes.IRadioDbContext
+    {
+        public bool Falhou { get; private set; }
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Usuarios.Usuario> Usuarios => real.Usuarios;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Autenticacao.RefreshToken> RefreshTokens => real.RefreshTokens;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Transmissao.CredencialTransmissao> CredenciaisTransmissao => real.CredenciaisTransmissao;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Grade.Programa> Programas => real.Programas;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Interacao.PedidoMusica> PedidosMusica => real.PedidosMusica;
+        public Microsoft.EntityFrameworkCore.DbSet<ArquivoMidia> ArquivosMidia => real.ArquivosMidia;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Interacao.Divulgacao> Divulgacoes => real.Divulgacoes;
+        public Microsoft.EntityFrameworkCore.DbSet<Reproducao> Reproducoes => real.Reproducoes;
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            if (Falhou) return real.SaveChangesAsync(cancellationToken);
+            Falhou = true;
+            throw new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("RowVersion"); // outro Worker liberou antes
+        }
+    }
+
+    [Fact]
+    public async Task Lease_vencido_que_perde_a_corrida_nao_deixa_o_evento_duplicado_no_proximo_SaveChanges()
+    {
+        var c = new Cena();
+        var m = c.Pendente();
+        // já na 3ª tentativa: liberar o lease rejeita e enfileira MidiaSanitizada
+        for (var i = 0; i < 2; i++)
+        {
+            var x = c.F.Db.ArquivosMidia.Single();
+            x.IniciarAnalise(c.F.Relogio.UtcNow);
+            x.LiberarLeaseExpirado(c.F.Relogio.UtcNow.Add(c.F.Opcoes.LeaseDoPipeline(TipoMidia.Vinheta, 120)).AddSeconds(1), c.F.Opcoes.LeaseDoPipeline(TipoMidia.Vinheta, 120));
+            c.F.Db.SaveChanges();
+        }
+
+        c.F.Db.ArquivosMidia.Single().IniciarAnalise(c.F.Relogio.UtcNow);
+        c.F.Db.SaveChanges();
+        c.F.Relogio.UtcNow = c.F.Relogio.UtcNow.Add(c.F.Opcoes.LeaseDoPipeline(TipoMidia.Vinheta, 120)).AddSeconds(1);
+        var db = new DbQueFalhaUmaVez(c.F.Db);
+        var pipeline = new PipelineDeMidia(db, new CapturaDeMidia(c.F.Db, c.F.Relogio), c.F.Storage, c.Scanner, c.Sanitizer, new OutboxEf(c.F.Db), c.F.Relogio, c.Marcador,
+            Options.Create(c.F.Opcoes), c.Logs.Logger<PipelineDeMidia>());
+
+        await pipeline.ProcessarProximaAsync(default); // perde a corrida: nada salvo
+        Assert.True(db.Falhou);
+        Assert.Equal(0, c.Eventos("MidiaSanitizada"));
+
+        await pipeline.ProcessarProximaAsync(default); // agora libera de verdade (rejeita na 3ª) e salva
+        Assert.Equal(StatusSanitizacao.Rejeitado, c.Recarregar(m.Id).StatusSanitizacao);
+        Assert.Equal(1, c.Eventos("MidiaSanitizada")); // exatamente 1, não 2
     }
 
     // ---- lease ----

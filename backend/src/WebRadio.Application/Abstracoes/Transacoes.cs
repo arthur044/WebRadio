@@ -74,6 +74,14 @@ public interface IOutbox
     /// derruba as conexões do hub do usuário (papel alterado, desativação, troca de senha; S-M08, S-M11).
     /// </summary>
     void EnfileirarSessoesRevogadas(Guid usuarioId);
+
+    /// <summary>
+    /// Descarta os eventos enfileirados que ainda NÃO foram salvos. Quem perde uma corrida de concorrência no <c>SaveChanges</c> chama isto, senão o evento já adicionado ao
+    /// contexto sairia no próximo <c>SaveChanges</c>, sem a mudança de estado que o justifica (evento duplicado).
+    /// </summary>
+    void DescartarNaoSalvos()
+    {
+    }
 }
 
 public static class EventosDoOutbox

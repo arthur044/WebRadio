@@ -80,6 +80,23 @@ public sealed class LimiteDeUploadDeMidia(IRequestThrottle contadores, IIpHasher
     public static string ChaveDosBytes(IIpHasher hasher, Guid usuario) => hasher.ChaveOpaca("midiabytes:" + usuario.ToString("N"));
 
     /// <summary>
+    /// Desfaz o que o <see cref="RegistrarAsync"/> somou, quando o POST foi RECUSADO depois dele (limite de abertos, trava ocupada, falha da assinatura): nenhum envio nasceu, então
+    /// nem a tentativa (20/h) nem os bytes contam. Só o CANCELAMENTO de um envio que nasceu não devolve nada (08 v1.5). Melhor esforço: Redis fora = nada a desfazer.
+    /// </summary>
+    public async Task DesfazerAsync(Guid usuario, long tamanhoBytes, CancellationToken ct)
+    {
+        try
+        {
+            await contadores.IncrementarPorAsync($"throttle:midiaup:{ChaveOpaca(hasher, usuario)}", -1, Janela, ct);
+            await contadores.IncrementarPorAsync($"throttle:{ChaveDosBytes(hasher, usuario)}", -tamanhoBytes, Janela, ct);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            logger.LogWarning("MIDIA_UPLOAD_CONTADORES_NAO_DEVOLVIDOS ({Tipo})", e.GetType().Name);
+        }
+    }
+
+    /// <summary>
     /// Conta a tentativa (20/h) e soma os bytes declarados no orçamento por hora (08 v1.5). Lança <see cref="LimiteExcedidoException"/> acima de qualquer um dos dois; <c>true</c> = o Redis não
     /// respondeu (fallback SQL). Um <c>POST</c> recusado por bytes devolve os bytes que somou (só a tentativa conta); o CANCELAMENTO do envio nunca devolve nada.
     /// </summary>
@@ -209,7 +226,13 @@ public sealed class IniciarUploadHandler(
         }
         catch (TravaOcupadaException)
         {
+            if (!usarSql) await limite.DesfazerAsync(cmd.UsuarioId, cmd.TamanhoBytes, ct);
             throw new LimiteExcedidoException(TimeSpan.FromSeconds(1));
+        }
+        catch (LimiteExcedidoException)
+        {
+            if (!usarSql) await limite.DesfazerAsync(cmd.UsuarioId, cmd.TamanhoBytes, ct); // 5 abertos: nenhum envio nasceu
+            throw;
         }
 
         try
@@ -219,7 +242,7 @@ public sealed class IniciarUploadHandler(
         }
         catch
         {
-            // Sem policy o registro não serve a ninguém e ocuparia um dos 5 abertos até vencer: descarta (melhor esforço; a limpeza do F09 é a rede).
+            // Sem policy o registro não serve a ninguém e ocuparia um dos 5 abertos até vencer: descarta (melhor esforço; a limpeza do F09 é a rede), e os contadores voltam.
             try
             {
                 db.ArquivosMidia.Remove(midia);
@@ -230,6 +253,7 @@ public sealed class IniciarUploadHandler(
                 // a exceção que importa é a da assinatura
             }
 
+            if (!usarSql) await limite.DesfazerAsync(cmd.UsuarioId, cmd.TamanhoBytes, CancellationToken.None);
             throw;
         }
     }

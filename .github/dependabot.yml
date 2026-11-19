@@ -38,6 +38,9 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "Microsoft.EntityFrameworkCore*"
         update-types: ["version-update:semver-major"]
+      # Serilog.AspNetCore 11 puxa Microsoft.Extensions 11 (NU1109 com o runtime 10.x): fica no major atual, como os pacotes do framework.
+      - dependency-name: "Serilog.AspNetCore"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/frontend"

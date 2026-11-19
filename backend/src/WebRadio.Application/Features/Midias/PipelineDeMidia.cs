@@ -68,10 +68,14 @@ public sealed class PipelineDeMidia(
     /// ANTES de capturar item ou baixar arquivo, sonda o antivírus (E4-D13): fora ou com a base velha, não captura nada (o item segue <c>Pendente</c> com a tentativa intacta) e emite
     /// <c>WORKER_DEGRADADO motivo=&lt;código&gt;</c> NESTE ciclo, mesmo com a fila vazia.
     /// </summary>
-    public async Task<PassoDoPipeline> ProcessarProximaAsync(CancellationToken ct)
+    public async Task<PassoDoPipeline> ProcessarProximaAsync(CancellationToken ct, bool primeiroDoCiclo = true)
     {
-        sanitizer.LimparJobsAbandonados(IdadeDeJobAbandonado);
-        await LiberarLeasesVencidosAsync(ct);
+        // Uma vez por tick do Worker (o laço chama com false depois do primeiro item): com uma fila de 100 itens não são 100 varreduras do diretório nem 100 consultas de EmAnalise.
+        if (primeiroDoCiclo)
+        {
+            sanitizer.LimparJobsAbandonados(IdadeDeJobAbandonado);
+            await LiberarLeasesVencidosAsync(ct);
+        }
 
         if (await scanner.ConferirDisponibilidadeAsync(ct) is { } indisponivel)
         {
@@ -113,16 +117,35 @@ public sealed class PipelineDeMidia(
             logger.LogWarning("PIPELINE_MIDIA_FALHA_NO_SCAN midia {MidiaId}: {Motivo}", midia.Id, e.Motivo);
             await FalhaDoArquivoAsync(midia, ct);
         }
-        catch (Exception e)
+        catch (Exception e) when (EhInfraestrutura(e))
         {
-            // Qualquer outra (MinIO, SQL, disco do job, rede) é infraestrutura: o arquivo não tem culpa.
+            // MinIO, SQL, disco do job, rede: o arquivo não tem culpa.
             logger.LogError(e, "PIPELINE_MIDIA_INFRAESTRUTURA midia {MidiaId} ({Tipo}): o item volta a Pendente e a tentativa é devolvida.", midia.Id, e.GetType().Name);
             await DevolverAsync(midia, ct);
             passo = PassoDoPipeline.InfraestruturaFora;
         }
+        catch (Exception e)
+        {
+            // Exceção que não é de infraestrutura conhecida (bug de parse, estado impossível...) PROVOCADA por este arquivo: conta a tentativa, e a 3ª rejeita. Devolver sempre deixaria
+            // um arquivo hostil na frente da fila FIFO para sempre, e nada mais seria sanitizado.
+            logger.LogError(e, "PIPELINE_MIDIA_EXCECAO_INESPERADA midia {MidiaId} ({Tipo}): conta como falha de processamento do arquivo.", midia.Id, e.GetType().Name);
+            await FalhaDoArquivoAsync(midia, ct);
+        }
 
         return passo;
     }
+
+    /// <summary>
+    /// Só o que é infraestrutura conhecida volta à fila sem contar: rede e HTTP, E/S (disco do job), prazo, banco (exceto a violação do duplicado, que o pipeline trata antes) e o
+    /// cliente do MinIO. O resto é do arquivo.
+    /// </summary>
+    internal static bool EhInfraestrutura(Exception e) => e switch
+    {
+        HttpRequestException or IOException or TimeoutException or TaskCanceledException or System.Net.Sockets.SocketException => true,
+        System.Data.Common.DbException => true,
+        DbUpdateException => true,
+        _ => e.GetType().Namespace?.StartsWith("Minio", StringComparison.Ordinal) == true,
+    };
 
     /// <summary>Lease vencido (Worker morto no meio) conta como falha de processamento e volta à fila; na 3ª o item é rejeitado (S-M04).</summary>
     private async Task LiberarLeasesVencidosAsync(CancellationToken ct)
@@ -145,6 +168,7 @@ public sealed class PipelineDeMidia(
             {
                 logger.LogDebug("PIPELINE_MIDIA_LEASE_JA_LIBERADO midia {MidiaId}: outro Worker liberou antes", m.Id);
                 db.ArquivosMidia.Entry(m).State = EntityState.Detached;
+                outbox.DescartarNaoSalvos(); // o evento já adicionado não pode sair no próximo SaveChanges (MidiaSanitizada duplicado)
             }
         }
     }

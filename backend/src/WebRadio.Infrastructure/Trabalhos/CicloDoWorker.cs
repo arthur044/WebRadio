@@ -138,11 +138,13 @@ public sealed class CicloDoWorker(ILideranca lideranca, IServiceScopeFactory esc
     {
         try
         {
+            var primeiro = true;
             while (!ct.IsCancellationRequested)
             {
                 await using var escopo = escopos.CreateAsyncScope();
                 if (escopo.ServiceProvider.GetService<WebRadio.Application.Features.Midias.PipelineDeMidia>() is not { } pipeline) return;
-                if (await pipeline.ProcessarProximaAsync(ct) != WebRadio.Application.Features.Midias.PassoDoPipeline.Processada) break;
+                if (await pipeline.ProcessarProximaAsync(ct, primeiroDoCiclo: primeiro) != WebRadio.Application.Features.Midias.PassoDoPipeline.Processada) break;
+                primeiro = false; // a varredura de jobs e a liberação de leases são uma vez por tick
             }
 
             var falhas = Interlocked.Exchange(ref _falhasDaSanitizacao, 0);
