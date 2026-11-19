@@ -1,7 +1,7 @@
 # =============================================================================
 # WebRadio — infra/liquidsoap/teste/api-falsa.liq (só para infra/liquidsoap/teste.sh)
 # Faz o papel da API interna (api:8081) e do MinIO (minio:9000) na rede de teste.
-# MOCK_MODO: "vazia" (sempre 204) · "maliciosa" (URL fora do prefixo) · "valida" (uma faixa, depois 204).
+# MOCK_MODO: "vazia" (sempre 204) · "maliciosa" (URL fora do prefixo) · "valida" (uma faixa de pedido, depois 204) · "rotacao" (uma faixa da biblioteca, sem pedidoId, depois 204).
 # Registra no log o que o radio.liq mandou; o token nunca é impresso, só "auth=ok|ERRADO".
 #
 # Harbor (E2-F08): as rotas /internal/harbor/* respondem ao que o teste.sh escreve em /controle (um arquivo por assunto, lido a cada
@@ -20,9 +20,17 @@ def autorizado(req) =
   if req.headers["authorization"] == "Bearer #{token}" then "ok" else "ERRADO" end
 end
 
+# O contrato do E4-D5: X-Playout-Instancia obrigatório e em UUID (a API real responde 400 senão). Imprime o valor SÓ se for UUID.
+def instancia(req) =
+  v = req.headers["x-playout-instancia"]
+  if string.match(pattern="^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", v) then v else "INVALIDA" end
+end
+
 def proxima(req, res) =
-  log.important(label="mock", "PROXIMA auth=#{autorizado(req)}")
-  if modo == "maliciosa" then
+  log.important(label="mock", "PROXIMA auth=#{autorizado(req)} instancia=#{instancia(req)}")
+  if instancia(req) == "INVALIDA" then
+    res.status_code(400)
+  elsif modo == "maliciosa" then
     servidas := servidas() + 1
     urls = [
       "file:///etc/passwd",
@@ -39,6 +47,14 @@ def proxima(req, res) =
       midiaId="11111111-1111-1111-1111-111111111111", pedidoId=null,
       url=list.nth(default="file:///etc/passwd", urls, servidas() mod list.length(urls)),
       titulo="nao deve tocar", artista="ninguem"
+    })
+  elsif modo == "rotacao" and servidas() < 1 then
+    # Faixa da rotação da biblioteca (E4-D4): sem pedidoId.
+    servidas := servidas() + 1
+    res.json({
+      midiaId="44444444-4444-4444-4444-444444444444", pedidoId=null,
+      url="http://minio:9000/midia/2026/10/faixa.mp3?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc123",
+      titulo="Da rotação", artista="Biblioteca"
     })
   elsif modo == "valida" and servidas() < 1 then
     servidas := servidas() + 1
