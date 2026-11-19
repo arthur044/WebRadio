@@ -148,9 +148,12 @@ Limites por tipo (configuráveis em `Midia:Limites`):
 Máquina de estados:
 ```
 AguardandoUpload ─(API: concluir, HEAD ok)─► Pendente ─(worker pega)─► EmAnalise ─┬─► Aprovado
-      └─(worker: expirou)─► [registro e objeto removidos]                          ├─► Quarentena (antivírus)
+      ├─(worker: expirou)─► [registro e objeto removidos]                          ├─► Quarentena (antivírus)
+      └─(dono ou Admin: CancelarEnvio)─► Rejeitado ("envio cancelado")
                                                                                     └─► Rejeitado (tipo/tamanho/duração/duplicado)
 ```
+`CancelarEnvio` (v1.5 do `08`) só vale em `AguardandoUpload`; grava `MotivoRejeicao` fixo "Envio cancelado." e não apaga a linha, para o fallback SQL dos limites do S-M06 continuar contando o envio; a `Manutencao` apaga o registro cancelado depois de 24 h.
+
 Invariante: `Aprovado ⇒ MimeType, HashSHA256, DuracaoSegundos, SanitizadoEmUtc ≠ null`, reforçado também por CHECK no banco. Só mídia `Aprovado` e `Ativo` pode tocar ou ser ligada a um pedido.
 
 ### 2.6 `Divulgacao` (schema `interacao`) — *Announcement*
