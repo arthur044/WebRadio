@@ -61,12 +61,15 @@ function montarApi(
     excluir?: Response[]
     /** Corpo do `GET /midias/{id}` (a releitura depois de um 409 no `concluir`). */
     registro?: object
+    /** Status HTTP de falhas do `GET /midias/{id}`, consumidos antes de o `registro` responder. */
+    relituras?: number[]
   } = {},
 ) {
   const chamadas: Chamada[] = []
   const uploads = [...(respostas.uploads ?? [])]
   const concluir = [...(respostas.concluir ?? [])]
   const excluir = [...(respostas.excluir ?? [])]
+  const relituras = [...(respostas.relituras ?? [])]
   let n = 0
   vi.stubGlobal(
     'fetch',
@@ -98,8 +101,10 @@ function montarApi(
         )
       }
       if (/^\/midias\/[^/]+\/concluir$/.test(caminho)) return concluir.shift() ?? json(202)
-      if (metodo === 'GET' && /^\/midias\/[^/]+$/.test(caminho) && respostas.registro) {
-        return json(200, respostas.registro)
+      if (metodo === 'GET' && /^\/midias\/[^/]+$/.test(caminho)) {
+        const falha = relituras.shift()
+        if (falha) return json(falha, { type: '/erros/x', title: 'x', status: falha })
+        if (respostas.registro) return json(200, respostas.registro)
       }
       if (metodo === 'DELETE' && /^\/midias\/[^/]+$/.test(caminho))
         return excluir.shift() ?? json(204)
@@ -464,6 +469,62 @@ describe('fila de envios: cancelar, concluir e o slot de AguardandoUpload (Guard
     useEnvios.getState().tentarDeNovo(useEnvios.getState().envios[0].id)
     await ate(() => XhrFalso.instancias.length === 2)
     expect(api.chamadas.filter((c) => c.caminho === '/midias/uploads')).toHaveLength(2)
+  })
+
+  it('409 no concluir com o registro ainda AguardandoUpload (envio vencido): não repete o concluir, refaz o envio inteiro', async () => {
+    const api = montarApi({
+      concluir: [json(409, { type: '/erros/transicao-invalida', title: 'x', status: 409 })],
+      registro: { statusSanitizacao: 'AguardandoUpload', cancelado: false },
+    })
+    useEnvios.getState().adicionar(novo('a.mp3'))
+    await ate(() => XhrFalso.instancias.length === 1)
+    XhrFalso.instancias[0].responder(201)
+    await ate(() => useEnvios.getState().envios[0].estado.fase === 'erro')
+    expect(useEnvios.getState().envios[0].midiaId).toBeUndefined()
+
+    useEnvios.getState().tentarDeNovo(useEnvios.getState().envios[0].id)
+    await ate(() => XhrFalso.instancias.length === 2)
+    expect(api.chamadas.filter((c) => c.caminho === '/midias/m1/concluir')).toHaveLength(1)
+    expect(api.chamadas.filter((c) => c.caminho === '/midias/uploads')).toHaveLength(2)
+  })
+
+  it('releitura que falha: repete até 3 vezes com espera crescente e então dá erro, mantendo o midiaId', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const api = montarApi({
+      concluir: [json(409, { type: '/erros/transicao-invalida', title: 'x', status: 409 })],
+      relituras: [503, 503, 503],
+    })
+    useEnvios.getState().adicionar(novo('a.mp3'))
+    await vi.waitFor(() => expect(XhrFalso.instancias).toHaveLength(1))
+    XhrFalso.instancias[0].responder(201)
+    const leituras = () =>
+      api.chamadas.filter((c) => c.metodo === 'GET' && c.caminho === '/midias/m1').length
+
+    await vi.waitFor(() => expect(leituras()).toBe(1))
+    await vi.advanceTimersByTimeAsync(500)
+    await vi.waitFor(() => expect(leituras()).toBe(2))
+    await vi.advanceTimersByTimeAsync(1000)
+    await vi.waitFor(() => expect(leituras()).toBe(3))
+
+    await vi.waitFor(() => expect(useEnvios.getState().envios[0].estado.fase).toBe('erro'))
+    expect(leituras()).toBe(3)
+    expect(useEnvios.getState().envios[0].midiaId).toBe('m1')
+  })
+
+  it('releitura que falha uma vez e depois acha o registro em análise: o envio vira concluído', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    montarApi({
+      concluir: [json(409, { type: '/erros/transicao-invalida', title: 'x', status: 409 })],
+      relituras: [503],
+      registro: { statusSanitizacao: 'Pendente', cancelado: false },
+    })
+    useEnvios.getState().adicionar(novo('a.mp3'))
+    await vi.waitFor(() => expect(XhrFalso.instancias).toHaveLength(1))
+    XhrFalso.instancias[0].responder(201)
+
+    await vi.advanceTimersByTimeAsync(500)
+
+    await vi.waitFor(() => expect(useEnvios.getState().envios[0].estado.fase).toBe('enviado'))
   })
 
   it('cancelar um envio em andamento devolve o slot com DELETE, antes de o seguinte pedir policy', async () => {

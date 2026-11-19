@@ -161,17 +161,32 @@ function textoOuNulo(valor: string): string | null {
   return t === '' ? null : t
 }
 
-/** Releitura do registro depois de um 409 no `concluir`; `null` (rede, 5xx) deixa o erro seguir e o retry repetir o `concluir`. */
+/** Releituras do registro depois de um 409 no `concluir`, e a espera entre elas (500 ms, 1 s...). */
+const RELEITURAS_MAXIMAS = 3
+const ESPERA_ENTRE_RELEITURAS_MS = 500
+
+/**
+ * Depois de um 409 no `concluir`, relê o registro (spec 08, P02 v1.6):
+ * - `cancelado`, 404 ou ainda `AguardandoUpload` = o envio venceu ou foi cancelado (`perdido`); repetir o `concluir` seria
+ *   um laço de 409 até a limpeza do F09, então o envio é refeito por inteiro;
+ * - qualquer outro status (inclusive `Rejeitado` pela análise) = um `concluir` anterior chegou e a resposta se perdeu
+ *   (`concluido`): a lista mostra o resultado.
+ * Se a própria releitura falha (rede, 5xx), repete até `RELEITURAS_MAXIMAS` vezes com espera crescente; esgotadas, `null`.
+ */
 async function situacaoDoRegistro(midiaId: string): Promise<'concluido' | 'perdido' | null> {
-  try {
-    const midia = await apiFetch<MidiaDto>(`/midias/${encodeURIComponent(midiaId)}`)
-    if (midia.cancelado) return 'perdido'
-    // Ainda `AguardandoUpload` não é o que o 409 diz: deixa o erro seguir. Qualquer outro status (inclusive `Rejeitado` pela
-    // análise) é um envio que chegou ao fim do `concluir`: a lista mostra o resultado.
-    return midia.statusSanitizacao === 'AguardandoUpload' ? null : 'concluido'
-  } catch (err) {
-    return err instanceof ApiError && err.status === 404 ? 'perdido' : null
+  for (let tentativa = 0; tentativa < RELEITURAS_MAXIMAS; tentativa++) {
+    try {
+      const midia = await apiFetch<MidiaDto>(`/midias/${encodeURIComponent(midiaId)}`)
+      if (midia.cancelado || midia.statusSanitizacao === 'AguardandoUpload') return 'perdido'
+      return 'concluido'
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return 'perdido'
+      if (tentativa < RELEITURAS_MAXIMAS - 1) {
+        await new Promise((r) => setTimeout(r, ESPERA_ENTRE_RELEITURAS_MS * 2 ** tentativa))
+      }
+    }
   }
+  return null
 }
 
 /** Recusa do storage ao `POST` do arquivo (policy vencida, tamanho fora do que a policy permite...). */
@@ -268,8 +283,8 @@ async function executar(envio: Envio): Promise<void> {
       )
       return
     }
-    // 409 no `concluir` = o registro já não está em `AguardandoUpload`: ou um `concluir` anterior chegou (a resposta se
-    // perdeu) e o envio está concluído, ou o envio foi cancelado/venceu e repetir o `concluir` daria 409 para sempre.
+    // 409 no `concluir` (`/erros/transicao-invalida`): relê o registro para saber se o envio concluiu ou se perdeu-se
+    // (cancelado, vencido); ver `situacaoDoRegistro`.
     if (midiaId !== undefined && err instanceof ApiError && err.status === 409) {
       const resultado = await situacaoDoRegistro(midiaId)
       if (resultado === 'concluido') return atualizar(id, { fase: 'enviado', midiaId })
@@ -281,6 +296,11 @@ async function executar(envio: Envio): Promise<void> {
             'O envio foi cancelado ou venceu. Tente de novo para enviar o arquivo outra vez.',
         })
       }
+      // Releitura esgotada: o `midiaId` fica, e o "tentar de novo" volta ao `concluir` (e a este exame).
+      return atualizar(id, {
+        fase: 'erro',
+        mensagem: 'Não foi possível confirmar o envio. Confira a conexão e tente de novo.',
+      })
     }
     atualizar(id, { fase: 'erro', mensagem: mensagemDeErro(err) })
     // Falha antes do `concluir` (storage recusou, rede): o slot volta agora, antes de qualquer "tentar de novo".
