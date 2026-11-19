@@ -2,7 +2,7 @@
 # E1-F14 — Icecast próprio (Alpine, sem root). Contexto de build = RAIZ do repositório:
 #   docker build -f infra/icecast/Dockerfile -t webradio-icecast .
 # O icecast.xml NUNCA entra na imagem com senha: o entrypoint o renderiza no tmpfs (/tmp) a partir de /run/secrets.
-FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
 # icecast 2.5.x; o pacote cria o usuário de sistema "icecast" (uid 100). Versão fixada (B3-09): a base é por digest e o pacote
 # flutuaria mesmo com a base fixada. O repositório do Alpine 3.24 guarda só a revisão corrente: quando uma correção sair (-r1) este build
