@@ -119,6 +119,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IListenerIdentity>(sp => new ListenerIdentity(
             Base64Url.DecodeFromChars(sp.GetRequiredService<IConfiguration>()["Seguranca:Pepper"]!), sp.GetRequiredService<IIpHasher>()));
         AddStorage(services, configuration);
+        // E4-F08: a fila do playout (SQL do Atlas), a faixa em voo e o sorteio.
+        services.AddScoped<IFilaDoPlayout, FilaDoPlayout>();
+        services.AddSingleton<IFaixaEmVoo>(sp => new FaixaEmVoo(sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<FaixaEmVoo>>(), sp.GetService<IConnectionMultiplexer>()));
+        services.AddSingleton<IAleatorio, AleatorioDoSistema>();
         services.AddSingleton<ITocandoAgoraStore>(sp => new TocandoAgoraStore(
             sp.GetRequiredService<IClock>(), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TocandoAgoraStore>>(), sp.GetService<IConnectionMultiplexer>()));
         services.AddSingleton<WebRadio.Application.Features.Harbor.IEstadoDoAoVivoStore>(sp => new EstadoDoAoVivoStore(
