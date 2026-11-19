@@ -31,6 +31,10 @@ async function seguiuNaMesmaPagina(page: Page) {
 }
 
 test.describe('envio de mídia (E4-P01, E4-P02, DoD 1)', () => {
+  // Sem retry: cada tentativa faz um login, e o /auth/login aceita 5 por minuto por IP. Um retry esgotaria o limite e
+  // derrubaria o pedidos-moderacao em cascata, escondendo o erro de verdade.
+  test.describe.configure({ retries: 0 })
+
   test.beforeEach(async ({ request }) => {
     // Sondagem sem efeito colateral: a listagem com o token do Admin semeado. Só o 404 (rota inexistente) pula; 401, 403
     // ou 5xx são falha de verdade e não podem sumir atrás de um skip.
@@ -92,7 +96,11 @@ test.describe('envio de mídia (E4-P01, E4-P02, DoD 1)', () => {
     expect((await concluir).status()).toBe(202)
 
     // --- o status muda sem recarregar: Pendente (ou Em análise) e depois Aprovada, pelo evento MidiaSanitizada
-    const item = page.getByRole('listitem').filter({ hasText: titulo })
+    // O título também aparece na fila de envios ("Enviado. A análise começou..."): o item da lista fica na região "Mídias".
+    const item = page
+      .getByRole('region', { name: 'Mídias' })
+      .getByRole('listitem')
+      .filter({ hasText: titulo })
     await expect(item).toContainText(/Na fila de análise|Em análise/, { timeout: 30_000 })
     await expect(item).toContainText('Aprovada', { timeout: 150_000 })
 
