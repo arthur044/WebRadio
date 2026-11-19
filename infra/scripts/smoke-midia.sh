@@ -86,15 +86,17 @@ login() { # $1 e-mail, $2 senha; o /auth/login tem 5 por minuto por IP: espera e
   return 1
 }
 
-# Um upload como o browser: policy pela API, multipart PELO NGINX com os campos e o `file` por último, concluir. Imprime o midiaId; $UP_POST = HTTP do multipart.
-UP_POST=""; UP_CONCLUIR=""; UP_POLICY=""
+# Um upload como o browser: policy pela API, multipart PELO NGINX com os campos e o `file` por último, concluir. Define $UP_ID (o midiaId), $UP_POLICY, $UP_POST e $UP_CONCLUIR
+# (variáveis, não saída: um $(subir ...) rodaria num subshell e as perderia).
+UP_POST=""; UP_CONCLUIR=""; UP_POLICY=""; UP_ID=""; LAST=""
 subir() { # $1 token, $2 arquivo, $3 tipo (Vinheta|Comercial|Musica), $4 mime, $5 título (opcional)
+  UP_ID=""; UP_POST=""; UP_CONCLUIR=""
   local tam; tam="$(stat -c %s "$2")"
   python3 -I -c 'import json,sys; print(json.dumps({"nomeOriginal": sys.argv[1], "tipoMidia": sys.argv[2], "tamanhoBytes": int(sys.argv[3]), "mimeTypeDeclarado": sys.argv[4], "titulo": sys.argv[5] or None}))' \
     "$(basename "$2")" "$3" "$tam" "$4" "${5:-}" > "$TMP/up.json"
   local r; r="$(api POST /api/v1/midias/uploads "$1" "$TMP/up.json")"
   UP_POLICY="$(status_de "$r")"
-  [[ "$UP_POLICY" == 201 ]] || { printf ''; return 0; }
+  [[ "$UP_POLICY" == 201 ]] || return 0
   local corpo; corpo="$(corpo_de "$r")"
   local id url; id="$(json 'd["midiaId"]' <<<"$corpo")"; url="$(json 'd["upload"]["url"]' <<<"$corpo")"
   local campos=()
@@ -104,7 +106,7 @@ subir() { # $1 token, $2 arquivo, $3 tipo (Vinheta|Comercial|Musica), $4 mime, $
   if [[ "$UP_POST" == 201 ]]; then
     r="$(api POST "/api/v1/midias/$id/concluir" "$1")"; UP_CONCLUIR="$(status_de "$r")"
   fi
-  printf '%s' "$id"
+  UP_ID="$id"
 }
 status_da() { # $1 token, $2 id; imprime statusSanitizacao
   local r; r="$(api GET "/api/v1/midias/$2" "$1")"
@@ -183,7 +185,7 @@ chmod 755 "$TMP" "$FIX"; chmod 644 "$FIX"/* 2>/dev/null || true
 # --- DoD 3: S-C01 e o upload pelo nginx -------------------------------------------------------------------------------------------
 echo "== DoD 1 e 3: upload pelo nginx, e o que o sanitizer recusa"
 recusa() { # $1 arquivo, $2 tipo, $3 mime, $4 descrição, $5 "sem-ffmpeg" (opcional)
-  local id; id="$(subir "$LOC1" "$FIX/$1" "$2" "$3" "")"
+  local id; subir "$LOC1" "$FIX/$1" "$2" "$3" ""; id="$UP_ID"
   if [[ "$UP_POLICY" != 201 || "$UP_POST" != 201 || "$UP_CONCLUIR" != 202 ]]; then falha "$4: o envio falhou (policy $UP_POLICY, multipart $UP_POST, concluir $UP_CONCLUIR)"; return; fi
   espera_ate 120 terminal "$LOC1" "$id" || true
   confere "$4 → Rejeitado" test "$(status_da "$LOC1" "$id")" = Rejeitado
@@ -198,7 +200,7 @@ recusa teora.ogg Vinheta audio/ogg "OGG com Theora"
 recusa longo.wav Vinheta audio/wav "WAV de 90 s numa vinheta de 60 s"
 confere "o motivo da duração fala do limite" bash -c "[[ \"\$(curl -s -H 'Authorization: Bearer $LOC1' '$BASE/api/v1/midias/$LAST' | python3 -I -c 'import json,sys; print(json.loads(sys.stdin.read()).get(\"motivoRejeicao\",\"\"))')\" == *dura* ]]"
 
-ID_CAPA="$(subir "$LOC1" "$FIX/capa.mp3" Vinheta audio/mpeg "")"
+subir "$LOC1" "$FIX/capa.mp3" Vinheta audio/mpeg ""; ID_CAPA="$UP_ID"
 if [[ "$UP_POLICY" == 201 && "$UP_POST" == 201 && "$UP_CONCLUIR" == 202 ]]; then
   ok "MP3 com capa e tags: policy 201, multipart 201 pelo nginx, concluir 202"
   confere "e vai de Pendente a Aprovado" espera_status "$LOC1" "$ID_CAPA" Aprovado 120
@@ -220,7 +222,7 @@ fi
 
 # --- DoD 4: antivírus -----------------------------------------------------------------------------------------------------
 echo "== DoD 4: antivírus com a assinatura de teste"
-ID_MARCADO="$(subir "$LOC1" "$FIX/marcado.wav" Vinheta audio/wav "")"
+subir "$LOC1" "$FIX/marcado.wav" Vinheta audio/wav ""; ID_MARCADO="$UP_ID"
 if [[ "$UP_CONCLUIR" == 202 ]]; then
   espera_ate 120 terminal "$LOC1" "$ID_MARCADO" || true
   confere "o WAV marcado vai para Quarentena" test "$(status_da "$LOC1" "$ID_MARCADO")" = Quarentena
@@ -232,7 +234,7 @@ fi
 
 "${COMPOSE[@]}" stop clamd >/dev/null 2>&1
 ANTES="$(grep -c 'WORKER_DEGRADADO motivo=scanner' <<<"$(logs_worker)" || true)"
-ID_LIMPO="$(subir "$LOC1" "$FIX/limpo.wav" Vinheta audio/wav "")"
+subir "$LOC1" "$FIX/limpo.wav" Vinheta audio/wav ""; ID_LIMPO="$UP_ID"
 if [[ "$UP_CONCLUIR" == 202 ]]; then
   sleep 55 # mais de 4 ciclos de 10 s do Worker
   confere "com o clamd parado por 4 ciclos o arquivo continua Pendente (nunca Aprovado sem scan)" test "$(status_da "$LOC1" "$ID_LIMPO")" = Pendente
@@ -274,7 +276,7 @@ done
 
 # quota do bucket quarentena: recusa o que passa dela (o limite do teste é de 1 MiB; o arquivo tem ~2 MB)
 mc_root quota set svc/quarentena --size 1MiB >/dev/null && QUOTA_MUDADA=1
-ID_QUOTA="$(subir "$LOC1" "$FIX/grande.wav" Vinheta audio/wav "")"
+subir "$LOC1" "$FIX/grande.wav" Vinheta audio/wav ""; ID_QUOTA="$UP_ID"
 confere "com a quota de 1 MiB a policy sai (201) e o POST acima dela é recusado pelo MinIO (4xx)" test "$UP_POLICY" = 201 -a "${UP_POST:-0}" -ge 400
 if [[ -n "$ID_QUOTA" ]]; then
   r="$(api POST "/api/v1/midias/$ID_QUOTA/concluir" "$LOC1")"
