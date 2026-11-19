@@ -15,6 +15,8 @@
 #   7. limites do S-M06: o 21º POST na mesma hora é 429 (o cancelamento do envio não devolve o contador); 20 POST paralelos do mesmo usuário = exatamente 5 × 201 e
 #      15 × 429; a quota do bucket quarentena está configurada (10 GiB; a recusa é do MinIO, que só a aplica com o uso medido pelo scanner dele); GET, PUT e DELETE em /storage/quarentena/... são recusados.
 #
+#   2 e 8 (E4-F08). um pedido aprovado com a música da biblioteca toca sozinho e vira Tocado (Reproducao com o PedidoId, o ouvinte vê Tocado); depois a rotação toca faixas da
+#      biblioteca sem repetir em sequência, e a mídia desativada some dela.
 # Os arquivos de teste são gerados aqui (python3 e um ffmpeg COMPLETO num contêiner descartável, só para gerar; o do sanitizer só tem o encoder de MP3). Nunca imprime
 # segredo. Acumula as falhas e sai com 1 se houve alguma.
 # =============================================================================
@@ -159,6 +161,7 @@ def wav(path, segundos, taxa=22050, marca=None, aberto=False, freq=440):
 
 wav(d + "/marcado.wav", 3, marca=b"WEBRADIO-E4-ASSINATURA-DE-TESTE")   # a assinatura de teste (infra/clamav/smoke/smoke.ndb)
 wav(d + "/limpo.wav", 3, freq=523)
+wav(d + "/musica.wav", 35, freq=262)                                   # uma Musica (mínimo de 30 s) para o pedido tocado pelo playout (DoD 2)
 wav(d + "/longo.wav", 90, aberto=True)                                 # 90 s numa vinheta (limite 60 s), cabeçalho com tamanho aberto
 open(d + "/playlist.mp3", "wb").write(b"#EXTM3U\nhttp://api:8080/health/live\n")
 open(d + "/concat.mp3", "wb").write(b"ffconcat version 1.0\nfile /etc/passwd\n")
@@ -246,6 +249,48 @@ else
 fi
 
 # --- DoD 7: limites do S-M06 -------------------------------------------------------------------------------------------------
+# --- DoD 2 e 8: o playout toca o pedido aprovado e depois a rotação da biblioteca (E4-F08) ---------------------------------------------
+echo "== DoD 2 e 8: pedido tocado pelo playout e rotação pela biblioteca"
+sql() { # $1 = consulta; imprime só o valor (a senha do SA é lida DENTRO do contêiner, nunca em argv do host)
+  docker exec -i "$("${COMPOSE[@]}" ps -q sqlserver)" bash -c \
+    'SQLCMDPASSWORD="$(cat /run/secrets/mssql_sa_password)" exec /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -d WebRadio -h -1 -W -Q "SET NOCOUNT ON; $1"' _ "$1" 2>/dev/null | tr -d '\r ' | head -n1
+}
+subir "$LOC1" "$FIX/musica.wav" Musica audio/wav "Música do smoke"; ID_MUSICA="$UP_ID"
+if [[ "$UP_CONCLUIR" == 202 ]] && espera_status "$LOC1" "$ID_MUSICA" Aprovado 150; then
+  ok "a música de 35 s da biblioteca é aprovada"
+  OUVINTE="$(python3 -I -c 'import uuid; print(uuid.uuid4())')"
+  r="$(curl --silent --max-time 20 --write-out '\n%{http_code}' -X POST -H 'Content-Type: application/json' -H "X-Listener-Id: $OUVINTE" \
+    --data '{"nomeOuvinte":"Smoke","tituloMusica":"Musica do smoke","artista":"Banda","mensagem":"smoke do Epico 4"}' "$BASE/api/v1/pedidos" || true)"
+  ID_PEDIDO="$(json 'd["id"]' <<<"${r%$'\n'*}" 2>/dev/null || true)"
+  confere "o ouvinte faz o pedido (201)" test "${r##*$'\n'}" = 201 -a -n "$ID_PEDIDO"
+  printf '{"midiaId": "%s"}' "$ID_MUSICA" > "$TMP/aprovar.json"
+  r="$(api POST "/api/v1/pedidos/$ID_PEDIDO/aprovar" "$ADMIN" "$TMP/aprovar.json")"
+  confere "o locutor aprova o pedido ligando a música da biblioteca (200)" test "$(status_de "$r")" = 200
+  pedido_tocado() { [[ "$(sql "SELECT Status FROM interacao.PedidoMusica WHERE Id = '$ID_PEDIDO'")" == 4 ]]; }
+  confere "o pedido vira Tocado sozinho (em até 4 min)" espera_ate 240 pedido_tocado
+  ouvinte_ve_tocado() { curl --silent --max-time 10 -H "X-Listener-Id: $OUVINTE" "$BASE/api/v1/pedidos/meus" | grep -q 'Tocado'; }
+  confere "o ouvinte vê Tocado" ouvinte_ve_tocado
+  confere "midia.Reproducao ganha UMA linha com o PedidoId e a mídia do pedido" test "$(sql "SELECT COUNT(*) FROM midia.Reproducao WHERE PedidoId = '$ID_PEDIDO' AND MidiaId = '$ID_MUSICA'")" = 1
+  confere "a linha é de uma Musica" test "$(sql "SELECT m.TipoMidia FROM midia.Reproducao AS r JOIN midia.ArquivoMidia AS m ON m.Id = r.MidiaId WHERE r.PedidoId = '$ID_PEDIDO'")" = 3
+  sleep 30
+  confere "o pedido não é tocado duas vezes (o Liquidsoap não reenvia na mesma instância)" test "$(sql "SELECT COUNT(*) FROM midia.Reproducao WHERE PedidoId = '$ID_PEDIDO'")" = 1
+
+  # DoD 8: com a fila de pedidos vazia, a rotação devolve faixas Aprovado e Ativo da biblioteca, e a em voo não repete em sequência.
+  rotacao_tocou() { [[ "$(sql "SELECT COUNT(*) FROM midia.Reproducao AS r JOIN midia.ArquivoMidia AS m ON m.Id = r.MidiaId WHERE r.PedidoId IS NULL AND m.StatusSanitizacao = 4 AND m.Ativo = 1")" -ge 2 ]]; }
+  confere "a rotação da biblioteca toca (>= 2 faixas sem pedido, em até 4 min)" espera_ate 240 rotacao_tocou
+  confere "nenhuma faixa repete em sequência (a faixa em voo é excluída)" test "$(sql "SELECT COUNT(*) FROM (SELECT MidiaId, LAG(MidiaId) OVER (ORDER BY IniciadoEmUtc, Id) AS Anterior FROM midia.Reproducao) AS x WHERE MidiaId = Anterior")" = 0
+
+  # Mídia desativada some da rotação no próximo pedido de faixa.
+  ETAG="$(curl --silent --max-time 10 --dump-header - --output /dev/null -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/midias/$ID_CAPA" | tr -d '\r' | grep -i -m1 '^etag:' | cut -d' ' -f2-)"
+  r="$(curl --silent --max-time 10 --write-out '\n%{http_code}' -X PATCH -H 'Content-Type: application/json' -H "If-Match: $ETAG" -H "Authorization: Bearer $ADMIN" --data '{"ativo":false}' "$BASE/api/v1/midias/$ID_CAPA" || true)"
+  confere "o Admin desativa a vinheta (PATCH 200)" test "${r##*$'\n'}" = 200
+  DESATIVADA_EM="$(sql "SELECT FORMAT(DATEADD(SECOND, 20, SYSUTCDATETIME()), 'yyyy-MM-dd HH:mm:ss')")"
+  sleep 60
+  confere "depois de desativada a vinheta não toca mais (nenhuma reprodução depois da folga de 20 s)" test "$(sql "SELECT COUNT(*) FROM midia.Reproducao WHERE MidiaId = '$ID_CAPA' AND IniciadoEmUtc > '$DESATIVADA_EM'")" = 0
+else
+  falha "a música do pedido não chegou a Aprovado (policy $UP_POLICY, multipart $UP_POST, concluir $UP_CONCLUIR)"
+fi
+
 # A API tem um limite global de 100 requisições por minuto por IP (janela FIXA, Program.cs). O DoD 7 faz bem mais que isso, e a janela que ele deixa aberta derrubaria o E2E que roda
 # logo depois (429 já nas primeiras chamadas): espera a janela virar antes e depois.
 esperar_janela() { echo "  (espera 62 s: a janela de 100/min por IP da API)"; sleep 62; }
