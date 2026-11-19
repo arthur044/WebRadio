@@ -113,13 +113,19 @@ export function recarregarMidias(queryClient: QueryClient): Promise<unknown> {
   return queryClient.invalidateQueries({ queryKey: ['midias'] })
 }
 
+/** URL pré-assinada e o instante (ms, relógio do servidor) em que ela vence; `null` se a API não mandou um instante válido. */
+export interface UrlDePreview {
+  url: string
+  expiraEm: number | null
+}
+
 /**
  * URL de pré-escuta. O `<audio>` não manda `Authorization`, e o 302 do `GET /midias/{id}/preview` reenviaria o Bearer
  * ao MinIO junto da assinatura; por isso `?formato=url` devolve a URL pré-assinada em JSON (`{ url, expiraEmUtc }`, 5 min; combinado com o Forge, E4-F03).
  * Só aceita o que a API prometeu: mesma origem, sob `/storage/midia/`. Nada vindo da rede vira `src` sem passar daqui.
  */
-export async function resolverUrlDePreview(id: string): Promise<string> {
-  const { url } = await apiFetch<{ url: string }>(
+export async function resolverUrlDePreview(id: string): Promise<UrlDePreview> {
+  const { url, expiraEmUtc } = await apiFetch<{ url: string; expiraEmUtc?: string }>(
     `/midias/${encodeURIComponent(id)}/preview?formato=url`,
   )
   let alvo: URL
@@ -132,5 +138,6 @@ export async function resolverUrlDePreview(id: string): Promise<string> {
   if (alvo.origin !== window.location.origin || !alvo.pathname.startsWith('/storage/midia/')) {
     throw new Error('URL de pré-escuta inesperada')
   }
-  return alvo.href
+  const expiraEm = Date.parse(expiraEmUtc ?? '')
+  return { url: alvo.href, expiraEm: Number.isFinite(expiraEm) ? expiraEm : null }
 }
