@@ -30,6 +30,14 @@ updates:
     ignore:
       - dependency-name: "MediatR"
         update-types: ["version-update:semver-major"]
+      # O runtime ASP.NET/.NET do compose é o 10.x (LTS, imagens dotnet/* no bloco docker /backend): os pacotes do framework acompanham o major dele,
+      # nunca o 11 do Dependabot (Guardian, hotfix da CVE-2026-114147). Sobem por patch/minor.
+      - dependency-name: "Microsoft.AspNetCore.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.EntityFrameworkCore*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/frontend"

@@ -75,12 +75,13 @@ gerar_base64url() {
   openssl rand -base64 "$1" | tr '+/' '-_' | tr -d '=\n'
 }
 
-# Regenera até ter maiúscula, minúscula e dígito.
+# Regenera até ter maiúscula, minúscula e dígito, e sem '-' no início: um segredo que começa com '-' vira flag em CLI que o recebe por
+# argumento (o `mc admin user add` do minio-init caiu assim no CI, e o erro imprimiu parte do segredo).
 gerar_forte() {
   local valor
   while true; do
     valor="$(gerar_base64url "$1")"
-    if [[ "$valor" =~ [A-Z] && "$valor" =~ [a-z] && "$valor" =~ [0-9] ]]; then
+    if [[ "$valor" != -* && "$valor" =~ [A-Z] && "$valor" =~ [a-z] && "$valor" =~ [0-9] ]]; then
       printf '%s' "$valor"
       return 0
     fi
