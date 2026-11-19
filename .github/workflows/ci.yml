@@ -506,7 +506,9 @@ jobs:
       - name: Senha nova do Admin (mascarada)
         run: |
           set -euo pipefail
+          # Sem '-' no início: o valor vira argumento de CLI em outros passos e viraria flag.
           nova="$(openssl rand -base64 24 | tr '+/' '-_')"
+          while [ "${nova#-}" != "$nova" ]; do nova="$(openssl rand -base64 24 | tr '+/' '-_')"; done
           echo "::add-mask::${nova}"
           echo "E2E_ADMIN_SENHA_NOVA=${nova}" >> "$GITHUB_ENV"
 

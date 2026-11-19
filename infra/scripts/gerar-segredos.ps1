@@ -48,11 +48,11 @@ function New-Base64UrlSecret {
 }
 
 function New-StrongSecret {
-    # Regenera até ter maiúscula, minúscula e dígito (política de senha do SQL Server).
+    # Regenera até ter maiúscula, minúscula e dígito (política de senha do SQL Server) e sem '-' no início (vira flag em CLI que recebe o segredo por argumento).
     param([int]$Bytes)
     while ($true) {
         $valor = New-Base64UrlSecret -Bytes $Bytes
-        if ($valor -cmatch '[A-Z]' -and $valor -cmatch '[a-z]' -and $valor -cmatch '[0-9]') {
+        if (-not $valor.StartsWith('-') -and $valor -cmatch '[A-Z]' -and $valor -cmatch '[a-z]' -and $valor -cmatch '[0-9]') {
             return $valor
         }
     }
