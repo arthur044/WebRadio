@@ -204,7 +204,7 @@ if [[ "$UP_POLICY" == 201 && "$UP_POST" == 201 && "$UP_CONCLUIR" == 202 ]]; then
   URL="$(json 'd["url"]' <<<"$(corpo_de "$r")" 2>/dev/null || true)"
   confere "pré-escuta: ?formato=url devolve a URL (200)" test "$(status_de "$r")" = 200
   if [[ -n "$URL" ]]; then
-    curl -s --max-time 30 -o "$TMP/saida.mp3" -D "$TMP/saida.h" "$URL" || true
+    curl --silent --max-time 30 --output "$TMP/saida.mp3" --dump-header "$TMP/saida.h" "$URL" || true
     confere "a URL serve audio/mpeg (200)" bash -c "head -n1 '$TMP/saida.h' | grep -q ' 200' && grep -qi '^content-type: audio/mpeg' '$TMP/saida.h'"
     chmod 644 "$TMP/saida.mp3"
     SAIDA="$(docker run --rm --pull never --network none --user 65532:65532 -v "$TMP:/in:ro" --entrypoint /usr/local/bin/ffprobe webradio-sanitizer:local -v error -show_entries stream=codec_name,codec_type -of csv=p=0 /in/saida.mp3 2>&1 | tr '\n' '|')"
@@ -255,7 +255,7 @@ for i in $(seq 1 20); do
   [[ "$(status_de "$d")" == 204 ]] || ruins=$((ruins + 1))
 done
 confere "20 envios com desistência (POST 201 e DELETE 204): nenhum falhou" test "$ruins" = 0
-curl -s -D "$TMP/vinte-e-um.h" -o /dev/null --max-time 20 -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer $LOC2" --data-binary "@$TMP/pequeno.json" "$BASE/api/v1/midias/uploads" || true
+curl --silent --dump-header "$TMP/vinte-e-um.h" --output /dev/null --max-time 20 -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer $LOC2" --data-binary "@$TMP/pequeno.json" "$BASE/api/v1/midias/uploads" || true
 confere "o 21º POST na mesma hora → 429 (o cancelamento não devolveu o contador)" bash -c "head -n1 '$TMP/vinte-e-um.h' | grep -q ' 429'"
 confere "com Retry-After" grep -qi '^retry-after:' "$TMP/vinte-e-um.h"
 
