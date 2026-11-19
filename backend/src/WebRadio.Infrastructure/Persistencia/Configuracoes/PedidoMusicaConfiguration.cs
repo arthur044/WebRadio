@@ -45,6 +45,8 @@ public sealed class PedidoMusicaConfiguration : IEntityTypeConfiguration<PedidoM
 
         builder.Property(p => p.ModeradoEmUtc).HasColumnType("datetime2(3)");
         builder.Property(p => p.EnviadoPlayoutEmUtc).HasColumnType("datetime2(3)");
+        // E4-D5: instância do Liquidsoap que recebeu o pedido (propriedade de sombra até o Forge levá-la ao domínio no E4-F08).
+        builder.Property<Guid?>("EnviadoPlayoutInstancia");
         builder.Property(p => p.TocadoEmUtc).HasColumnType("datetime2(3)");
         builder.Property(p => p.CriadoEmUtc)
             .HasColumnType("datetime2(3)")
@@ -89,9 +91,11 @@ public sealed class PedidoMusicaConfiguration : IEntityTypeConfiguration<PedidoM
             .IncludeProperties(p => new { p.NomeOuvinte, p.TituloMusica, p.Artista, p.Mensagem, p.ProgramaId, p.CriadoEmUtc })
             .HasFilter("Status = 2");
 
+        // E4-D5: entrega ao Liquidsoap. O predicado tem `OR` (nunca entregue, ou entregue a outra instância), então o filtro não pode mais
+        // exigir EnviadoPlayoutEmUtc IS NULL; chave em ModeradoEmUtc (idade máxima de 24 h e ORDER BY do próprio índice).
         builder.HasIndex(p => p.ModeradoEmUtc, "IX_PedidoMusica_Playout")
-            .IncludeProperties(p => p.MidiaId)
-            .HasFilter("Status = 2 AND MidiaId IS NOT NULL AND EnviadoPlayoutEmUtc IS NULL");
+            .IncludeProperties(nameof(PedidoMusica.MidiaId), nameof(PedidoMusica.EnviadoPlayoutEmUtc), "EnviadoPlayoutInstancia")
+            .HasFilter("Status = 2 AND MidiaId IS NOT NULL");
 
         builder.HasIndex(p => new { p.ListenerDeviceHash, p.CriadoEmUtc })
             .IsDescending(false, true)
