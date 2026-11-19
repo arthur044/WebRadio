@@ -15,7 +15,7 @@ set -euo pipefail
 export LC_ALL=C
 
 SANITIZER="webradio-sanitizer:teste"
-ALPINE="alpine@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf" # o mesmo da imagem (o ffmpeg completo vem do apk, só para gerar arquivos)
+ALPINE="alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf" # o mesmo da imagem (o ffmpeg completo vem do apk, só para gerar arquivos)
 P="wr-san-teste-$$"
 TMP="$(mktemp -d)"
 FALHAS=0
@@ -186,6 +186,8 @@ for ruim in \
   '{"formato":"mp3","duracaoMaxSegundos":99999999,"tamanhoMaxSaidaBytes":1000,"timeoutSegundos":5}' \
   '{"formato":"mp3","duracaoMaxSegundos":10,"tamanhoMaxSaidaBytes":1000,"timeoutSegundos":5,"extra":"x"}' \
   '{"formato":"mp3","duracaoMaxSegundos":0,"tamanhoMaxSaidaBytes":1000,"timeoutSegundos":5}' \
+  '{"formato":"mp3","duracaoMaxSegundos":08,"tamanhoMaxSaidaBytes":1000,"timeoutSegundos":5}' \
+  '{"formato":"mp3","duracaoMaxSegundos":10,"tamanhoMaxSaidaBytes":01000,"timeoutSegundos":05}' \
   $'{"formato":"mp3","duracaoMaxSegundos":10,"tamanhoMaxSaidaBytes":1000,"timeoutSegundos":5}\n{"formato":"mp3","duracaoMaxSegundos":10,"tamanhoMaxSaidaBytes":1000,"timeoutSegundos":5}' \
   'não é json'; do
   ID="$(novo_id)"

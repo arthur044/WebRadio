@@ -205,7 +205,7 @@ for nome_cfg, cfg in (("base", prod), ("base + live", live)):
     confere(f"{nome_cfg}: sem Seguranca__AceitarAssinaturaSemData", "AceitarAssinaturaSemData" not in texto)
     confere(f"{nome_cfg}: sem o .ndb de teste montado", ".ndb" not in texto)
 confere("sanitizer sem rede (network_mode none)", servicos["sanitizer"].get("network_mode") == "none")
-for n in ("app", "dados", "playout", "midia-borda"):
+for n in ("app", "dados", "playout", "midia-borda", "antivirus"):
     confere(f"rede {n} é internal", bool(prod["networks"][n].get("internal")))
 
 # --- gatilho (ii) do risco aceito do TrustServerCertificate (B3-03): nenhum contêiner da dados com capability de rede

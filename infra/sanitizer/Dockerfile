@@ -5,7 +5,7 @@
 # Contexto de build = RAIZ do repositório:  docker build -f infra/sanitizer/Dockerfile -t webradio-sanitizer:local .
 
 # ---- 1) compilação: fontes por versão e SHA-256 (conferidos contra o site oficial na criação; o build falha se o hash mudar) ----
-FROM alpine@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS build
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS build
 ARG LAME_VERSION=3.100
 ARG LAME_SHA256=ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e
 ARG FFMPEG_VERSION=9.0.2
@@ -38,7 +38,7 @@ RUN cd "ffmpeg-${FFMPEG_VERSION}" \
  && make -j"$(nproc)" && make install
 
 # ---- 2) execução: Alpine por digest (sh, timeout e stat do busybox) + os dois binários estáticos e o script ----
-FROM alpine@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 # Correções de segurança da base (o trivy falha em HIGH corrigível nesta imagem): sobe os pacotes já presentes para a revisão corrente do Alpine.
 RUN apk upgrade --no-cache
 COPY --from=build /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/

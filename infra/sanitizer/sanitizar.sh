@@ -53,10 +53,11 @@ processar() {
   : > "$d/iniciado" 2>/dev/null || true
   inicio="$(date +%s)"
 
-  # job.json: UMA linha, exatamente neste formato (o Worker o escreve assim); qualquer desvio é job inválido.
+  # job.json: UMA linha, exatamente neste formato (o Worker o escreve assim); qualquer desvio é job inválido. Números sem zero à esquerda: no `ash` do Alpine `$((08 + 1))` é
+  # erro aritmético que ENCERRA o script (e o contêiner).
   job="$(head -c 512 "$d/job.json")"
   # O grep casa POR LINHA: um job.json de várias linhas passaria nele e só cairia depois. Uma linha só.
-  if [ "$(printf '%s\n' "$job" | wc -l)" -gt 1 ] || ! echo "$job" | grep -Eq '^\{"formato":"(mp3|ogg|wav|flac)","duracaoMaxSegundos":[0-9]{1,5},"tamanhoMaxSaidaBytes":[0-9]{1,10},"timeoutSegundos":[0-9]{1,4}\}$'; then
+  if [ "$(printf '%s\n' "$job" | wc -l)" -gt 1 ] || ! echo "$job" | grep -Eq '^\{"formato":"(mp3|ogg|wav|flac)","duracaoMaxSegundos":[1-9][0-9]{0,4},"tamanhoMaxSaidaBytes":[1-9][0-9]{0,9},"timeoutSegundos":[1-9][0-9]{0,3}\}$'; then
     rejeitar "$d" job_invalido 0 ""
     return 0
   fi
