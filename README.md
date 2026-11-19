@@ -152,9 +152,9 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 |---|---|---|---|
 | Spec | Pacote de tarefas do Épico 4 (v1.2, com os reviews do Guardian, do Sentinel e do Atlas) | #92 | Na `main` |
 | D1 | Imagens de terceiros sem CRITICAL corrigível e trivy bloqueando (E4-F01) | #95 | Na `main` |
-| D2 | Upload, sanitização, ClamAV e biblioteca (backend) | — | Pendente |
-| D3 | Playout pela biblioteca e relatório de mais tocadas (backend) | — | Pendente |
-| D4 | Telas: biblioteca, envio, aprovar com mídia, mais tocadas | — | Pendente |
+| D2 | Upload, sanitização, ClamAV e biblioteca (backend) | #112 | Em andamento (PR em rascunho) |
+| D3 | Playout pela biblioteca e relatório de mais tocadas (backend); abre com o A01a do Atlas (chave de sorteio e índices) | A01a: #111 | A01a com PR aberto; o resto pendente |
+| D4 | Telas: biblioteca, envio, aprovar com mídia, mais tocadas | #110 | Em andamento (PR em rascunho) |
 
 - **Ainda não existe upload nem biblioteca**: até o D2 entrar na `main`, nada do que o Épico 4 descreve acima está disponível na API ou nas telas.
 - **Revisão**: todo PR do Épico 4 passa pelo Sentinel, por ser o épico do upload não confiável.
@@ -240,5 +240,5 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 ---
 
 **Versão**: Épico 3 fechado; Épico 4 em andamento (spec e D1 na `main`)  
-**Última atualização**: 2026-11-08  
+**Última atualização**: 2026-11-19  
 **Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend), Lore (Documentação)
