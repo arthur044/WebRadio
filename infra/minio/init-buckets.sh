@@ -21,6 +21,8 @@ ler() {
   v="$(cat "$S/$1")"
   [ -n "$v" ] || falhar "$1 está vazio."
   case "$v" in *[!A-Za-z0-9_-]*) falhar "$1 tem caractere fora de [A-Za-z0-9_-]." ;; esac
+  # Um valor que começa com '-' viraria flag no mc (já derrubou o CI e o erro do mc imprimiu parte do segredo): recusa SEM imprimir o valor.
+  case "$v" in -*) falhar "$1 começa com '-' (o mc o leria como flag): gere o segredo de novo." ;; esac
   printf '%s' "$v"
 }
 
@@ -56,7 +58,9 @@ mc admin policy create wr webradio-svc-worker "$P/svc-worker.json"
 # efêmero e sem outro processo. O `--` impede que uma chave começando com '-' seja lida como flag, e a saída do mc NÃO vai ao log: o erro de
 # uso dele ecoa o argumento (já imprimiu parte do segredo no CI).
 criar_usuario() {
-  mc admin user add -- wr "$1" "$2" >/dev/null 2>&1 || falhar "não consegui criar o usuário de serviço $3 (saída do mc omitida: pode conter segredo)."
+  mc admin user add -- wr "$1" "$2" >/dev/null 2>&1 && return 0
+  rc=$?
+  falhar "não consegui criar o usuário de serviço $3 (rc=$rc; saída do mc omitida: pode conter segredo)."
 }
 criar_usuario "$API_KEY" "$API_SECRET" svc-api
 criar_usuario "$WORKER_KEY" "$WORKER_SECRET" svc-worker
