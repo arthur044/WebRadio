@@ -534,8 +534,8 @@ jobs:
         run: infra/scripts/smoke-pedidos.sh
 
       # Épico 4, DoD 1 (upload), 3 (S-C01), 4 (antivírus) e 7 (limites do S-M06), E4-F10: sobe o clamd REAL só com a assinatura de teste (docker-compose.smoke.yml, sem
-      # baixar a base do freshclam) e recria o Worker com ele; envia pelo nginx com a POST policy como o browser; para o clamd por 4 ciclos; baixa a quota do bucket e a restaura.
-      # Roda antes do E2E: o trap religa o clamd e restaura a quota.
+      # baixar a base do freshclam) e recria o Worker com ele; envia pelo nginx com a POST policy como o browser; para o clamd por 4 ciclos e confere a quota configurada.
+      # Roda antes do E2E: o trap religa o clamd.
       - name: Smoke da mídia (DoD 1, 3, 4 e 7 do Épico 4)
         timeout-minutes: 20
         run: infra/scripts/smoke-midia.sh

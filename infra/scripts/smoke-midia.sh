@@ -13,7 +13,7 @@
 #   4. antivírus com a assinatura de teste: o WAV marcado vai para Quarentena; com o clamd parado por 4 ciclos do Worker o arquivo continua Pendente, o marcador
 #      WORKER_DEGRADADO motivo=scanner sai a cada ciclo, e quando o clamd volta o MESMO arquivo é aprovado (nunca aprovado sem scan).
 #   7. limites do S-M06: o 21º POST na mesma hora é 429 (o cancelamento do envio não devolve o contador); 20 POST paralelos do mesmo usuário = exatamente 5 × 201 e
-#      15 × 429; a quota do bucket quarentena recusa o upload acima dela; GET, PUT e DELETE em /storage/quarentena/... são recusados.
+#      15 × 429; a quota do bucket quarentena está configurada (10 GiB; a recusa é do MinIO, que só a aplica com o uso medido pelo scanner dele); GET, PUT e DELETE em /storage/quarentena/... são recusados.
 #
 # Os arquivos de teste são gerados aqui (python3 e um ffmpeg COMPLETO num contêiner descartável, só para gerar; o do sanitizer só tem o encoder de MP3). Nunca imprime
 # segredo. Acumula as falhas e sai com 1 se houve alguma.
@@ -30,8 +30,6 @@ TMP="$(mktemp -d)"
 FIX="$TMP/fix"
 # uid:gid do sanitizer e do mc de teste (sem privilégio). Em variável: dois-pontos colado a --user, perto de um curl, dispara o curl-auth-user do gitleaks.
 UID_SEM_PRIVILEGIO="65532:65532"
-QUOTA_ORIGINAL="10GiB"
-QUOTA_MUDADA=0
 MINIO_CID=""
 
 : "${E2E_ADMIN_SENHA_NOVA:?Defina E2E_ADMIN_SENHA_NOVA (a senha que o smoke do ao vivo deixou no Admin)}"
@@ -49,8 +47,7 @@ mc_root() { # argumentos do mc; a credencial root vai por --env-file (nunca em a
 }
 
 limpar() {
-  # A quota baixada e o clamd parado não podem sobrar para quem vem depois (o E2E).
-  if [[ "$QUOTA_MUDADA" == 1 && -n "$MINIO_CID" ]]; then mc_root quota set svc/quarentena --size "$QUOTA_ORIGINAL" >/dev/null || true; fi
+  # O clamd parado não pode sobrar para quem vem depois (o E2E).
   "${COMPOSE[@]}" up -d --wait --wait-timeout 300 clamd >/dev/null 2>&1 || true
   # Os arquivos gerados pelo contêiner pertencem ao root dele.
   docker run --rm -v "$TMP:/x" --entrypoint sh "$ALPINE" -c 'rm -rf /x/*' >/dev/null 2>&1 || true
@@ -163,7 +160,6 @@ def wav(path, segundos, taxa=22050, marca=None, aberto=False, freq=440):
 wav(d + "/marcado.wav", 3, marca=b"WEBRADIO-E4-ASSINATURA-DE-TESTE")   # a assinatura de teste (infra/clamav/smoke/smoke.ndb)
 wav(d + "/limpo.wav", 3, freq=523)
 wav(d + "/longo.wav", 90, aberto=True)                                 # 90 s numa vinheta (limite 60 s), cabeçalho com tamanho aberto
-wav(d + "/grande.wav", 47, freq=330)                                    # ~2 MB: acima da quota de 1 MiB do teste
 open(d + "/playlist.mp3", "wb").write(b"#EXTM3U\nhttp://api:8080/health/live\n")
 open(d + "/concat.mp3", "wb").write(b"ffconcat version 1.0\nfile /etc/passwd\n")
 open(d + "/id3-playlist.mp3", "wb").write(b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"#EXTM3U\nhttp://api:8080/health/live\n")
@@ -267,23 +263,17 @@ paralelo() { # um POST; imprime o código
   curl -s -o "$TMP/par-$1.json" --max-time 30 -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer $ADMIN" --data-binary "@$TMP/pequeno.json" "$BASE/api/v1/midias/uploads"
 }
 export -f paralelo; export TMP BASE ADMIN
-CODIGOS="$(seq 1 20 | xargs -P 20 -I{} bash -c 'paralelo {}' | sort | uniq -c | tr -s ' ' | tr '\n' ';')"
-confere "20 POST paralelos do mesmo usuário: exatamente 5 × 201 e 15 × 429 ($CODIGOS)" test "$CODIGOS" = " 15 429; 5 201;"
+CODIGOS="$(seq 1 20 | xargs -P 20 -I{} bash -c 'paralelo {}' | sort | uniq -c | awk '{print $2 "x" $1}' | tr '\n' ';')"
+confere "20 POST paralelos do mesmo usuário: exatamente 5 × 201 e 15 × 429 ($CODIGOS)" test "$CODIGOS" = "201x5;429x15;"
 for f in "$TMP"/par-*.json; do
   id="$(json 'd.get("midiaId","")' < "$f" 2>/dev/null || true)"
   [[ -n "$id" ]] && api DELETE "/api/v1/midias/$id" "$ADMIN" >/dev/null || true
 done
 
-# quota do bucket quarentena: recusa o que passa dela (o limite do teste é de 1 MiB; o arquivo tem ~2 MB)
-mc_root quota set svc/quarentena --size 1MiB >/dev/null && QUOTA_MUDADA=1
-subir "$LOC1" "$FIX/grande.wav" Vinheta audio/wav ""; ID_QUOTA="$UP_ID"
-confere "com a quota de 1 MiB a policy sai (201) e o POST acima dela é recusado pelo MinIO (4xx)" test "$UP_POLICY" = 201 -a "${UP_POST:-0}" -ge 400
-if [[ -n "$ID_QUOTA" ]]; then
-  r="$(api POST "/api/v1/midias/$ID_QUOTA/concluir" "$LOC1")"
-  confere "o concluir não acha o objeto (400): nada entrou na quarentena" test "$(status_de "$r")" = 400
-  api DELETE "/api/v1/midias/$ID_QUOTA" "$LOC1" >/dev/null || true
-fi
-mc_root quota set svc/quarentena --size "$QUOTA_ORIGINAL" >/dev/null && QUOTA_MUDADA=0
+# quota do bucket quarentena (F07): configurada pelo minio-init. O MinIO só a APLICA com o uso medido pelo scanner de dados dele (que roda a cada minuto ou mais), então um upload
+# acima dela logo depois do boot passaria no CI: o que o smoke garante é que a quota existe e é a esperada (10 GiB); a recusa em si é do MinIO.
+quota_configurada() { local saida; saida="$(mc_root quota info svc/quarentena || true)"; grep -Eqi '10 ?GiB' <<<"$saida"; }
+confere "a quota do bucket quarentena está configurada (10 GiB)" quota_configurada
 
 # borda do storage: só POST na quarentena
 for metodo in GET PUT DELETE; do
