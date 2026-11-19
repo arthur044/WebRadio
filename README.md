@@ -166,7 +166,7 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 
 - **Já na API**: `POST /midias/uploads` e `/midias/{id}/concluir` (envio direto ao storage por POST policy, com limites de 20 por hora e 5 abertos por usuário), `GET /midias` e `GET /midias/{id}`, preview, `PATCH`/`DELETE`, o pipeline do Worker e as limpezas da manutenção. O contrato está na §6 de [`docs/specs/02-api-rest.md`](docs/specs/02-api-rest.md).
 - **Ainda não existe**: tela de biblioteca ou de envio (D4) e playout pela biblioteca (D3): o pedido aprovado segue sem tocar sozinho e `GET /internal/playout/proxima` segue em 204.
-- **Pendências do D2** (issues #136, #137 e #138): trava contra apagão em `midia/` numa biblioteca pequena, a mesma trava na varredura da quarentena e o marcador `WORKER_DEGRADADO motivo=sanitizer`. O smoke não testa a recusa pela quota do bucket `quarentena` (o MinIO só a aplica depois da medição dele); confere que a quota está configurada.
+- **Pendências do D2** (issues #136 a #140): trava contra apagão em `midia/` numa biblioteca pequena (#136), a mesma trava na varredura da quarentena (#137), o marcador `WORKER_DEGRADADO motivo=sanitizer` (#138), o Liquidsoap com `Restarting (137)` intermitente no Compose do CI (#139) e o piso do `INCRBY` negativo no throttle na virada da hora (#140). O smoke não testa a recusa pela quota do bucket `quarentena` (o MinIO só a aplica depois da medição dele); confere que a quota está configurada.
 - **Revisão**: todo PR do Épico 4 passa pelo Sentinel, por ser o épico do upload não confiável.
 
 ## O que vem a seguir
