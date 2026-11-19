@@ -25,7 +25,7 @@ public class MidiasEndpointsTests
         public Task<InfoObjeto?> HeadAsync(string bucket, string chave, CancellationToken ct = default) => Task.FromResult(Objetos.TryGetValue($"{bucket}/{chave}", out var o) ? o : null);
 
         public Task<string> UrlGetPreAssinadaAsync(string bucket, string chave, TimeSpan validade, string? contentType = null, string? contentDisposition = null, CancellationToken ct = default) =>
-            Task.FromResult($"http://localhost:8080/storage/{bucket}/{chave}?X-Amz-Signature=abc");
+            Task.FromResult($"http://localhost:8080/storage/{bucket}/{chave}?response-content-type={contentType}&response-content-disposition={Uri.EscapeDataString(contentDisposition ?? "")}&X-Amz-Expires={(int)validade.TotalSeconds}&X-Amz-Signature=abc");
 
         public Task<long> BaixarAsync(string bucket, string chave, string etagEsperado, long limiteBytes, Stream destino, CancellationToken ct = default) => throw new NotSupportedException();
 
@@ -51,7 +51,7 @@ public class MidiasEndpointsTests
         f.CriarUsuario("locutor@example.com", Role.Locutor);
         f.CriarUsuario("locutor2@example.com", Role.Locutor);
         f.CriarUsuario("ouvinte@example.com", Role.Ouvinte);
-        return new Cena(host.CreateClient(new() { BaseAddress = new Uri("http://localhost") }), storage, f);
+        return new Cena(host.CreateClient(new() { BaseAddress = new Uri("http://localhost"), AllowAutoRedirect = false }), storage, f);
     }
 
     private static async Task<string> TokenDe(HttpClient c, string email)
@@ -263,7 +263,29 @@ public class MidiasEndpointsTests
         Assert.StartsWith("http://localhost:8080/storage/midia/", corpo.GetProperty("url").GetString());
         Assert.True(corpo.TryGetProperty("expiraEmUtc", out _));
 
-        Assert.Equal(HttpStatusCode.BadRequest, (await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}/preview?formato=outro", token)).StatusCode);
+        var invalido = await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}/preview?formato=outro", token);
+        Assert.Equal(HttpStatusCode.BadRequest, invalido.StatusCode);
+        Assert.DoesNotContain("outro", await invalido.Content.ReadAsStringAsync()); // o valor recusado não é ecoado
+    }
+
+    [Fact]
+    public async Task Preview_302_e_200_saem_da_mesma_url_assinada_e_as_duas_formas_sao_no_store()
+    {
+        var c = NovaCena();
+        var id = Semear(c);
+        var token = await TokenDe(c.C, "locutor@example.com");
+
+        var redirecionamento = await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}/preview", token);
+        Assert.Equal(HttpStatusCode.Found, redirecionamento.StatusCode);
+        Assert.Equal("no-store", redirecionamento.Headers.CacheControl!.ToString());
+        var destino = redirecionamento.Headers.Location!.OriginalString;
+
+        var json = await Json(await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}/preview?formato=url", token));
+        var url = json.GetProperty("url").GetString()!;
+        Assert.Equal(destino, url);
+        Assert.Contains("response-content-type=audio/mpeg", url);
+        Assert.Contains($"response-content-disposition=inline%3B%20filename%2A%3DUTF-8%27%27{id}.mp3", url);
+        Assert.Contains("X-Amz-Expires=300", url);
     }
 
     [Fact]
