@@ -7,12 +7,18 @@
 # saida_grande_demais, timeout. Os sete primeiros são do ARQUIVO (rejeição determinística); `timeout` é falha de processamento (o Worker conta a tentativa, E4-D13). A duração mínima e máxima
 # do tipo são conferidas pelo Worker sobre a SAÍDA: aqui o `-t` só corta em duração máxima + 1 s.
 # Nada do conteúdo do arquivo é interpolado em comando: formato e números são validados antes de qualquer uso.
+# PRAZO ÚNICO POR JOB (S-A01, E4-D1): o `timeoutSegundos` vale para o job INTEIRO (ffprobe + ffmpeg + ffprobe da saída), não para cada etapa, porque o Worker desiste em
+# `timeoutSegundos + 15 s` e apaga o diretório; com prazo por etapa o sanitizer seguiria ocupado com o job abandonado e o próximo upload, inocente, estouraria o prazo sem ter começado.
+# O arquivo `iniciado` é escrito ao pegar o job: é dele que o Worker conta esse prazo (sem ele, o Worker trata "o sanitizer não pegou o job" como falha de infraestrutura).
 set -u
 
 JOBS="${SANITIZER_JOBS:-/jobs}"
 FFMPEG="${SANITIZER_FFMPEG:-/usr/local/bin/ffmpeg}"
 FFPROBE="${SANITIZER_FFPROBE:-/usr/local/bin/ffprobe}"
 UMA_VEZ="${SANITIZER_UMA_VEZ:-0}" # teste: processa o que houver e sai
+
+# Segundos que sobram do prazo único do job (`$inicio` e `$tempo` são do job em curso). Zero ou negativo = estourou.
+restante() { echo $(( tempo - ($(date +%s) - inicio) )); }
 
 # Resultado de um job: $1 = diretório, $2 = JSON já montado. O Worker só lê result.json (rename => nunca pela metade).
 escrever_resultado() {
@@ -43,6 +49,10 @@ processar() {
     return 0
   fi
 
+  # Daqui em diante o job é meu: `iniciado` marca o começo do prazo único (o Worker o espera).
+  : > "$d/iniciado" 2>/dev/null || true
+  inicio="$(date +%s)"
+
   # job.json: UMA linha, exatamente neste formato (o Worker o escreve assim); qualquer desvio é job inválido.
   job="$(head -c 512 "$d/job.json")"
   # O grep casa POR LINHA: um job.json de várias linhas passaria nele e só cairia depois. Uma linha só.
@@ -58,7 +68,8 @@ processar() {
   [ "$duracao_max" -ge 1 ] && [ "$tamanho_max" -ge 1 ] && [ "$tempo" -ge 1 ] || { rejeitar "$d" job_invalido 0 ""; return 0; }
 
   # 1) ffprobe com o demuxer FORÇADO e só o protocolo file (S-C01 item 2). Uma linha `codec,tipo` por stream (a ordem é a do ffprobe, não a pedida).
-  streams="$(timeout -s KILL "$tempo" "$FFPROBE" -v error -protocol_whitelist file -f "$formato" -show_entries stream=codec_type,codec_name -of csv=p=0 "$d/in.bin" 2>/dev/null)"
+  r="$(restante)"; [ "$r" -ge 1 ] || { rejeitar "$d" timeout 0 ""; return 0; }
+  streams="$(timeout -s KILL "$r" "$FFPROBE" -v error -protocol_whitelist file -f "$formato" -show_entries stream=codec_type,codec_name -of csv=p=0 "$d/in.bin" 2>/dev/null)"
   rc=$?
   if [ "$rc" -ne 0 ]; then
     if [ "$rc" -ge 124 ]; then rejeitar "$d" timeout 0 ""; else rejeitar "$d" formato_invalido 0 ""; fi
@@ -85,7 +96,8 @@ processar() {
   # 2) recodifica (S-C01 item 2): só 0:a:0, sem metadado nem capítulo, bitexact, 192k/44,1 kHz/estéreo; -t corta em duração máxima + 1 s (a duração que vale é a da
   # saída, conferida pelo Worker) e -fs limita o tamanho.
   rm -f "$d/out.tmp.mp3"
-  timeout -s KILL "$tempo" "$FFMPEG" -nostdin -hide_banner -v error -protocol_whitelist file -f "$formato" -i "$d/in.bin" \
+  r="$(restante)"; [ "$r" -ge 1 ] || { rejeitar "$d" timeout "$audio" "$codec"; return 0; }
+  timeout -s KILL "$r" "$FFMPEG" -nostdin -hide_banner -v error -protocol_whitelist file -f "$formato" -i "$d/in.bin" \
     -map 0:a:0 -vn -sn -dn -map_metadata -1 -map_chapters -1 -fflags +bitexact -flags:a +bitexact \
     -c:a libmp3lame -b:a 192k -ar 44100 -ac 2 -t "$((duracao_max + 1))" -fs "$tamanho_max" -f mp3 -y "$d/out.tmp.mp3" >/dev/null 2>&1
   rc=$?
@@ -102,7 +114,11 @@ processar() {
   fi
 
   # 3) duração da SAÍDA (S-A01): o cabeçalho do original pode mentir.
-  dur="$(timeout -s KILL "$tempo" "$FFPROBE" -v error -protocol_whitelist file -f mp3 -show_entries format=duration -of csv=p=0 "$d/out.tmp.mp3" 2>/dev/null | head -n 1)"
+  r="$(restante)"; [ "$r" -ge 1 ] || { rejeitar "$d" timeout "$audio" "$codec"; return 0; }
+  dur="$(timeout -s KILL "$r" "$FFPROBE" -v error -protocol_whitelist file -f mp3 -show_entries format=duration -of csv=p=0 "$d/out.tmp.mp3" 2>/dev/null)"
+  rc=$?
+  if [ "$rc" -ge 124 ]; then rejeitar "$d" timeout "$audio" "$codec" "$rc"; return 0; fi
+  dur="$(echo "$dur" | head -n 1)"
   echo "$dur" | grep -Eq '^[0-9]{1,6}(\.[0-9]{1,6})?$' || { rejeitar "$d" falha_na_decodificacao "$audio" "$codec"; return 0; }
 
   mv -f "$d/out.tmp.mp3" "$d/out.mp3"

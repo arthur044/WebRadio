@@ -22,7 +22,7 @@ FALHAS=0
 VERSAO_MINIMA="9.0.2" # o trivy não enxerga binário compilado: o pin sobe aqui e no Dockerfile quando sair CVE de demuxer/decoder (ver o Dockerfile)
 
 limpar() {
-  docker rm -f "$P-san" "$P-lento" >/dev/null 2>&1 || true
+  docker rm -f "$P-san" "$P-lento" "$P-parcelado" >/dev/null 2>&1 || true
   # Os arquivos gerados pelo contêiner pertencem ao root dele.
   docker run --rm -v "$TMP:/x" --entrypoint sh "$ALPINE" -c 'rm -rf /x/*' >/dev/null 2>&1 || true
   rm -rf "$TMP"
@@ -90,6 +90,10 @@ ENDURECIDO=(--network none --read-only --cap-drop ALL --security-opt no-new-priv
   --tmpfs /jobs:uid=65532,gid=65532,mode=0700,size=512m)
 docker run -d --name "$P-san" "${ENDURECIDO[@]}" "$SANITIZER" >/dev/null
 docker run -d --name "$P-lento" "${ENDURECIDO[@]}" -v "$TMP/ffmpeg-lento.sh:/stub/ffmpeg:ro" -e SANITIZER_FFMPEG=/stub/ffmpeg "$SANITIZER" >/dev/null
+# Um ffprobe que gasta 3 s em cada chamada e depois roda o real: o job (3 chamadas, 5 s de prazo) estoura o prazo ÚNICO, mesmo com cada etapa dentro de 5 s.
+printf '#!/bin/sh\nsleep 3\nexec /usr/local/bin/ffprobe "$@"\n' > "$TMP/ffprobe-parcelado.sh"
+chmod 0755 "$TMP/ffprobe-parcelado.sh"
+docker run -d --name "$P-parcelado" "${ENDURECIDO[@]}" -v "$TMP/ffprobe-parcelado.sh:/stub/ffprobe:ro" -e SANITIZER_FFPROBE=/stub/ffprobe "$SANITIZER" >/dev/null
 
 confere "uid 65532, sem rede, root somente leitura, sem capacidades" test \
   "$(docker inspect -f '{{.Config.User}} {{.HostConfig.NetworkMode}} {{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}}' "$P-san")" = "65532:65532 none true [ALL]"
@@ -212,6 +216,17 @@ job "$P-lento" "$ID" mp3 "$TMP/fix/a.mp3" 10 1000000 2
 RES="$(espera_resultado "$P-lento" "$ID" 30)" || RES=""
 confere "estourou o timeout de 2 s: motivo timeout em $((SECONDS - T0)) s" test "$(echo "$RES" | campo motivo)" = "timeout"
 confere "o processo travado foi morto" test "$(docker exec "$P-lento" sh -c 'ps | grep -c "[s]leep 120"' || true)" = "0"
+
+echo "== prazo único por job (Sentinel F-1 do #112): três etapas de 3 s dentro de um prazo de 5 s"
+ID="$(novo_id)"
+T0=$SECONDS
+job "$P-parcelado" "$ID" mp3 "$TMP/fix/a.mp3" 10 1000000 5
+RES="$(espera_resultado "$P-parcelado" "$ID" 30)" || RES=""
+DECORRIDO=$((SECONDS - T0))
+confere "o job estourou o prazo único (motivo timeout)" test "$(echo "$RES" | campo motivo)" = "timeout"
+confere "terminou em até 8 s (com prazo por etapa seriam ~9 s ou mais; foram $DECORRIDO s)" test "$DECORRIDO" -le 8
+confere "o sanitizer escreveu o arquivo iniciado" docker exec "$P-parcelado" test -f "/jobs/$ID/iniciado"
+confere "um job normal também escreve iniciado" docker exec "$P-san" test -f "/jobs/$LAST_ID/iniciado"
 
 echo
 if [[ "$FALHAS" -eq 0 ]]; then
