@@ -17,7 +17,7 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.13")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -262,6 +262,9 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                     b.Property<DateTime?>("EnviadoPlayoutEmUtc")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<Guid?>("EnviadoPlayoutInstancia")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<byte[]>("ListenerDeviceHash")
                         .HasColumnType("binary(32)");
 
@@ -355,9 +358,9 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "ModeradoEmUtc" }, "IX_PedidoMusica_Aprovados"), new[] { "NomeOuvinte", "TituloMusica", "Artista", "Mensagem", "ProgramaId", "CriadoEmUtc" });
 
                     b.HasIndex(new[] { "ModeradoEmUtc" }, "IX_PedidoMusica_Playout")
-                        .HasFilter("Status = 2 AND MidiaId IS NOT NULL AND EnviadoPlayoutEmUtc IS NULL");
+                        .HasFilter("Status = 2 AND MidiaId IS NOT NULL");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "ModeradoEmUtc" }, "IX_PedidoMusica_Playout"), new[] { "MidiaId" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "ModeradoEmUtc" }, "IX_PedidoMusica_Playout"), new[] { "MidiaId", "EnviadoPlayoutEmUtc", "EnviadoPlayoutInstancia" });
 
                     b.ToTable("PedidoMusica", "interacao", t =>
                         {
@@ -448,6 +451,11 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                     b.Property<DateTime?>("SanitizadoEmUtc")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<int>("Sorteio")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("int")
+                        .HasComputedColumnSql("CONVERT(int, SUBSTRING(HASHBYTES('SHA2_256', CONVERT(binary(16), [Id])), 1, 4))", true);
+
                     b.Property<byte>("StatusSanitizacao")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint")
@@ -495,6 +503,12 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                         .HasFilter("StatusSanitizacao IN (1, 2, 3)");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("StatusSanitizacao", "DataUploadUtc"), new[] { "UploadExpiraEmUtc", "TentativasSanitizacao", "EmAnaliseDesdeUtc" });
+
+                    b.HasIndex("TipoMidia", "Sorteio")
+                        .HasDatabaseName("IX_ArquivoMidia_Rotacao")
+                        .HasFilter("StatusSanitizacao = 4 AND Ativo = 1");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("TipoMidia", "Sorteio"), new[] { "Titulo", "Artista" });
 
                     b.HasIndex("TipoMidia", "StatusSanitizacao")
                         .HasDatabaseName("IX_ArquivoMidia_Biblioteca");

@@ -132,10 +132,10 @@ Moderar um pedido que não está `Pendente` → erro de domínio `PedidoJaModera
 | MotivoRejeicao | string(500)? | |
 | EnviadoPorUsuarioId | Guid | FK Usuario |
 | DataUploadUtc | DateTime | criação do registro |
-| UploadExpiraEmUtc | DateTime | criação + 1 h (limpeza de `AguardandoUpload`) |
+| UploadExpiraEmUtc | DateTime | criação + `Midia:Upload:LimpezaAguardandoHoras` (padrão 2 h): limite do `concluir` e da limpeza de `AguardandoUpload` (um relógio só; a POST policy vale 15 min, `08` E4-D11) |
 | SanitizadoEmUtc | DateTime? | |
 | Ativo | bool | desativar tira da rotação sem apagar o histórico |
-| Sorteio | int | coluna calculada persistida `CHECKSUM(Id)`, chave do sorteio da rotação (`08`, E4-D4); nunca gravada pela aplicação |
+| Sorteio | int | coluna calculada persistida (4 primeiros bytes do SHA-256 do `Id`; `CHECKSUM(Id)` não serve, dá poucos valores distintos com `NEWSEQUENTIALID()`), chave do sorteio da rotação (`08`, E4-D4); nunca gravada pela aplicação |
 | RowVersion | byte[] | |
 
 Limites por tipo (configuráveis em `Midia:Limites`):
@@ -148,9 +148,12 @@ Limites por tipo (configuráveis em `Midia:Limites`):
 Máquina de estados:
 ```
 AguardandoUpload ─(API: concluir, HEAD ok)─► Pendente ─(worker pega)─► EmAnalise ─┬─► Aprovado
-      └─(worker: expirou)─► [registro e objeto removidos]                          ├─► Quarentena (antivírus)
+      ├─(worker: expirou)─► [registro e objeto removidos]                          ├─► Quarentena (antivírus)
+      └─(dono ou Admin: CancelarEnvio)─► Rejeitado (MotivosRejeicao.EnvioCancelado)
                                                                                     └─► Rejeitado (tipo/tamanho/duração/duplicado)
 ```
+`CancelarEnvio` (v1.5 do `08`) só vale em `AguardandoUpload` (fora dele → `TransicaoInvalida`, 409; na API isso só aparece na corrida com o `concluir`, porque a autorização responde 403/404 antes); grava `MotivoRejeicao` = a constante de domínio `MotivosRejeicao.EnvioCancelado` ("Envio cancelado."; a `Manutencao` e o `MidiaDto.cancelado` comparam com a constante, nunca com texto digitado) e não apaga a linha, para o fallback SQL dos limites do S-M06 continuar contando o envio; a `Manutencao` apaga o registro cancelado depois de 24 h.
+
 Invariante: `Aprovado ⇒ MimeType, HashSHA256, DuracaoSegundos, SanitizadoEmUtc ≠ null`, reforçado também por CHECK no banco. Só mídia `Aprovado` e `Ativo` pode tocar ou ser ligada a um pedido.
 
 ### 2.6 `Divulgacao` (schema `interacao`) — *Announcement*
