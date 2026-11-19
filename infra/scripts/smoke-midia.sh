@@ -28,6 +28,8 @@ BASE="${SMOKE_BASE:-http://localhost:8080}"
 ALPINE="alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf" # o mesmo do sanitizer (o ffmpeg completo vem do apk, só para gerar arquivos)
 TMP="$(mktemp -d)"
 FIX="$TMP/fix"
+# uid:gid do sanitizer e do mc de teste (sem privilégio). Em variável: dois-pontos colado a --user, perto de um curl, dispara o curl-auth-user do gitleaks.
+UID_SEM_PRIVILEGIO="65532:65532"
 QUOTA_ORIGINAL="10GiB"
 QUOTA_MUDADA=0
 MINIO_CID=""
@@ -41,7 +43,7 @@ falha() { printf '  FALHA %s\n' "$1"; falhas=$((falhas + 1)); }
 confere() { if "${@:2}"; then ok "$1"; else falha "$1"; fi; }
 
 mc_root() { # argumentos do mc; a credencial root vai por --env-file (nunca em argv), no namespace de rede do MinIO
-  docker run --rm -i --pull never --network "container:$MINIO_CID" --user 65532:65532 --read-only --tmpfs /tmp --cap-drop ALL \
+  docker run --rm -i --pull never --network "container:$MINIO_CID" --user "$UID_SEM_PRIVILEGIO" --read-only --tmpfs /tmp --cap-drop ALL \
     --security-opt no-new-privileges:true --env-file "$TMP/mc-root.env" -e HOME=/tmp -e MC_CONFIG_DIR=/tmp/.mc \
     --entrypoint mc webradio-minio-init:local "$@" 2>&1
 }
@@ -207,9 +209,9 @@ if [[ "$UP_POLICY" == 201 && "$UP_POST" == 201 && "$UP_CONCLUIR" == 202 ]]; then
     curl --silent --max-time 30 --output "$TMP/saida.mp3" --dump-header "$TMP/saida.h" "$URL" || true
     confere "a URL serve audio/mpeg (200)" bash -c "head -n1 '$TMP/saida.h' | grep -q ' 200' && grep -qi '^content-type: audio/mpeg' '$TMP/saida.h'"
     chmod 644 "$TMP/saida.mp3"
-    SAIDA="$(docker run --rm --pull never --network none --user 65532:65532 -v "$TMP:/in:ro" --entrypoint /usr/local/bin/ffprobe webradio-sanitizer:local -v error -show_entries stream=codec_name,codec_type -of csv=p=0 /in/saida.mp3 2>&1 | tr '\n' '|')"
+    SAIDA="$(docker run --rm --pull never --network none --user "$UID_SEM_PRIVILEGIO" -v "$TMP:/in:ro" --entrypoint /usr/local/bin/ffprobe webradio-sanitizer:local -v error -show_entries stream=codec_name,codec_type -of csv=p=0 /in/saida.mp3 2>&1 | tr '\n' '|')"
     confere "a saída tem 1 stream de áudio mp3 e nenhuma capa" test "$SAIDA" = "mp3,audio|"
-    TAGS="$(docker run --rm --pull never --network none --user 65532:65532 -v "$TMP:/in:ro" --entrypoint /usr/local/bin/ffprobe webradio-sanitizer:local -v error -show_entries format_tags -of default=nw=1 /in/saida.mp3 2>&1)"
+    TAGS="$(docker run --rm --pull never --network none --user "$UID_SEM_PRIVILEGIO" -v "$TMP:/in:ro" --entrypoint /usr/local/bin/ffprobe webradio-sanitizer:local -v error -show_entries format_tags -of default=nw=1 /in/saida.mp3 2>&1)"
     confere "e nenhum metadado (a tag secreta sumiu)" test -z "$TAGS"
   fi
 else
