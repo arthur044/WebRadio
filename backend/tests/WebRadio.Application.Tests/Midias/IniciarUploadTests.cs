@@ -42,6 +42,88 @@ public sealed class IniciarUploadTests
     }
 
     [Fact]
+    public async Task O_registro_vive_pelo_prazo_de_limpeza_e_nao_pelo_da_policy()
+    {
+        var f = new MidiasFixture();
+        await f.Iniciar.Handle(f.Comando(), default);
+        Assert.Equal(f.Relogio.UtcNow.AddHours(2), f.Db.ArquivosMidia.Single().UploadExpiraEmUtc);
+
+        var g = new MidiasFixture(new MidiaOptions { Upload = new UploadOptions { LimpezaAguardandoHoras = 3 } });
+        await g.Iniciar.Handle(g.Comando(), default);
+        Assert.Equal(g.Relogio.UtcNow.AddHours(3), g.Db.ArquivosMidia.Single().UploadExpiraEmUtc);
+    }
+
+    [Fact]
+    public async Task Retry_after_do_limite_de_abertos_vai_ate_o_vencimento_do_aguardando_mais_antigo()
+    {
+        var f = new MidiasFixture();
+        f.Semear(StatusSanitizacao.AguardandoUpload, criadaEm: f.Relogio.UtcNow.AddMinutes(-30)); // vence em 90 min
+        f.Semear(StatusSanitizacao.AguardandoUpload, criadaEm: f.Relogio.UtcNow.AddMinutes(-10));
+        for (var i = 0; i < 3; i++) f.Semear(StatusSanitizacao.Pendente);
+
+        var e = await Assert.ThrowsAsync<LimiteExcedidoException>(() => f.Iniciar.Handle(f.Comando(), default));
+        Assert.Equal(TimeSpan.FromMinutes(90), e.TenteDeNovoEm);
+    }
+
+    [Fact]
+    public async Task Retry_after_do_limite_de_abertos_tem_o_minimo_de_60_s()
+    {
+        var f = new MidiasFixture();
+        f.Semear(StatusSanitizacao.AguardandoUpload, criadaEm: f.Relogio.UtcNow.AddMinutes(-119).AddSeconds(-40)); // vence em 20 s
+        for (var i = 0; i < 4; i++) f.Semear(StatusSanitizacao.Pendente);
+
+        var e = await Assert.ThrowsAsync<LimiteExcedidoException>(() => f.Iniciar.Handle(f.Comando(), default));
+        Assert.Equal(TimeSpan.FromSeconds(60), e.TenteDeNovoEm);
+    }
+
+    [Fact]
+    public async Task Retry_after_sem_aguardando_aberto_e_de_60_s()
+    {
+        var f = new MidiasFixture();
+        for (var i = 0; i < 3; i++) f.Semear(StatusSanitizacao.Pendente);
+        for (var i = 0; i < 2; i++) f.Semear(StatusSanitizacao.EmAnalise);
+
+        var e = await Assert.ThrowsAsync<LimiteExcedidoException>(() => f.Iniciar.Handle(f.Comando(), default));
+        Assert.Equal(TimeSpan.FromSeconds(60), e.TenteDeNovoEm);
+    }
+
+    [Fact]
+    public async Task Aguardando_upload_vencido_nao_conta_no_limite_de_abertos()
+    {
+        var f = new MidiasFixture();
+        for (var i = 0; i < 3; i++) f.Semear(StatusSanitizacao.AguardandoUpload, criadaEm: f.Relogio.UtcNow.AddHours(-3)); // venceram há 1 h
+        for (var i = 0; i < 2; i++) f.Semear(StatusSanitizacao.Pendente);
+
+        for (var i = 0; i < 3; i++) await f.Iniciar.Handle(f.Comando(), default); // 2 abertos de verdade: cabem mais 3
+        await Assert.ThrowsAsync<LimiteExcedidoException>(() => f.Iniciar.Handle(f.Comando(), default));
+    }
+
+    [Fact]
+    public async Task Se_a_assinatura_da_policy_falha_depois_do_commit_o_registro_e_descartado()
+    {
+        var f = new MidiasFixture();
+        f.Storage.FalharNaPolicy = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => f.Iniciar.Handle(f.Comando(), default));
+        Assert.Empty(f.Db.ArquivosMidia);
+    }
+
+    [Fact]
+    public async Task A_policy_so_e_assinada_depois_do_commit_nunca_quando_o_limite_ou_a_trava_recusam()
+    {
+        var f = new MidiasFixture();
+        for (var i = 0; i < 5; i++) f.Semear(StatusSanitizacao.Pendente);
+        await Assert.ThrowsAsync<LimiteExcedidoException>(() => f.Iniciar.Handle(f.Comando(), default));
+        Assert.Empty(f.Storage.Policies);
+
+        var g = new MidiasFixture();
+        g.Transacao.Ocupada = true;
+        var e = await Assert.ThrowsAsync<LimiteExcedidoException>(() => g.Iniciar.Handle(g.Comando(), default));
+        Assert.Equal(TimeSpan.FromSeconds(1), e.TenteDeNovoEm);
+        Assert.Empty(g.Storage.Policies);
+        Assert.Empty(g.Db.ArquivosMidia);
+    }
+
+    [Fact]
     public async Task Conta_e_insere_sob_a_trava_do_usuario()
     {
         var f = new MidiasFixture();

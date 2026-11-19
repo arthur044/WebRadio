@@ -109,8 +109,9 @@ public sealed class LimiteDeUploadDeMidia(IRequestThrottle contadores, IIpHasher
 }
 
 /// <summary>
-/// 08 E4-F02: policy primeiro (sem ela não há registro), depois, na MESMA transação e sob a trava do usuário, a contagem dos abertos
-/// (<c>AguardandoUpload</c>, <c>Pendente</c>, <c>EmAnalise</c>) e o <c>INSERT</c>. Sem a trava, 20 <c>POST</c> paralelos passariam do limite de 5.
+/// 08 E4-F02: na MESMA transação e sob a trava do usuário, a contagem dos abertos (<c>AguardandoUpload</c> não vencido, <c>Pendente</c>, <c>EmAnalise</c>) e o
+/// <c>INSERT</c>; sem a trava, 20 <c>POST</c> paralelos passariam do limite de 5. Nada fora do banco dentro do bloco (o EF o reexecuta num retry): o contador de 20/h
+/// do Redis fica antes dele e a POST policy é assinada DEPOIS do commit (se a assinatura falhar, o registro é descartado).
 /// </summary>
 public sealed class IniciarUploadHandler(
     IRadioDbContext db,
@@ -124,6 +125,7 @@ public sealed class IniciarUploadHandler(
     public static readonly TimeSpan EsperaDaTrava = TimeSpan.FromMilliseconds(2000);
     /// <summary>15 min (S-M02): é a janela em que o POST na mesma chave ainda é aceito. A validade é checada quando o POST CHEGA ao storage, então um upload lento que já começou termina.</summary>
     public static readonly TimeSpan ValidadeDaPolicy = TimeSpan.FromMinutes(15);
+    /// <summary><c>Retry-After</c> mínimo do limite de abertos, e o valor quando nenhum <c>AguardandoUpload</c> está aberto (só <c>Pendente</c>/<c>EmAnalise</c>: o Worker libera quando quiser).</summary>
     public static readonly TimeSpan EsperaComAbertosNoLimite = TimeSpan.FromSeconds(60);
 
     private static readonly StatusSanitizacao[] Abertos = [StatusSanitizacao.AguardandoUpload, StatusSanitizacao.Pendente, StatusSanitizacao.EmAnalise];
@@ -137,16 +139,18 @@ public sealed class IniciarUploadHandler(
 
         var midia = new ArquivoMidia(
             Guid.CreateVersion7(), cmd.NomeOriginal, Normalizar(cmd.Titulo), Normalizar(cmd.Artista), cmd.TipoMidia,
-            cmd.MimeTypeDeclarado, cmd.TamanhoBytes, cmd.UsuarioId, agora);
-        var policy = await destino.CriarPostPolicyAsync(Buckets.Quarentena, midia.ChaveStorage, cmd.MimeTypeDeclarado, cmd.TamanhoBytes, ValidadeDaPolicy, ct);
+            cmd.MimeTypeDeclarado, cmd.TamanhoBytes, cmd.UsuarioId, agora, TimeSpan.FromHours(o.Upload.LimpezaAguardandoHoras));
 
         var trava = Travas.UploadDeMidiaDoUsuario(LimiteDeUploadDeMidia.ChaveOpaca(hasher, cmd.UsuarioId));
         try
         {
             await transacao.ExecutarAsync([trava], EsperaDaTrava, async ct2 =>
             {
-                var abertos = await db.ArquivosMidia.CountAsync(m => m.EnviadoPorUsuarioId == cmd.UsuarioId && Abertos.Contains(m.StatusSanitizacao), ct2);
-                if (abertos >= o.MaximoAbertos) throw new LimiteExcedidoException(EsperaComAbertosNoLimite);
+                // AguardandoUpload vencido não conta: a limpeza (F09) ainda não passou, mas o upload já não pode ser concluído.
+                var abertos = await db.ArquivosMidia.CountAsync(
+                    m => m.EnviadoPorUsuarioId == cmd.UsuarioId && Abertos.Contains(m.StatusSanitizacao)
+                        && (m.StatusSanitizacao != StatusSanitizacao.AguardandoUpload || m.UploadExpiraEmUtc > agora), ct2);
+                if (abertos >= o.MaximoAbertos) throw new LimiteExcedidoException(await EsperaDoLimiteDeAbertosAsync(cmd.UsuarioId, agora, ct2));
 
                 if (usarSql)
                 {
@@ -167,7 +171,35 @@ public sealed class IniciarUploadHandler(
             throw new LimiteExcedidoException(TimeSpan.FromSeconds(1));
         }
 
-        return new UploadIniciadoDto(midia.Id, new UploadDto(policy.Url, policy.Campos, policy.ExpiraEmUtc));
+        try
+        {
+            var policy = await destino.CriarPostPolicyAsync(Buckets.Quarentena, midia.ChaveStorage, cmd.MimeTypeDeclarado, cmd.TamanhoBytes, ValidadeDaPolicy, ct);
+            return new UploadIniciadoDto(midia.Id, new UploadDto(policy.Url, policy.Campos, policy.ExpiraEmUtc));
+        }
+        catch
+        {
+            // Sem policy o registro não serve a ninguém e ocuparia um dos 5 abertos até vencer: descarta (melhor esforço; a limpeza do F09 é a rede).
+            try
+            {
+                db.ArquivosMidia.Remove(midia);
+                await db.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (Exception)
+            {
+                // a exceção que importa é a da assinatura
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>Até o vencimento do <c>AguardandoUpload</c> mais antigo do usuário (mínimo 60 s); sem nenhum aberto, 60 s (02 §6).</summary>
+    private async Task<TimeSpan> EsperaDoLimiteDeAbertosAsync(Guid usuario, DateTime agora, CancellationToken ct)
+    {
+        var vencimento = await db.ArquivosMidia
+            .Where(m => m.EnviadoPorUsuarioId == usuario && m.StatusSanitizacao == StatusSanitizacao.AguardandoUpload && m.UploadExpiraEmUtc > agora)
+            .MinAsync(m => (DateTime?)m.UploadExpiraEmUtc, ct);
+        return vencimento is { } v && v - agora > EsperaComAbertosNoLimite ? v - agora : EsperaComAbertosNoLimite;
     }
 
     private static string? Normalizar(string? texto) => string.IsNullOrEmpty(texto) ? null : TextoSeguro.Normalizar(texto);

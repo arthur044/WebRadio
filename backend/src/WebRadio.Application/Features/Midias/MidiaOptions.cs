@@ -22,6 +22,9 @@ public sealed class MidiaOptions
     /// <summary>Uploads em <c>AguardandoUpload</c>, <c>Pendente</c> ou <c>EmAnalise</c> por usuário.</summary>
     public int MaximoAbertos { get; set; } = MaximoAbertosPadrao;
 
+    /// <summary><c>Midia:Upload</c>: prazo do registro em <c>AguardandoUpload</c> (E4-D11).</summary>
+    public UploadOptions Upload { get; set; } = new();
+
     public LimiteDoTipo Vinheta { get; set; } = new() { TamanhoMaximoBytes = 10 * MiB, DuracaoMinimaSegundos = 1, DuracaoMaximaSegundos = 60 };
 
     public LimiteDoTipo Comercial { get; set; } = new() { TamanhoMaximoBytes = 20 * MiB, DuracaoMinimaSegundos = 5, DuracaoMaximaSegundos = 120 };
@@ -56,6 +59,17 @@ public sealed class MidiaOptions
     }
 }
 
+public sealed class UploadOptions
+{
+    public const int LimpezaAguardandoHorasPadrao = 2;
+
+    /// <summary>
+    /// <c>UploadExpiraEmUtc</c> = criação + este valor: limite do <c>concluir</c> E da limpeza (um relógio só, 01 §2.5). A POST policy vale 15 min; a margem cobre o
+    /// upload lento que começou perto do fim da validade.
+    /// </summary>
+    public int LimpezaAguardandoHoras { get; set; } = LimpezaAguardandoHorasPadrao;
+}
+
 public sealed class SanitizacaoOptions
 {
     public int? TimeoutSegundos { get; set; }
@@ -80,6 +94,7 @@ public sealed class MidiaOptionsValidator : IValidateOptions<MidiaOptions>
         var erros = new List<string>();
         if (o.UploadsPorHora is < 1 or > 1000) erros.Add("Midia:UploadsPorHora deve estar entre 1 e 1000.");
         if (o.MaximoAbertos is < 1 or > 100) erros.Add("Midia:MaximoAbertos deve estar entre 1 e 100.");
+        if (o.Upload.LimpezaAguardandoHoras is < 1 or > 24) erros.Add("Midia:Upload:LimpezaAguardandoHoras deve estar entre 1 e 24.");
         if (o.Sanitizacao.TimeoutSegundos is < 5 or > 3600) erros.Add("Midia:Sanitizacao:TimeoutSegundos deve estar entre 5 e 3600.");
         foreach (var (nome, l) in new[] { ("Vinheta", o.Vinheta), ("Comercial", o.Comercial), ("Musica", o.Musica) })
         {

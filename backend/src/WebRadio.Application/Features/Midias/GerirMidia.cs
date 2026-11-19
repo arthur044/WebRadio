@@ -12,9 +12,10 @@ namespace WebRadio.Application.Features.Midias;
 
 /// <summary>
 /// <c>PATCH /midias/{id}</c> + <c>If-Match</c> (02 §6). <c>TituloPresente</c>/<c>ArtistaPresente</c> distinguem "campo ausente" (não muda) de "vazio" (limpa; a
-/// Música não pode ficar sem título). <c>ativo</c> só o Admin altera e o Locutor só edita a PRÓPRIA mídia (<see cref="AcessoNegadoException"/> → 403).
+/// Música não pode ficar sem título). <c>ativo</c> só o Admin altera e o Locutor só edita a PRÓPRIA mídia (<see cref="AcessoNegadoException"/> → 403); mídia desativada não existe para o Locutor (404).
+/// A autorização vem ANTES do <c>If-Match</c>: o 412 nunca vaza para quem não pode editar.
 /// </summary>
-public sealed record EditarMidiaCommand(Guid MidiaId, byte[] Versao, string? Titulo, string? Artista, bool? Ativo, bool EhAdmin, bool TituloPresente, bool ArtistaPresente, Guid UsuarioId = default)
+public sealed record EditarMidiaCommand(Guid MidiaId, byte[] Versao, string? Titulo, string? Artista, bool? Ativo, bool EhAdmin, bool TituloPresente, bool ArtistaPresente, Guid UsuarioId)
     : IRequest<MidiaDto>;
 
 public sealed class EditarMidiaValidator : AbstractValidator<EditarMidiaCommand>
@@ -31,10 +32,16 @@ public sealed class EditarMidiaHandler(IRadioDbContext db) : IRequestHandler<Edi
     public async Task<MidiaDto> Handle(EditarMidiaCommand cmd, CancellationToken ct)
     {
         var midia = await db.ArquivosMidia.FirstOrDefaultAsync(m => m.Id == cmd.MidiaId, ct) ?? throw new NaoEncontradoException("Mídia");
-        // Dono ou Admin (como o concluir): um Locutor não edita a mídia de outro (Guardian Q1 do #112). Mídia desativada some para o Locutor, então é 404 também.
-        if (!cmd.EhAdmin && (midia.EnviadoPorUsuarioId != cmd.UsuarioId || !midia.Ativo)) throw new AcessoNegadoException("Só quem enviou a mídia (ou o Admin) pode editá-la.");
+        // Existência, visibilidade e dono antes do If-Match (08 E4-F03). Mídia desativada some para o Locutor (404, como no GET e na lista); de outro dono → 403
+        // (o Locutor já vê as ativas dos outros).
+        if (!cmd.EhAdmin)
+        {
+            if (!midia.Ativo) throw new NaoEncontradoException("Mídia");
+            if (midia.EnviadoPorUsuarioId != cmd.UsuarioId) throw new AcessoNegadoException("Só quem enviou a mídia (ou o Admin) pode editá-la.");
+            if (cmd.Ativo is not null) throw new AcessoNegadoException("Só o Admin ativa ou desativa uma mídia.");
+        }
+
         if (!midia.RowVersion.AsSpan().SequenceEqual(cmd.Versao)) throw new VersaoDesatualizadaException();
-        if (cmd.Ativo is not null && !cmd.EhAdmin) throw new AcessoNegadoException("Só o Admin ativa ou desativa uma mídia.");
 
         var titulo = cmd.TituloPresente ? Normalizar(cmd.Titulo) : midia.Titulo;
         var artista = cmd.ArtistaPresente ? Normalizar(cmd.Artista) : midia.Artista;

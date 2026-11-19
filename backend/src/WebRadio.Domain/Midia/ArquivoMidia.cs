@@ -15,6 +15,9 @@ public sealed class ArquivoMidia : Entidade
     /// <summary>Fluxo C: na 3ª falha de processamento (não determinística — timeout/crash do sanitizer) → Rejeitado.</summary>
     public const byte MaxTentativasSanitizacao = 3;
 
+    /// <summary>01 §2.5 / 08 E4-D11: um relógio só para o <c>AguardandoUpload</c> — limite do <c>concluir</c> e da limpeza (a POST policy vale menos, 15 min).</summary>
+    public static readonly TimeSpan ValidadePadraoDoUpload = TimeSpan.FromHours(2);
+
     private const string BucketQuarentena = "quarentena";
     private const string BucketMidia = "midia";
 
@@ -86,7 +89,8 @@ public sealed class ArquivoMidia : Entidade
         string mimeTypeDeclarado,
         long tamanhoBytesDeclarado,
         Guid enviadoPorUsuarioId,
-        DateTime agora)
+        DateTime agora,
+        TimeSpan? validadeDoUpload = null)
         : base(id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(nomeOriginal);
@@ -103,6 +107,12 @@ public sealed class ArquivoMidia : Entidade
             throw new ArgumentOutOfRangeException(nameof(tamanhoBytesDeclarado), "O tamanho declarado precisa ser positivo.");
         }
 
+        var validade = validadeDoUpload ?? ValidadePadraoDoUpload;
+        if (validade <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(validadeDoUpload), "A validade do upload precisa ser positiva.");
+        }
+
         NomeOriginal = nomeOriginal;
         Titulo = titulo;
         Artista = artista;
@@ -114,7 +124,7 @@ public sealed class ArquivoMidia : Entidade
         StatusSanitizacao = StatusSanitizacao.AguardandoUpload;
         EnviadoPorUsuarioId = enviadoPorUsuarioId;
         DataUploadUtc = agora;
-        UploadExpiraEmUtc = agora.AddHours(1);
+        UploadExpiraEmUtc = agora + validade;
         Ativo = true;
     }
 
@@ -132,7 +142,7 @@ public sealed class ArquivoMidia : Entidade
 
         if (agora >= UploadExpiraEmUtc)
         {
-            throw new TransicaoInvalidaException("A janela de upload (1h) expirou.");
+            throw new TransicaoInvalidaException("O prazo do upload expirou.");
         }
 
         if (tamanhoBytesReal > TamanhoBytes)

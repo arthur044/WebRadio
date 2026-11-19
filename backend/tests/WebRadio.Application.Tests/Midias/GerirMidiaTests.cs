@@ -96,8 +96,22 @@ public sealed class GerirMidiaTests
     {
         var f = new MidiasFixture();
         var m = f.SemearAprovada(ativo: false);
-        await Assert.ThrowsAsync<AcessoNegadoException>(() => f.Editar.Handle(Patch(m, titulo: "x"), default));
+        await Assert.ThrowsAsync<NaoEncontradoException>(() => f.Editar.Handle(Patch(m, titulo: "x"), default));
+        await Assert.ThrowsAsync<NaoEncontradoException>(() => f.Editar.Handle(Patch(m, titulo: "x", versao: [9, 9, 9, 9, 9, 9, 9, 9]), default)); // 404, nunca 412
         await f.Editar.Handle(Patch(m, titulo: "x", admin: true), default);
+    }
+
+    [Fact]
+    public async Task A_autorizacao_vem_antes_do_if_match_o_412_nao_vaza_para_quem_nao_pode_editar()
+    {
+        var f = new MidiasFixture();
+        var m = f.SemearAprovada();
+        var errada = new byte[] { 9, 9, 9, 9, 9, 9, 9, 9 };
+
+        await Assert.ThrowsAsync<AcessoNegadoException>(() => f.Editar.Handle(Patch(m, titulo: "x", versao: errada, usuario: Guid.NewGuid()), default)); // outro Locutor: 403
+        await Assert.ThrowsAsync<AcessoNegadoException>(() => f.Editar.Handle(Patch(m, ativo: false, versao: errada), default)); // dono mandando ativo: 403
+        await Assert.ThrowsAsync<VersaoDesatualizadaException>(() => f.Editar.Handle(Patch(m, titulo: "x", versao: errada), default)); // dono: 412
+        await Assert.ThrowsAsync<VersaoDesatualizadaException>(() => f.Editar.Handle(Patch(m, titulo: "x", versao: errada, admin: true, usuario: Guid.NewGuid()), default)); // Admin: 412
     }
 
     [Fact]

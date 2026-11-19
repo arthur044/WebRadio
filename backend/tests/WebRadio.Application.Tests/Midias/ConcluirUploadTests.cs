@@ -86,10 +86,20 @@ public sealed class ConcluirUploadTests
     }
 
     [Fact]
-    public async Task Janela_de_upload_expirada_nao_conclui()
+    public async Task O_concluir_vale_ate_o_prazo_do_registro_e_nao_so_ate_o_fim_da_policy_de_15_min()
     {
         var (f, id) = await ComUploadFeitoAsync();
-        f.Relogio.UtcNow = f.Relogio.UtcNow.AddMinutes(61);
+        f.Relogio.UtcNow = f.Relogio.UtcNow.AddMinutes(119);
+        await f.Concluir.Handle(new ConcluirUploadCommand(id, f.Usuario, false), default);
+        Assert.Equal(StatusSanitizacao.Pendente, f.Db.ArquivosMidia.Single().StatusSanitizacao);
+    }
+
+    [Fact]
+    public async Task Concluir_depois_do_UploadExpiraEmUtc_e_recusado()
+    {
+        var (f, id) = await ComUploadFeitoAsync();
+        f.Relogio.UtcNow = f.Db.ArquivosMidia.Single().UploadExpiraEmUtc;
         await Assert.ThrowsAsync<TransicaoInvalidaException>(() => f.Concluir.Handle(new ConcluirUploadCommand(id, f.Usuario, false), default));
+        Assert.Equal(StatusSanitizacao.AguardandoUpload, f.Db.ArquivosMidia.Single().StatusSanitizacao);
     }
 }
