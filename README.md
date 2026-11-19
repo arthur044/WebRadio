@@ -114,6 +114,10 @@ Jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra 
 
 O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload foi fechado: as imagens construídas (Liquidsoap e `harbor-borda`) e as de SQL Server, Redis e MinIO não têm CRITICAL corrigível, e o trivy do CI falha se aparecer uma. O alpine do `minio-init` e os HIGH seguem só informativos (risco aceito (2) do B3, no `05`, §4).
 
+### Entregue depois (hotfix de CVE, PR #128)
+
+A `main` ficou vermelha por NU1903 (DoS no ASP.NET Core, GHSA-wr8v-9x5q-ggcm): pacotes Microsoft.* e imagens `dotnet/*` foram para a 10.0.15, e o Dependabot passou a ignorar o major (11.x) desses pacotes. O mesmo PR corrigiu dois vermelhos que a `main` já tinha: `libxslt` r4 no `web` e no `harbor-borda`, e o `minio-init`, que quebrava quando a secret key gerada começava com `-`.
+
 ### Pendente
 
 - Execução do `gerar-segredos.ps1` em Windows real e subida da base de produção num job.
@@ -150,10 +154,10 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 
 | Pacote | Entrega | PR | Situação |
 |---|---|---|---|
-| Spec | Pacote de tarefas do Épico 4 (v1.2, com os reviews do Guardian, do Sentinel e do Atlas) | #92 | Na `main` |
+| Spec | Pacote de tarefas do Épico 4 (v1.5, com os reviews do Guardian, do Sentinel e do Atlas) | #92, #108 | Na `main` |
 | D1 | Imagens de terceiros sem CRITICAL corrigível e trivy bloqueando (E4-F01) | #95 | Na `main` |
 | D2 | Upload, sanitização, ClamAV e biblioteca (backend) | #112 | Em andamento (PR em rascunho) |
-| D3 | Playout pela biblioteca e relatório de mais tocadas (backend); abre com o A01a do Atlas (chave de sorteio e índices) | A01a: #111 | A01a com PR aberto; o resto pendente |
+| D3 | Playout pela biblioteca e relatório de mais tocadas (backend); abre com o A01a do Atlas (chave de sorteio e índices) | A01a: #111 | A01a na `main`; o resto pendente |
 | D4 | Telas: biblioteca, envio, aprovar com mídia, mais tocadas | #110 | Em andamento (PR em rascunho) |
 
 - **Ainda não existe upload nem biblioteca**: até o D2 entrar na `main`, nada do que o Épico 4 descreve acima está disponível na API ou nas telas.
@@ -239,6 +243,6 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 
 ---
 
-**Versão**: Épico 3 fechado; Épico 4 em andamento (spec e D1 na `main`)  
+**Versão**: Épico 3 fechado; Épico 4 em andamento (spec v1.5, D1 e A01a na `main`)  
 **Última atualização**: 2026-11-19  
 **Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend), Lore (Documentação)
