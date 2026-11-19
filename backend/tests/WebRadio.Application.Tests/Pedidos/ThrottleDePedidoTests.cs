@@ -247,6 +247,8 @@ public class ThrottleDePedidoTests
 
         public Task<long> IncrementarAsync(string chave, TimeSpan ttl, CancellationToken ct = default) { chaves.Add(chave); return interno.IncrementarAsync(chave, ttl, ct); }
 
+        public Task<long> IncrementarPorAsync(string chave, long valor, TimeSpan ttl, CancellationToken ct = default) { chaves.Add(chave); return interno.IncrementarPorAsync(chave, valor, ttl, ct); }
+
         public Task<long> LerAsync(string chave, CancellationToken ct = default) => interno.LerAsync(chave, ct);
 
         public Task RemoverAsync(string chave, CancellationToken ct = default) => interno.RemoverAsync(chave, ct);

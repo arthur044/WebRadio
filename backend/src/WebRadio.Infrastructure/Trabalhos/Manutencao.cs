@@ -7,7 +7,7 @@ using WebRadio.Infrastructure.Persistencia;
 namespace WebRadio.Infrastructure.Trabalhos;
 
 public sealed record ResultadoDaManutencao(int PedidosAnonimizados, int EventosApagados, int RefreshApagados, int CredenciaisApagadas,
-    int IpsApagados = 0, int EventosDePedidoApagados = 0, int ImagensApagadas = 0);
+    int IpsApagados = 0, int EventosDePedidoApagados = 0, int ImagensApagadas = 0, int MidiasCanceladasApagadas = 0, int AguardandoVencidoApagado = 0, int ObjetosOrfaosDeMidiaApagados = 0);
 
 public interface IManutencao
 {
@@ -19,7 +19,7 @@ public interface IManutencao
 /// O "agora" é o do SQL (<c>SYSUTCDATETIME()</c>), não o do contêiner. Tudo é idempotente: rodar duas vezes, ou em
 /// dois workers ao mesmo tempo, não muda o resultado (a liderança só evita trabalho dobrado).
 /// </summary>
-public sealed class Manutencao(RadioDbContext db, IObjectStorage? storage = null, IClock? relogio = null, ILogger<Manutencao>? logger = null) : IManutencao
+public sealed class Manutencao(RadioDbContext db, IObjectStorage? storage = null, IClock? relogio = null, ILogger<Manutencao>? logger = null, ILimpezaDeMidia? midia = null) : IManutencao
 {
     public const int LotePadrao = 4000;
 
@@ -93,7 +93,10 @@ public sealed class Manutencao(RadioDbContext db, IObjectStorage? storage = null
         // derruba o resto da manutenção: o banco já foi limpo e a imagem sobra para a rodada seguinte.
         var imagens = await LimparImagensOrfasAsync(ct);
 
-        return new ResultadoDaManutencao(anonimizados, eventos, refresh, credenciais, ips, eventosDePedido, imagens);
+        // E4-F09: cancelados, AguardandoUpload vencido e órfãos de midia/ (com a trava contra apagão). Falha aqui também não derruba o resto.
+        var limpeza = await LimparMidiaAsync(ct);
+
+        return new ResultadoDaManutencao(anonimizados, eventos, refresh, credenciais, ips, eventosDePedido, imagens, limpeza.Cancelados, limpeza.AguardandoVencidos, limpeza.OrfaosDeMidia);
     }
 
     /// <summary>
@@ -124,6 +127,20 @@ public sealed class Manutencao(RadioDbContext db, IObjectStorage? storage = null
         {
             logger?.LogWarning("WORKER_MANUTENCAO_IMAGENS ({Tipo}): a limpeza das imagens órfãs falhou; tenta de novo na próxima rodada.", e.GetType().Name);
             return 0;
+        }
+    }
+
+    private async Task<ResultadoDaLimpezaDeMidia> LimparMidiaAsync(CancellationToken ct)
+    {
+        if (midia is null) return new ResultadoDaLimpezaDeMidia(0, 0, 0, false);
+        try
+        {
+            return await midia.ExecutarDiariaAsync(ct);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            logger?.LogWarning("WORKER_MANUTENCAO_MIDIA ({Tipo}): a limpeza de mídia falhou; tenta de novo na próxima rodada.", e.GetType().Name);
+            return new ResultadoDaLimpezaDeMidia(0, 0, 0, false);
         }
     }
 

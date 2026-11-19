@@ -45,3 +45,15 @@ public sealed class SqlEMinioFactAttribute : FactAttribute
         else if (!MinioDeTeste.Disponivel) Skip = "MinIO indisponível (defina WEBRADIO_TEST_MINIO, WEBRADIO_TEST_MINIO_ACCESS e WEBRADIO_TEST_MINIO_SECRET).";
     }
 }
+
+/// <summary>[Theory] que só roda com MinIO disponível; senão aparece como ignorada.</summary>
+public sealed class MinioTheoryAttribute : TheoryAttribute
+{
+    public MinioTheoryAttribute()
+    {
+        if (!MinioDeTeste.Disponivel)
+        {
+            Skip = "MinIO indisponível (defina WEBRADIO_TEST_MINIO=host:porta, WEBRADIO_TEST_MINIO_ACCESS e WEBRADIO_TEST_MINIO_SECRET).";
+        }
+    }
+}

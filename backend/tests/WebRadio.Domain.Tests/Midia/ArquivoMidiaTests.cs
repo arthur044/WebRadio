@@ -68,10 +68,27 @@ public class ArquivoMidiaTests
     }
 
     [Fact]
-    public void ConcluirUpload_apos_a_janela_de_1h_lanca_TransicaoInvalida()
+    public void ConcluirUpload_apos_o_UploadExpiraEmUtc_lanca_TransicaoInvalida()
     {
         var midia = Criar(tamanho: 1000);
-        Assert.Throws<TransicaoInvalidaException>(() => midia.ConcluirUpload(1000, "etag", Agora.AddHours(1).AddSeconds(1)));
+        Assert.Equal(Agora.AddHours(2), midia.UploadExpiraEmUtc);
+        Assert.Throws<TransicaoInvalidaException>(() => midia.ConcluirUpload(1000, "etag", Agora.AddHours(2)));
+    }
+
+    [Fact]
+    public void ConcluirUpload_ate_o_UploadExpiraEmUtc_vale_mesmo_depois_da_policy_de_15_min()
+    {
+        var midia = Criar(tamanho: 1000);
+        midia.ConcluirUpload(1000, "etag", Agora.AddHours(2).AddTicks(-1));
+        Assert.Equal(StatusSanitizacao.Pendente, midia.StatusSanitizacao);
+    }
+
+    [Fact]
+    public void A_validade_do_upload_e_configuravel_e_precisa_ser_positiva()
+    {
+        var midia = new ArquivoMidia(Guid.NewGuid(), "a.mp3", null, null, TipoMidia.Vinheta, "audio/mpeg", 10, Guid.NewGuid(), Agora, TimeSpan.FromHours(3));
+        Assert.Equal(Agora.AddHours(3), midia.UploadExpiraEmUtc);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ArquivoMidia(Guid.NewGuid(), "a.mp3", null, null, TipoMidia.Vinheta, "audio/mpeg", 10, Guid.NewGuid(), Agora, TimeSpan.Zero));
     }
 
     [Fact]

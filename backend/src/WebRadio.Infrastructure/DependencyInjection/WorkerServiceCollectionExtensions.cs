@@ -1,7 +1,10 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using WebRadio.Application.Abstracoes;
+using WebRadio.Infrastructure.Triagem;
+using WebRadio.Infrastructure.Sanitizacao;
 using WebRadio.Infrastructure.Seguranca;
 using WebRadio.Infrastructure.Trabalhos;
 
@@ -27,6 +30,8 @@ public static class WorkerServiceCollectionExtensions
         var ciclo = new CicloOptions();
         if (!string.IsNullOrWhiteSpace(configuration["Worker:ArquivoDeHeartbeat"]))
             ciclo.ArquivoDeHeartbeat = configuration["Worker:ArquivoDeHeartbeat"];
+        if (int.TryParse(configuration["Manutencao:Quarentena:IntervaloOrfaosMinutos"], out var intervaloOrfaos) && intervaloOrfaos >= 1)
+            ciclo.IntervaloDosOrfaosDaQuarentena = TimeSpan.FromMinutes(intervaloOrfaos);
         services.AddSingleton(ciclo);
         services.AddSingleton(new LiderancaOptions());
 
@@ -49,4 +54,83 @@ public static class WorkerServiceCollectionExtensions
         services.AddHostedService<CicloDoWorker>();
         return services;
     }
+
+    /// <summary>
+    /// E4-F05: o pipeline de sanitização no Worker (só com <c>Storage:Endpoint</c>; sem storage o ciclo o ignora). Limites por tipo em <c>Midia:*</c>, o volume de jobs em
+    /// <c>Sanitizer:*</c> e o marcador "Degraded" em <c>Worker:ArquivoDeDegradacao</c> (padrão /tmp/worker-degradado, em tmpfs).
+    /// </summary>
+    public static IServiceCollection AddPipelineDeMidiaDoWorker(this IServiceCollection services, IConfiguration configuration)
+    {
+        if (string.IsNullOrWhiteSpace(configuration["Storage:Endpoint"])) return services;
+
+        var midia = new WebRadio.Application.Features.Midias.MidiaOptions();
+        configuration.GetSection(WebRadio.Application.Features.Midias.MidiaOptions.Secao).Bind(midia);
+        if (new WebRadio.Application.Features.Midias.MidiaOptionsValidator().Validate(null, midia) is { Failed: true } invalido)
+            throw new InvalidOperationException(string.Join(" ", invalido.Failures));
+        var sanitizer = new SanitizerOptions();
+        configuration.GetSection(SanitizerOptions.Secao).Bind(sanitizer);
+        var scan = int.TryParse(configuration["Seguranca:TimeoutScanSegundos"], out var t) ? t : 120;
+        var degradacao = string.IsNullOrWhiteSpace(configuration["Worker:ArquivoDeDegradacao"]) ? "/tmp/worker-degradado" : configuration["Worker:ArquivoDeDegradacao"];
+
+        services.AddSingleton(Options.Create(midia));
+        services.AddSingleton(sanitizer);
+        services.AddSingleton<IAudioSanitizer, SanitizerPorVolume>();
+        services.AddSingleton<IMarcadorDeDegradacao>(sp => new MarcadorDeDegradacao(degradacao, sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MarcadorDeDegradacao>>()));
+        services.AddScoped<IRadioDbContext>(sp => sp.GetRequiredService<WebRadio.Infrastructure.Persistencia.RadioDbContext>());
+        services.AddScoped<IOutbox, WebRadio.Infrastructure.Persistencia.Outbox.OutboxEf>();
+        services.AddScoped<ICapturaDeMidia, CapturaDeMidia>();
+        // E4-F09: limpezas de mídia (diária dentro da Manutencao e a varredura de órfãos da quarentena a cada 30 min).
+        var limpeza = new LimpezaDeMidiaOptions();
+        if (int.TryParse(configuration["Manutencao:Midia:LimiteExclusao"], out var limiteExclusao) && limiteExclusao > 0) limpeza.LimiteExclusaoDeObjetos = limiteExclusao;
+        services.AddSingleton(limpeza);
+        services.AddScoped<ILimpezaDeMidia, LimpezaDeMidia>();
+        services.AddScoped(sp => new WebRadio.Application.Features.Midias.PipelineDeMidia(
+            sp.GetRequiredService<IRadioDbContext>(), sp.GetRequiredService<ICapturaDeMidia>(), sp.GetRequiredService<IObjectStorage>(), sp.GetRequiredService<IMalwareScanner>(),
+            sp.GetRequiredService<IAudioSanitizer>(), sp.GetRequiredService<IOutbox>(), sp.GetRequiredService<IClock>(), sp.GetRequiredService<IMarcadorDeDegradacao>(),
+            sp.GetRequiredService<IOptions<WebRadio.Application.Features.Midias.MidiaOptions>>(),
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebRadio.Application.Features.Midias.PipelineDeMidia>>()) { TimeoutDoScanSegundos = scan });
+        return services;
+    }
+
+    /// <summary>
+    /// E4-F06 (E4-D7, E4-D8, S-A02): o antivírus do Worker. Com <c>ClamAv:Host</c> registra o <see cref="ClamAvMalwareScanner"/>; sem ele, só Development com
+    /// <c>Seguranca:PermitirScannerNoOp=true</c> aceita o NoOp. Fora de Development o scanner é resolvido NO BOOT: sem scanner (ou com opção inválida) o Worker não sobe,
+    /// em vez de descobrir só quando o primeiro arquivo chegar.
+    /// </summary>
+    public static IServiceCollection AddScannerDoWorker(this IServiceCollection services, IConfiguration configuration, IHostEnvironment ambiente)
+    {
+        if (!string.IsNullOrWhiteSpace(configuration["ClamAv:Host"]))
+        {
+            var o = new ClamAvOptions { Host = configuration["ClamAv:Host"]! };
+            if (int.TryParse(configuration["ClamAv:Porta"], out var porta)) o.Porta = porta;
+            if (int.TryParse(configuration["Seguranca:TimeoutScanSegundos"], out var timeout)) o.TimeoutScanSegundos = timeout;
+            if (int.TryParse(configuration["Seguranca:IdadeMaximaAssinaturaDias"], out var idade)) o.IdadeMaximaAssinaturaDias = idade;
+            if (bool.TryParse(configuration["Seguranca:AceitarAssinaturaSemData"], out var semData)) o.AceitarAssinaturaSemData = semData;
+            if (new ClamAvOptionsValidator().Validate(null, o) is { Failed: true } invalido) throw new InvalidOperationException(string.Join(" ", invalido.Failures));
+
+            services.AddSingleton(Options.Create(o));
+            services.AddSingleton<IClamdTransporte, ClamdTcpTransporte>();
+            services.AddSingleton<IMalwareScanner, ClamAvMalwareScanner>();
+        }
+        else
+        {
+            services.AddScannerNoOpSePermitido(configuration, ambiente);
+        }
+
+        if (!ambiente.IsDevelopment()) services.AddHostedService<ScannerObrigatorioNoBoot>();
+        return services;
+    }
+}
+
+/// <summary>Falha o boot do Worker se o <see cref="IMalwareScanner"/> não estiver registrado (fail-closed, S-A02).</summary>
+internal sealed class ScannerObrigatorioNoBoot(IServiceProvider servicos) : IHostedService
+{
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        _ = servicos.GetService<IMalwareScanner>()
+            ?? throw new InvalidOperationException("Nenhum antivírus configurado: defina ClamAv:Host (fora de Development o Worker não sobe sem scanner).");
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

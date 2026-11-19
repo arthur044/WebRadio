@@ -86,7 +86,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: backend/global.json
 
@@ -132,7 +132,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: backend/global.json
 
@@ -253,6 +253,13 @@ jobs:
       - name: infra/harbor-borda/teste.sh
         run: infra/harbor-borda/teste.sh
 
+      - name: infra/sanitizer/teste.sh
+        run: infra/sanitizer/teste.sh
+
+      # minio-init com um mc de mentira (sem Docker): segredo iniciado em '-' recusado sem imprimir o valor, saída do mc fora do log, `--` antes dos argumentos.
+      - name: infra/minio/teste.sh
+        run: infra/minio/teste.sh
+
   # F17: o 03-schema-sqlserver.sql (contrato, ADR D14) e as migrations do EF precisam gerar o MESMO schema. Dois bancos
   # descartáveis no SQL Server do próprio job; o resultado (catálogo e diff) vai para o resumo do job, para o Atlas.
   ddl-check:
@@ -270,7 +277,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: backend/global.json
 
@@ -348,7 +355,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: backend/global.json
 
@@ -409,7 +416,7 @@ jobs:
         run: |
           set -euo pipefail
           falhas=0
-          for imagem in webradio-api:local webradio-worker:local webradio-migrator:local webradio-web:local webradio-icecast:local webradio-liquidsoap:local webradio-harbor-borda:local webradio-minio-init:local; do
+          for imagem in webradio-api:local webradio-worker:local webradio-migrator:local webradio-web:local webradio-icecast:local webradio-liquidsoap:local webradio-harbor-borda:local webradio-sanitizer:local webradio-minio-init:local; do
             echo "== ${imagem}"
             trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${imagem}" || falhas=$((falhas + 1))
           done
@@ -424,7 +431,8 @@ jobs:
           # manual (digest). E4-F01: CRITICAL com correção disponível nessas três FALHA o job, sem exceção (.trivyignore). O HIGH aparece como aviso e
           # no resumo do job, para quem decide a troca do digest. O alpine do minio-init segue só informativo (0 CRITICAL hoje). O harbor-borda
           # (nginx, a única imagem publicada para fora) também é imagem própria agora e está no passo estrito acima.
-          bloqueiam="mcr.microsoft.com/mssql/server redis cgr.dev/chainguard/minio"
+          # E4-F06: o passo bloqueia POR PADRÃO (hoje sqlserver, redis, minio e clamav/clamav); só as imagens listadas aqui são informativas (o alpine do minio-init, 0 CRITICAL).
+          informativas="alpine"
           {
             echo "### Imagens de terceiros do compose (com correção disponível)"
             echo "| Imagem | HIGH | CRITICAL | CRITICAL quebra o job |"
@@ -438,8 +446,7 @@ jobs:
             contagem="$(trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --format json "${imagem}" 2>/dev/null \
               | python3 -c "import json,sys; d=json.load(sys.stdin); v=[x for r in d.get('Results',[]) for x in (r.get('Vulnerabilities') or [])]; print(sum(x['Severity']=='HIGH' for x in v), sum(x['Severity']=='CRITICAL' for x in v))" || echo "? ?")"
             read -r altas criticas <<<"${contagem}"
-            bloqueia="não"
-            case " ${bloqueiam} " in *" ${nome} "*) bloqueia="sim" ;; esac
+            case " ${informativas} " in *" ${nome} "*) bloqueia="não" ;; *) bloqueia="sim" ;; esac
             echo "| \`${nome}\` | ${altas} | ${criticas} | ${bloqueia} |" >> "$GITHUB_STEP_SUMMARY"
             if [ "${altas}" = "?" ]; then
               # Sem leitura não há como afirmar "zero CRITICAL": nas imagens que bloqueiam, falha fechada.
@@ -486,6 +493,7 @@ jobs:
         run: |
           docker compose -f docker-compose.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.smoke.yml config --quiet
 
       - name: Build das imagens
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml build
@@ -524,6 +532,13 @@ jobs:
       # para o E2E logo abaixo não herdar o limite por IP. Roda antes do E2E de propósito.
       - name: Smoke dos pedidos (DoD 2 e 3 do Épico 3)
         run: infra/scripts/smoke-pedidos.sh
+
+      # Épico 4, DoD 1 (upload), 3 (S-C01), 4 (antivírus) e 7 (limites do S-M06), E4-F10: sobe o clamd REAL só com a assinatura de teste (docker-compose.smoke.yml, sem
+      # baixar a base do freshclam) e recria o Worker com ele; envia pelo nginx com a POST policy como o browser; para o clamd por 4 ciclos e confere a quota configurada.
+      # Roda antes do E2E: o trap religa o clamd.
+      - name: Smoke da mídia (DoD 1, 3, 4 e 7 do Épico 4)
+        timeout-minutes: 20
+        run: infra/scripts/smoke-midia.sh
 
       # DoD 2: o player toca o /stream/radio.mp3 real (Liquidsoap -> Icecast -> nginx) sem pausar ao navegar entre Mural, Grade e
       # Pedir Música. E2-P01/P02 (DoD 1 do Épico 2): com o Worker de verdade, o selo Ao Vivo aparece e some na grade sem recarregar,
@@ -566,6 +581,8 @@ jobs:
         if: failure()
         run: |
           docker compose -f docker-compose.yml -f docker-compose.dev.yml ps -a
+          # Contêiner morto por falta de memória aparece aqui (o log do mc só diz "Killed"): OOMKilled=true.
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml ps -aq | xargs -r docker inspect -f '{{.Name}} exit={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}}'
           docker compose -f docker-compose.yml -f docker-compose.dev.yml logs --no-color --tail 80
 
       - name: Derrubar

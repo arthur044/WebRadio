@@ -50,6 +50,8 @@ builder.Services.AddSingleton<IValidateOptions<WebRadio.Application.Features.Har
 // Pedidos__LimitePorIp, Pedidos__TetoPendentes, Pedidos__ExpiracaoMinutos (07, E3-F01): faixa inválida recusa o boot.
 builder.Services.AddOptions<WebRadio.Application.Features.Pedidos.PedidosOptions>().BindConfiguration(WebRadio.Application.Features.Pedidos.PedidosOptions.Secao).ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<WebRadio.Application.Features.Pedidos.PedidosOptions>, WebRadio.Application.Features.Pedidos.PedidosOptionsValidator>();
+builder.Services.AddOptions<WebRadio.Application.Features.Midias.MidiaOptions>().BindConfiguration(WebRadio.Application.Features.Midias.MidiaOptions.Secao).ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<WebRadio.Application.Features.Midias.MidiaOptions>, WebRadio.Application.Features.Midias.MidiaOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<StorageOptions>, StorageOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<RedisOptions>, RedisOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<SeedOptions>, SeedOptionsValidator>();

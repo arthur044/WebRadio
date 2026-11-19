@@ -150,7 +150,7 @@ public class LimpezaDeImagensOrfasTests(BancoDeTeste banco) : IClassFixture<Banc
 
         public Task<InfoObjeto?> HeadAsync(string bucket, string chave, CancellationToken ct = default) => throw new NotSupportedException();
 
-        public Task MoverAsync(string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<long> BaixarAsync(string bucket, string chave, string etagEsperado, long limiteBytes, Stream destino, CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task<bool> VerificarAsync(CancellationToken ct = default) => Task.FromResult(false);
     }
@@ -179,7 +179,7 @@ public class LimpezaDeImagensOrfasTests(BancoDeTeste banco) : IClassFixture<Banc
 
         public Task<InfoObjeto?> HeadAsync(string bucket, string chave, CancellationToken ct = default) => real.HeadAsync(bucket, chave, ct);
 
-        public Task MoverAsync(string bucketOrigem, string chaveOrigem, string bucketDestino, string chaveDestino, string etagEsperado, CancellationToken ct = default) => real.MoverAsync(bucketOrigem, chaveOrigem, bucketDestino, chaveDestino, etagEsperado, ct);
+        public Task<long> BaixarAsync(string bucket, string chave, string etagEsperado, long limiteBytes, Stream destino, CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task<bool> VerificarAsync(CancellationToken ct = default) => real.VerificarAsync(ct);
     }

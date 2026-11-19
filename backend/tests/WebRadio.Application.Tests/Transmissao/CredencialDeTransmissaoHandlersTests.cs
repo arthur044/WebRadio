@@ -27,6 +27,7 @@ public sealed class ThrottleQueFalha : IRequestThrottle
 {
     public Task<bool> TentarReservarAsync(string chave, TimeSpan ttl, CancellationToken ct = default) => throw new InvalidOperationException("redis fora");
     public Task<long> IncrementarAsync(string chave, TimeSpan ttl, CancellationToken ct = default) => throw new InvalidOperationException("redis fora");
+    public Task<long> IncrementarPorAsync(string chave, long valor, TimeSpan ttl, CancellationToken ct = default) => throw new InvalidOperationException("redis fora");
     public Task<long> LerAsync(string chave, CancellationToken ct = default) => throw new InvalidOperationException("redis fora");
     public Task RemoverAsync(string chave, CancellationToken ct = default) => throw new InvalidOperationException("redis fora");
     public Task<TimeSpan?> TempoRestanteAsync(string chave, CancellationToken ct = default) => throw new InvalidOperationException("redis fora");

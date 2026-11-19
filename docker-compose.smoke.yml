@@ -1,0 +1,30 @@
+# =============================================================================
+# WebRadio — docker-compose.smoke.yml (E4-F10): SÓ o smoke da mídia (infra/scripts/smoke-midia.sh).
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.smoke.yml up -d --wait clamd worker
+#
+# O antivírus é REAL (clamd de verdade, INSTREAM de verdade), mas sem baixar a base do freshclam: o CI não depende dos espelhos. O clamd lê uma base só com a
+# assinatura de teste (infra/clamav/smoke/smoke.ndb, sobre um WAV válido), então um clamd "sem data de base" é o esperado: o Worker aceita isso só aqui, com a exceção
+# Seguranca__AceitarAssinaturaSemData (E4-D7), que NUNCA existe na base nem na base + live (o smoke-compose.sh confere).
+# Requer o Docker Compose 2.24+ (tags !reset e !override).
+# =============================================================================
+services:
+  worker:
+    environment:
+      ClamAv__Host: "clamd"
+      Seguranca__PermitirScannerNoOp: "false"
+      Seguranca__AceitarAssinaturaSemData: "true"
+    depends_on:
+      clamd: { condition: service_healthy, required: true }
+
+  clamd:
+    # O dev.yml o põe no perfil `antivirus`; aqui ele sobe por nome.
+    profiles: !reset []
+    # Sem o freshclam: a base é só a assinatura de teste.
+    depends_on: !reset null
+    volumes: !override
+      - ./infra/clamav/smoke:/var/lib/clamav:ro
+      - ./infra/clamav/clamd.conf:/etc/clamav-projeto/clamd.conf:ro
+
+  freshclam:
+    # Nunca sobe no smoke (sem saída para os espelhos): um perfil que ninguém liga.
+    profiles: [freshclam-real]

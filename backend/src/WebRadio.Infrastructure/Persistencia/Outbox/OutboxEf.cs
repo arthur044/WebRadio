@@ -13,6 +13,12 @@ public sealed class OutboxEf(RadioDbContext db) : IOutbox
     /// <summary>O mesmo formato da API (camelCase, enum como string): o payload vai como está para os clientes do hub.</summary>
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
 
+    public void DescartarNaoSalvos()
+    {
+        foreach (var e in db.ChangeTracker.Entries<EventoOutbox>().Where(x => x.State == Microsoft.EntityFrameworkCore.EntityState.Added).ToList())
+            e.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+    }
+
     public void EnfileirarParaTodos(string tipo, object carga) => Adicionar(tipo, carga, grupos: null);
 
     public void EnfileirarParaGrupos(IReadOnlyCollection<string> grupos, string tipo, object carga)

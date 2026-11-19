@@ -27,3 +27,10 @@ targetRules = ["curl-auth-user"]
 condition = "AND"
 paths = ['''^infra/icecast/teste\.sh$''']
 regexes = ['''hackme''']
+
+[[allowlists]]
+description = "smoke-midia.sh (F10 do Épico 4): o '--user 65532:65532' do 'docker run' do ffprobe cai na janela da regra curl-auth-user. É o uid/gid do sanitizer (E4-D1), não credencial. Como o CI varre todas as branches, o falso positivo do forge/e4-d2 derrubava o gitleaks de todo PR."
+targetRules = ["curl-auth-user"]
+condition = "AND"
+paths = ['''^infra/scripts/smoke-midia\.sh$''']
+regexes = ['''^65532:65532$''']

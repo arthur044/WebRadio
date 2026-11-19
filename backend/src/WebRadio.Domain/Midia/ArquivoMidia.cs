@@ -4,6 +4,13 @@ using WebRadio.Domain.Erros;
 
 namespace WebRadio.Domain.Midia;
 
+/// <summary>Motivos de rejeição que o domínio e a <c>Manutencao</c> comparam por CONSTANTE, nunca por texto digitado (01 §2.5).</summary>
+public static class MotivosRejeicao
+{
+    /// <summary>O dono (ou o Admin) desistiu do envio em <c>AguardandoUpload</c> (08 v1.5).</summary>
+    public const string EnvioCancelado = "Envio cancelado.";
+}
+
 /// <summary>
 /// schema midia (MediaUpload). 01-dominio.md §2.5, v1.1.
 /// Invariante: Aprovado ⇒ MimeType, HashSHA256, DuracaoSegundos, SanitizadoEmUtc ≠ null (reforçado por CHECK no banco).
@@ -14,6 +21,9 @@ public sealed class ArquivoMidia : Entidade
 
     /// <summary>Fluxo C: na 3ª falha de processamento (não determinística — timeout/crash do sanitizer) → Rejeitado.</summary>
     public const byte MaxTentativasSanitizacao = 3;
+
+    /// <summary>01 §2.5 / 08 E4-D11: um relógio só para o <c>AguardandoUpload</c> — limite do <c>concluir</c> e da limpeza (a POST policy vale menos, 15 min).</summary>
+    public static readonly TimeSpan ValidadePadraoDoUpload = TimeSpan.FromHours(2);
 
     private const string BucketQuarentena = "quarentena";
     private const string BucketMidia = "midia";
@@ -86,7 +96,8 @@ public sealed class ArquivoMidia : Entidade
         string mimeTypeDeclarado,
         long tamanhoBytesDeclarado,
         Guid enviadoPorUsuarioId,
-        DateTime agora)
+        DateTime agora,
+        TimeSpan? validadeDoUpload = null)
         : base(id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(nomeOriginal);
@@ -103,6 +114,12 @@ public sealed class ArquivoMidia : Entidade
             throw new ArgumentOutOfRangeException(nameof(tamanhoBytesDeclarado), "O tamanho declarado precisa ser positivo.");
         }
 
+        var validade = validadeDoUpload ?? ValidadePadraoDoUpload;
+        if (validade <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(validadeDoUpload), "A validade do upload precisa ser positiva.");
+        }
+
         NomeOriginal = nomeOriginal;
         Titulo = titulo;
         Artista = artista;
@@ -114,7 +131,7 @@ public sealed class ArquivoMidia : Entidade
         StatusSanitizacao = StatusSanitizacao.AguardandoUpload;
         EnviadoPorUsuarioId = enviadoPorUsuarioId;
         DataUploadUtc = agora;
-        UploadExpiraEmUtc = agora.AddHours(1);
+        UploadExpiraEmUtc = agora + validade;
         Ativo = true;
     }
 
@@ -132,7 +149,7 @@ public sealed class ArquivoMidia : Entidade
 
         if (agora >= UploadExpiraEmUtc)
         {
-            throw new TransicaoInvalidaException("A janela de upload (1h) expirou.");
+            throw new TransicaoInvalidaException("O prazo do upload expirou.");
         }
 
         if (tamanhoBytesReal > TamanhoBytes)
@@ -146,6 +163,23 @@ public sealed class ArquivoMidia : Entidade
         EtagUpload = etag;
         StatusSanitizacao = StatusSanitizacao.Pendente;
     }
+
+    /// <summary>
+    /// <c>DELETE /midias/{id}</c> do dono ou do Admin em <c>AguardandoUpload</c> (08 v1.5): vai a <c>Rejeitado</c> com <see cref="MotivosRejeicao.EnvioCancelado"/>. A linha FICA (o fallback SQL
+    /// dos limites do S-M06 continua contando o envio; a <c>Manutencao</c> a apaga em 24 h). Fora de <c>AguardandoUpload</c> → <see cref="TransicaoInvalidaException"/> (na API só na corrida com o <c>concluir</c>).
+    /// </summary>
+    public void CancelarEnvio(DateTime agora)
+    {
+        UtcGuard.Exigir(agora, nameof(agora));
+        GarantirStatus(StatusSanitizacao.AguardandoUpload);
+
+        StatusSanitizacao = StatusSanitizacao.Rejeitado;
+        MotivoRejeicao = MotivosRejeicao.EnvioCancelado;
+        SanitizadoEmUtc = agora;
+    }
+
+    /// <summary><c>Rejeitado</c> por <see cref="CancelarEnvio"/>: a tela mostra "Cancelado" e não "Rejeitada" (<c>MidiaDto.cancelado</c>).</summary>
+    public bool Cancelado => StatusSanitizacao == StatusSanitizacao.Rejeitado && MotivoRejeicao == MotivosRejeicao.EnvioCancelado;
 
     /// <summary>Worker pega o arquivo: EmAnalise, EmAnaliseDesdeUtc = agora (lease), TentativasSanitizacao + 1.</summary>
     public void IniciarAnalise(DateTime agora)
@@ -170,6 +204,23 @@ public sealed class ArquivoMidia : Entidade
         }
 
         TransicaoPorFalha(agora);
+    }
+
+    /// <summary>
+    /// Falha de INFRAESTRUTURA (E4-D13: clamd fora, assinatura velha, MinIO ou SQL fora): volta a Pendente e a tentativa é DEVOLVIDA. Quem consome a fila não pode
+    /// rejeitar um arquivo legítimo só porque o antivírus esteve parado por três ciclos.
+    /// </summary>
+    public void DevolverPorFalhaDeInfraestrutura()
+    {
+        GarantirStatus(StatusSanitizacao.EmAnalise);
+
+        if (TentativasSanitizacao > 0)
+        {
+            TentativasSanitizacao--;
+        }
+
+        StatusSanitizacao = StatusSanitizacao.Pendente;
+        EmAnaliseDesdeUtc = null;
     }
 
     /// <summary>Hash do arquivo recebido, antes da recodificação — auditoria; escrita única, não muda o status.</summary>
@@ -279,7 +330,24 @@ public sealed class ArquivoMidia : Entidade
         EmAnaliseDesdeUtc = null;
     }
 
+    /// <summary>
+    /// PATCH (E4-F03): título e artista da biblioteca. Música exige título (CK_ArquivoMidia_Musica_Titulo). O texto já vem normalizado e validado
+    /// pelo <c>TextoSeguro</c> da Application (vai ao Liquidsoap e ao Icecast, S-A09).
+    /// </summary>
+    public void EditarTexto(string? titulo, string? artista)
+    {
+        if (TipoMidia == TipoMidia.Musica)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(titulo);
+        }
+
+        Titulo = string.IsNullOrWhiteSpace(titulo) ? null : titulo;
+        Artista = string.IsNullOrWhiteSpace(artista) ? null : artista;
+    }
+
     public void Desativar() => Ativo = false;
+
+    public void Ativar() => Ativo = true;
 
     private void TransicaoPorFalha(DateTime agora)
     {

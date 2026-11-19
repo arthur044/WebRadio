@@ -306,7 +306,7 @@ PY
     sumir_como_root() { mc_como root rm --force "svc/$1" || true; }
 
     # Objetos que os negativos tentam mexer, criados ANTES com a credencial root (apagar o que não existe falharia igual com a permissão concedida).
-    for objeto in publico/fora-politica.bin midia/politica.bin quarentena/politica.bin; do gravar_como root "$objeto" || falha "preparar $objeto com a credencial root"; done
+    for objeto in publico/fora-politica.bin midia/2026/11/politica.bin quarentena/2026/11/politica.bin; do gravar_como root "$objeto" || falha "preparar $objeto com a credencial root"; done
 
     confere "svc-api grava em publico/divulgacoes/" gravar_como api publico/divulgacoes/politica.bin
     confere "svc-api NÃO grava em publico/ fora de divulgacoes/ (Access Denied)" negado gravar_como api publico/fora-politica2.bin
@@ -314,15 +314,29 @@ PY
     confere "svc-worker NÃO lista publico/ fora do prefixo divulgacoes/ (Access Denied)" negado mc_como worker ls svc/publico/
     confere "svc-worker NÃO apaga em publico/ fora de divulgacoes/ (Access Denied) e o objeto continua lá" negado mc_como worker rm --force svc/publico/fora-politica.bin
     confere "o objeto de publico/ fora do prefixo continua existindo" existe_como_root publico/fora-politica.bin
-    confere "svc-worker NÃO apaga em midia/ (Access Denied) e o objeto continua lá" negado mc_como worker rm --force svc/midia/politica.bin
-    confere "o objeto de midia/ continua existindo" existe_como_root midia/politica.bin
-    confere "svc-worker NÃO lê nem apaga na quarentena/ (Access Denied)" negado mc_como worker rm --force svc/quarentena/politica.bin
-    confere "svc-worker NÃO grava em publico/ nem em midia/ (Access Denied)" negado gravar_como worker publico/divulgacoes/worker-nao-grava.bin
+    # E4-F07 (S-A04): o pipeline de mídia. O svc-worker LÊ e APAGA na quarentena, GRAVA e APAGA em midia/ (sem GetObject lá: o pipeline nunca lê de volta), e lista as duas
+    # só pelo padrão de ano (`20??/*`). Um `mc ls` sem prefixo ou fora do padrão é Access Denied. (O `mc stat` e o `mc rm` de um objeto listam o nome inteiro antes, e isso o
+    # svc-worker não tem por desenho: a leitura é `cat` e a remoção é recursiva pelo prefixo, como o SDK do Worker faz.)
+    confere "svc-worker lê na quarentena/ (GetObject)" mc_como worker cat svc/quarentena/2026/11/politica.bin
+    confere "svc-worker NÃO grava na quarentena/ (Access Denied)" negado gravar_como worker quarentena/2026/11/worker-nao-grava.bin
+    confere "svc-worker grava em midia/" gravar_como worker midia/2026/11/worker-grava.bin
+    confere "svc-worker NÃO lê de volta em midia/ (Access Denied)" negado mc_como worker cat svc/midia/2026/11/worker-grava.bin
+    confere "svc-api NÃO apaga em midia/ (Access Denied): a API comprometida não apaga a biblioteca" negado mc_como api rm --recursive --force svc/midia/2026/
+    confere "o objeto de midia/ continua existindo depois da negativa do svc-api" existe_como_root midia/2026/11/politica.bin
+    confere "svc-worker NÃO lista a quarentena/ sem prefixo (Access Denied)" negado mc_como worker ls svc/quarentena/
+    confere "svc-worker NÃO lista a quarentena/ fora do padrão de ano (Access Denied)" negado mc_como worker ls svc/quarentena/fora/
+    confere "svc-worker lista a quarentena/ pelo prefixo de ano" mc_como worker ls svc/quarentena/2026/
+    confere "svc-worker NÃO lista midia/ sem prefixo (Access Denied)" negado mc_como worker ls svc/midia/
+    confere "svc-worker lista midia/ pelo prefixo de ano" mc_como worker ls svc/midia/2026/
+    confere "svc-worker apaga em midia/ (rm recursivo pelo prefixo, só o que tem menos de 5 min)" mc_como worker rm --recursive --force --newer-than 5m svc/midia/2026/11/
+    confere "o objeto gravado pelo worker em midia/ sumiu" sumiu midia/2026/11/worker-grava.bin
+    confere "svc-worker apaga na quarentena/ (rm recursivo pelo prefixo)" mc_como worker rm --recursive --force --newer-than 5m svc/quarentena/2026/11/
+    confere "o objeto apagado na quarentena/ sumiu" sumiu quarentena/2026/11/politica.bin
     # O `mc rm` de um objeto só consulta o objeto (GetObject/ListBucket com o nome inteiro), que o svc-worker NÃO tem (o SDK .NET do Worker só lista pelo prefixo
     # e apaga, e isso o teste da limpeza abaixo prova). O que o mc consegue com a política é remover pelo prefixo inteiro; --newer-than limita ao que este smoke criou.
     confere "svc-worker lista e apaga em publico/divulgacoes/ (rm recursivo pelo prefixo, só o que tem menos de 5 min)" mc_como worker rm --recursive --force --newer-than 5m svc/publico/divulgacoes/
     confere "e o objeto que a API gravou sumiu" sumiu publico/divulgacoes/politica.bin
-    for objeto in publico/fora-politica.bin publico/divulgacoes/politica.bin midia/politica.bin quarentena/politica.bin; do sumir_como_root "$objeto"; done
+    for objeto in publico/fora-politica.bin publico/divulgacoes/politica.bin midia/2026/11/politica.bin midia/2026/11/worker-grava.bin quarentena/2026/11/politica.bin; do sumir_como_root "$objeto"; done
 
     # O código do Worker (SDK .NET: ListObjectsV2 com o prefixo, sob a política real) também funciona: a manutenção roda ao subir o Worker, e se o SDK
     # fizesse qualquer chamada além do que a política deixa (ex.: HEAD no bucket) a limpeza falharia todo dia só com um aviso, e as órfãs nunca sairiam.

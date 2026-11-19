@@ -64,6 +64,8 @@ public sealed class RedisQueCai(IClock clock) : IRequestThrottle
 
     public Task<long> IncrementarAsync(string chave, TimeSpan ttl, CancellationToken ct = default) => Seguir(() => _real.IncrementarAsync(chave, ttl, ct));
 
+    public Task<long> IncrementarPorAsync(string chave, long valor, TimeSpan ttl, CancellationToken ct = default) => Seguir(() => _real.IncrementarPorAsync(chave, valor, ttl, ct));
+
     public Task<long> LerAsync(string chave, CancellationToken ct = default) => Seguir(() => _real.LerAsync(chave, ct));
 
     public Task RemoverAsync(string chave, CancellationToken ct = default) => Seguir(() => _real.RemoverAsync(chave, ct));

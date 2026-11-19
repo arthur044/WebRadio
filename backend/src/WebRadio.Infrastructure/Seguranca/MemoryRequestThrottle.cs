@@ -35,6 +35,17 @@ public sealed class MemoryRequestThrottle(IClock clock) : IRequestThrottle
         }
     }
 
+    public Task<long> IncrementarPorAsync(string chave, long valor, TimeSpan ttl, CancellationToken ct = default)
+    {
+        lock (_trava)
+        {
+            var atual = Viva(chave);
+            var novo = (atual?.Valor ?? 0) + valor;
+            Gravar(chave, novo, atual?.ExpiraEmUtc ?? clock.UtcNow.Add(ttl));
+            return Task.FromResult(novo);
+        }
+    }
+
     public Task<long> LerAsync(string chave, CancellationToken ct = default)
     {
         lock (_trava) return Task.FromResult(Viva(chave)?.Valor ?? 0);
