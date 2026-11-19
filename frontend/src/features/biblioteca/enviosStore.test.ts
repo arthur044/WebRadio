@@ -55,7 +55,13 @@ interface Chamada {
 }
 
 function montarApi(
-  respostas: { uploads?: Response[]; concluir?: Response[]; excluir?: Response[] } = {},
+  respostas: {
+    uploads?: Response[]
+    concluir?: Response[]
+    excluir?: Response[]
+    /** Corpo do `GET /midias/{id}` (a releitura depois de um 409 no `concluir`). */
+    registro?: object
+  } = {},
 ) {
   const chamadas: Chamada[] = []
   const uploads = [...(respostas.uploads ?? [])]
@@ -92,6 +98,9 @@ function montarApi(
         )
       }
       if (/^\/midias\/[^/]+\/concluir$/.test(caminho)) return concluir.shift() ?? json(202)
+      if (metodo === 'GET' && /^\/midias\/[^/]+$/.test(caminho) && respostas.registro) {
+        return json(200, respostas.registro)
+      }
       if (metodo === 'DELETE' && /^\/midias\/[^/]+$/.test(caminho))
         return excluir.shift() ?? json(204)
       return json(404, { type: '/erros/x', title: 'x', status: 404 })
@@ -426,6 +435,35 @@ describe('fila de envios: cancelar, concluir e o slot de AguardandoUpload (Guard
     const envio = useEnvios.getState().envios[0]
     expect(envio.estado).toEqual({ fase: 'enviado', midiaId: 'm1' })
     expect(envio.slotAberto).toBeUndefined()
+  })
+
+  it('409 no concluir com o registro já em análise (resposta perdida): o envio vira concluído', async () => {
+    const api = montarApi({
+      concluir: [json(409, { type: '/erros/transicao-invalida', title: 'x', status: 409 })],
+      registro: { statusSanitizacao: 'Pendente', cancelado: false },
+    })
+    useEnvios.getState().adicionar(novo('a.mp3'))
+    await ate(() => XhrFalso.instancias.length === 1)
+    XhrFalso.instancias[0].responder(201)
+
+    await ate(() => useEnvios.getState().envios[0].estado.fase === 'enviado')
+    expect(api.chamadas.filter((c) => c.caminho === '/midias/m1/concluir')).toHaveLength(1)
+  })
+
+  it('409 no concluir com o envio cancelado: não repete o concluir; o retry refaz o envio inteiro', async () => {
+    const api = montarApi({
+      concluir: [json(409, { type: '/erros/transicao-invalida', title: 'x', status: 409 })],
+      registro: { statusSanitizacao: 'Rejeitado', cancelado: true },
+    })
+    useEnvios.getState().adicionar(novo('a.mp3'))
+    await ate(() => XhrFalso.instancias.length === 1)
+    XhrFalso.instancias[0].responder(201)
+    await ate(() => useEnvios.getState().envios[0].estado.fase === 'erro')
+    expect(useEnvios.getState().envios[0].midiaId).toBeUndefined()
+
+    useEnvios.getState().tentarDeNovo(useEnvios.getState().envios[0].id)
+    await ate(() => XhrFalso.instancias.length === 2)
+    expect(api.chamadas.filter((c) => c.caminho === '/midias/uploads')).toHaveLength(2)
   })
 
   it('cancelar um envio em andamento devolve o slot com DELETE, antes de o seguinte pedir policy', async () => {

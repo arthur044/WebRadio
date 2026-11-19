@@ -19,6 +19,7 @@ const midia: MidiaDto = {
   ativo: true,
   enviadoPorNome: 'Lia Locutora',
   podeEditar: true,
+  cancelado: false,
 }
 
 function urlNum(n: number): string {

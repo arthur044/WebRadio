@@ -31,6 +31,7 @@ function midia(id: string, extras: Partial<MidiaDto> = {}): MidiaDto {
     ativo: true,
     enviadoPorNome: 'Lia Locutora',
     podeEditar: true,
+    cancelado: false,
     ...extras,
   }
 }
@@ -248,6 +249,27 @@ describe('Biblioteca (E4-P01 a E4-P03)', () => {
     expect(screen.getByText(/Motivo: <script>alert\(1\)<\/script>/)).toBeInTheDocument()
     expect(screen.getByText(/<b>arquivo<\/b>\.mp3/)).toBeInTheDocument()
     expect(document.body.querySelector('img, b, script')).toBeNull()
+  })
+
+  it('mídia cancelada pelo dono aparece como Cancelado, não Rejeitada, sem repetir o motivo', async () => {
+    montarApi([
+      midia('a', {
+        statusSanitizacao: 'Rejeitado',
+        motivoRejeicao: 'Envio cancelado.',
+        cancelado: true,
+      }),
+      midia('b', { statusSanitizacao: 'Rejeitado', motivoRejeicao: 'Codec não permitido' }),
+    ])
+    renderBiblioteca()
+
+    expect(await screen.findByText('Cancelado')).toBeInTheDocument()
+    expect(screen.queryByText(/Envio cancelado\./)).toBeNull()
+    // A rejeição de verdade segue como está.
+    const rejeitada = screen
+      .getAllByRole('listitem')
+      .find((li) => li.textContent?.includes('Faixa b'))!
+    expect(within(rejeitada).getByText('Rejeitada')).toBeInTheDocument()
+    expect(screen.getByText(/Motivo: Codec não permitido/)).toBeInTheDocument()
   })
 
   it('a pré-escuta usa um <audio> próprio com a URL pré-assinada da mesma origem', async () => {

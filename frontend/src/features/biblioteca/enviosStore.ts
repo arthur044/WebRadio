@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { apiFetch, ApiError } from '../../shared/api/httpClient'
 import { descreverErro } from '../../shared/api/descreverErro'
-import type { TipoMidia, UploadMidiaDto } from '../../shared/api/types'
+import type { MidiaDto, TipoMidia, UploadMidiaDto } from '../../shared/api/types'
 import { mimeDeclarado, recusaLocal } from './limites'
 
 /** Se o 429 não trouxer `retryAfterSeconds`, espera isto antes de tentar o mesmo envio de novo. */
@@ -161,6 +161,19 @@ function textoOuNulo(valor: string): string | null {
   return t === '' ? null : t
 }
 
+/** Releitura do registro depois de um 409 no `concluir`; `null` (rede, 5xx) deixa o erro seguir e o retry repetir o `concluir`. */
+async function situacaoDoRegistro(midiaId: string): Promise<'concluido' | 'perdido' | null> {
+  try {
+    const midia = await apiFetch<MidiaDto>(`/midias/${encodeURIComponent(midiaId)}`)
+    if (midia.cancelado) return 'perdido'
+    // Ainda `AguardandoUpload` não é o que o 409 diz: deixa o erro seguir. Qualquer outro status (inclusive `Rejeitado` pela
+    // análise) é um envio que chegou ao fim do `concluir`: a lista mostra o resultado.
+    return midia.statusSanitizacao === 'AguardandoUpload' ? null : 'concluido'
+  } catch (err) {
+    return err instanceof ApiError && err.status === 404 ? 'perdido' : null
+  }
+}
+
 /** Recusa do storage ao `POST` do arquivo (policy vencida, tamanho fora do que a policy permite...). */
 export class ErroDoStorage extends Error {}
 
@@ -254,6 +267,20 @@ async function executar(envio: Envio): Promise<void> {
         }, segundos * 1000),
       )
       return
+    }
+    // 409 no `concluir` = o registro já não está em `AguardandoUpload`: ou um `concluir` anterior chegou (a resposta se
+    // perdeu) e o envio está concluído, ou o envio foi cancelado/venceu e repetir o `concluir` daria 409 para sempre.
+    if (midiaId !== undefined && err instanceof ApiError && err.status === 409) {
+      const resultado = await situacaoDoRegistro(midiaId)
+      if (resultado === 'concluido') return atualizar(id, { fase: 'enviado', midiaId })
+      if (resultado === 'perdido') {
+        guardar(id, { midiaId: undefined, slotAberto: undefined })
+        return atualizar(id, {
+          fase: 'erro',
+          mensagem:
+            'O envio foi cancelado ou venceu. Tente de novo para enviar o arquivo outra vez.',
+        })
+      }
     }
     atualizar(id, { fase: 'erro', mensagem: mensagemDeErro(err) })
     // Falha antes do `concluir` (storage recusou, rede): o slot volta agora, antes de qualquer "tentar de novo".

@@ -98,6 +98,8 @@ export interface MidiaDto {
    * ativa. O `PATCH` de quem não pode dá 403; a tela só oferece o botão a quem pode.
    */
   podeEditar: boolean
+  /** `Rejeitado` por desistência do dono ("Envio cancelado."): a tela mostra "Cancelado", não "Rejeitada". */
+  cancelado: boolean
 }
 
 /** Corpo de `POST /midias/uploads` (02 §6). `titulo` é obrigatório para `Musica` (a API devolve 400 sem ele). */

@@ -101,11 +101,11 @@ export function MidiaItem({
       )}
       <p className="text-sm">
         <span className={`font-medium ${COR_DO_STATUS[midia.statusSanitizacao]}`}>
-          {NOME_DO_STATUS[midia.statusSanitizacao]}
+          {midia.cancelado ? 'Cancelado' : NOME_DO_STATUS[midia.statusSanitizacao]}
         </span>
         {!midia.ativo && <span className="text-text-muted"> · Desativada</span>}
       </p>
-      {midia.motivoRejeicao && (
+      {midia.motivoRejeicao && !midia.cancelado && (
         <p className="text-on-air text-sm break-words">Motivo: {midia.motivoRejeicao}</p>
       )}
       {erro && (

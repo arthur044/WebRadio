@@ -31,6 +31,7 @@ const MIDIA = {
   ativo: true,
   enviadoPorNome: 'Ada Admin',
   podeEditar: true,
+  cancelado: false,
 }
 
 async function entrarComoAdmin(page: Page) {
