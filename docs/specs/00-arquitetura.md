@@ -148,7 +148,7 @@ A regra de dependência é garantida por **teste de arquitetura** (NetArchTest),
    6. `DuracaoSegundos` e `MimeType` vêm do **arquivo de saída** (o cabeçalho de entrada não é confiável, S-A01); limites por tipo aplicados sobre ela;
    7. `HashSHA256` da **saída** → duplicata de uma mídia aprovada = `Rejeitado` ("duplicado de {id}");
    8. grava **só a saída** em `midia/`, apaga o original da quarentena → `Aprovado`. `Rejeitado` apaga o objeto na hora; `Quarentena` guarda por 30 dias, isolada, e avisa o Admin (S-B06).
-4. O Worker apaga registros em `AguardandoUpload` com mais de 1 h e seus objetos.
+4. O Worker apaga registros em `AguardandoUpload` com mais de 2 h e seus objetos (a policy vale 15 min; `08` E4-D11).
 5. As imagens de divulgação **não** usam POST policy: passam pela API (multipart ≤ 2 MB), que recodifica, tira o EXIF, limita a 4096 px e grava em `publico/` com `Content-Type` definido pelo servidor (S-A05).
 
 ### Fluxo D — Playout (contrato definido agora, implementação no Épico 2)
