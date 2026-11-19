@@ -91,6 +91,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON SCHEMA::grade     TO webradio_a
 GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON SCHEMA::interacao TO webradio_app;
 GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON SCHEMA::midia     TO webradio_app;
 GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON SCHEMA::infra     TO webradio_app;
+-- [Atlas/E4-A02] rel só tem procedures de relatório (08, E4-D12): EXECUTE basta. A API chama rel.usp_MaisTocadas como webradio_app.
+GRANT EXECUTE ON SCHEMA::rel TO webradio_app;
 -- [Sentinel, item futuro — não bloqueia] midia.Reproducao é só-inserção, mas o GRANT
 -- por schema dá UPDATE/DELETE nela também. A tabela não existe ainda quando este script
 -- roda, então um DENY UPDATE, DELETE ON midia.Reproducao TO webradio_app fica para uma
@@ -117,8 +119,10 @@ GO
 -- db_datareader/db_owner: GRANT explícito por schema, nada além disso.
 GRANT SELECT ON SCHEMA::midia TO webradio_relatorio;
 GRANT SELECT ON SCHEMA::grade TO webradio_relatorio;
--- [Atlas] EXECUTE ON SCHEMA::rel fica para quando o Épico 3 criar o schema `rel`
--- (rel.usp_MaisTocadas, tarefa A07) — GRANT numa schema inexistente falha agora.
+-- [Atlas/E4-A02] EXECUTE no schema rel (rel.usp_MaisTocadas, 08 E4-D12): o schema nasce no init-db.sql, que roda antes deste script. O
+-- GRANT é no schema, e não na procedure, porque a procedure só existe depois do migrator e o migrator não tem GRANT. A procedure lê
+-- midia pela cadeia de propriedade (tudo é dbo): o SELECT em midia acima não é necessário para ela, e interacao continua fechado.
+GRANT EXECUTE ON SCHEMA::rel TO webradio_relatorio;
 GO
 
 PRINT 'logins.sql concluído.';

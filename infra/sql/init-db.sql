@@ -109,7 +109,7 @@ GO
 
 /* ---------- 3. Schemas (BLOQUEANTE, Sentinel/Guardian) ----------
    D20/E1-F05: a ordem é init-db.sql -> logins.sql -> migrator. O logins.sql já dá
-   GRANT por schema (seg/grade/interacao/midia/infra) antes de o migrator existir —
+   GRANT por schema (seg/grade/interacao/midia/infra/rel) antes de o migrator existir —
    numa base nova, sem isto, o primeiro GRANT falha porque o schema não existe.
    Idempotente (IF SCHEMA_ID(...) IS NULL): o EnsureSchema do EF (migrator) é
    condicional e não conflita ao rodar depois. O 03-schema-sqlserver.sql também
@@ -121,6 +121,9 @@ IF SCHEMA_ID(N'grade') IS NULL EXEC(N'CREATE SCHEMA grade AUTHORIZATION dbo');
 IF SCHEMA_ID(N'interacao') IS NULL EXEC(N'CREATE SCHEMA interacao AUTHORIZATION dbo');
 IF SCHEMA_ID(N'midia') IS NULL EXEC(N'CREATE SCHEMA midia AUTHORIZATION dbo');
 IF SCHEMA_ID(N'infra') IS NULL EXEC(N'CREATE SCHEMA infra AUTHORIZATION dbo');
+-- Relatórios (08, E4-D12): só procedures. Nasce aqui, e não na migration, porque o logins.sql (que roda antes do migrator) dá o
+-- GRANT EXECUTE por schema. AUTHORIZATION dbo mantém a cadeia de propriedade com midia: a procedure lê sem SELECT extra.
+IF SCHEMA_ID(N'rel') IS NULL EXEC(N'CREATE SCHEMA rel AUTHORIZATION dbo');
 GO
 
 PRINT 'init-db.sql concluído.';
