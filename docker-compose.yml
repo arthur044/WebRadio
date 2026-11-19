@@ -242,6 +242,8 @@ services:
       ClamAv__Host: "clamd"
       Seguranca__IdadeMaximaAssinaturaDias: "3"
       Seguranca__TimeoutScanSegundos: "120"
+      # Pipeline de sanitização (E4-F05, E4-D1): o Worker baixa o original DIRETO em /jobs/{id}/in.bin (tmpfs compartilhado com o sanitizer) e lê o resultado de lá.
+      Sanitizer__DiretorioDeJobs: "/jobs"
     # O banco e a credencial do svc-worker no MinIO (E3-F07). Sem JWT, pepper nem Redis; esses voltam quando um job do Worker precisar deles
     # (Épico 4: sanitização no MinIO, locks no Redis).
     secrets:
@@ -249,13 +251,16 @@ services:
       - { source: minio_worker_access_key, target: Storage__AccessKey }
       - { source: minio_worker_secret_key, target: Storage__SecretKey }
     tmpfs: [/tmp]
+    # O tmpfs do job conta no cgroup de quem escreve (o Worker): daí os 768m (E4-D1; a saída de até ~30 MB e o buffer do upload entram também).
+    volumes: [sanitizer-jobs:/jobs]
     networks: [dados, antivirus]
     cpus: 1
-    mem_limit: 256m
+    mem_limit: 768m
     pids_limit: 100
     depends_on:
       migrator: { condition: service_completed_successfully }
       minio-init: { condition: service_completed_successfully }
+      sanitizer: { condition: service_healthy }
       # Em dev o clamd fica no perfil `antivirus` e o Worker usa o NoOp: sem ele no projeto, a dependência não vale.
       clamd: { condition: service_healthy, required: false }
     healthcheck:
