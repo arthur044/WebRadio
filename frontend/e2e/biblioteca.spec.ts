@@ -136,7 +136,7 @@ test('o envio pede a policy, manda o arquivo ao storage e conclui; o 429 vira co
   })
   await envio.getByRole('button', { name: 'Enviar' }).click()
 
-  await expect(envio.getByText(/Tenta de novo em 0:0\d/)).toBeVisible()
+  await expect(envio.getByText(/Nova tentativa automática em 0:0\d/)).toBeVisible()
   await expect(envio.getByText(/Enviado\. A análise começou/)).toBeVisible({ timeout: 10_000 })
   expect(ordem).toEqual(['policy', 'storage', 'concluir'])
 })

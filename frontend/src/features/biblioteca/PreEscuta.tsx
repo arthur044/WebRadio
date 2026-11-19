@@ -5,7 +5,13 @@ import { resolverUrlDePreview, type UrlDePreview } from './useMidias'
 
 type Estado =
   | { tipo: 'carregando' }
-  | { tipo: 'pronto'; url: string; expiraEm: number | null; retomarEm: number }
+  | {
+      tipo: 'pronto'
+      url: string
+      expiraEm: number | null
+      retomarEm: number
+      tocar: boolean
+    }
   | { tipo: 'erro'; mensagem: string }
 
 /** Quanto antes do vencimento a próxima URL já é buscada. */
@@ -49,7 +55,7 @@ export function PreEscuta({ midia, aoFechar }: { midia: MidiaDto; aoFechar: () =
     let cancelado = false
     resolverUrlDePreview(midia.id)
       .then(({ url, expiraEm }) => {
-        if (!cancelado) setEstado({ tipo: 'pronto', url, expiraEm, retomarEm: 0 })
+        if (!cancelado) setEstado({ tipo: 'pronto', url, expiraEm, retomarEm: 0, tocar: true })
       })
       .catch((err: unknown) => {
         if (!cancelado) setEstado({ tipo: 'erro', mensagem: descreverErro(err).mensagem })
@@ -92,6 +98,8 @@ export function PreEscuta({ midia, aoFechar }: { midia: MidiaDto; aoFechar: () =
     falhasSeguidas.current += 1
     renovando.current = true
     const ponto = elemento.currentTime
+    // Quem pausou antes do vencimento (e deu um seek, por exemplo) continua pausado com a URL nova.
+    const tocar = !elemento.paused
     try {
       const guardada = proxima.current
       proxima.current = null
@@ -101,7 +109,13 @@ export function PreEscuta({ midia, aoFechar }: { midia: MidiaDto; aoFechar: () =
         guardada.expiraEm - Date.now() > MARGEM_DE_USO_MS
       const nova = usavel ? guardada : await resolverUrlDePreview(midia.id)
       if (montado.current) {
-        setEstado({ tipo: 'pronto', url: nova.url, expiraEm: nova.expiraEm, retomarEm: ponto })
+        setEstado({
+          tipo: 'pronto',
+          url: nova.url,
+          expiraEm: nova.expiraEm,
+          retomarEm: ponto,
+          tocar,
+        })
       }
     } catch (err: unknown) {
       if (montado.current) setEstado({ tipo: 'erro', mensagem: descreverErro(err).mensagem })
@@ -129,7 +143,7 @@ export function PreEscuta({ midia, aoFechar }: { midia: MidiaDto; aoFechar: () =
         <audio
           ref={audio}
           controls
-          autoPlay
+          autoPlay={estado.tocar}
           src={estado.url}
           aria-label={`Pré-escuta de ${midia.titulo ?? midia.nomeOriginal}`}
           className="w-full"

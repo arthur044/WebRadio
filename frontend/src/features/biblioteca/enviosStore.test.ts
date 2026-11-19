@@ -54,10 +54,13 @@ interface Chamada {
   corpo: unknown
 }
 
-function montarApi(respostas: { uploads?: Response[]; concluir?: Response[] } = {}) {
+function montarApi(
+  respostas: { uploads?: Response[]; concluir?: Response[]; excluir?: Response[] } = {},
+) {
   const chamadas: Chamada[] = []
   const uploads = [...(respostas.uploads ?? [])]
   const concluir = [...(respostas.concluir ?? [])]
+  const excluir = [...(respostas.excluir ?? [])]
   let n = 0
   vi.stubGlobal(
     'fetch',
@@ -89,6 +92,8 @@ function montarApi(respostas: { uploads?: Response[]; concluir?: Response[] } = 
         )
       }
       if (/^\/midias\/[^/]+\/concluir$/.test(caminho)) return concluir.shift() ?? json(202)
+      if (metodo === 'DELETE' && /^\/midias\/[^/]+$/.test(caminho))
+        return excluir.shift() ?? json(204)
       return json(404, { type: '/erros/x', title: 'x', status: 404 })
     }),
   )
@@ -328,6 +333,155 @@ describe('fila de envios (E4-P02)', () => {
       fase: 'erro',
       mensagem: 'O nome do arquivo tem caracteres não permitidos.',
     })
+  })
+})
+
+describe('fila de envios: cancelar, concluir e o slot de AguardandoUpload (Guardian no #110, spec 08 v1.5)', () => {
+  beforeEach(() => {
+    XhrFalso.instancias = []
+    vi.stubGlobal('XMLHttpRequest', XhrFalso)
+    useEnvios.setState({ envios: [] })
+  })
+  afterEach(async () => {
+    vi.useRealTimers()
+    for (let i = 0; i < 20; i++) {
+      for (const xhr of XhrFalso.instancias) if (!xhr.respondido) xhr.responder(201)
+      await esperar()
+    }
+    vi.unstubAllGlobals()
+  })
+
+  const novo = (nome: string) => ({
+    arquivo: arquivoDe(nome),
+    tipo: 'Vinheta' as const,
+    titulo: '',
+    artista: '',
+  })
+
+  it('cancelar o envio em espera do 429 destrava a fila: o seguinte pede a policy', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const api = montarApi({
+      uploads: [
+        json(429, { type: '/erros/limite', title: 'x', status: 429, retryAfterSeconds: 600 }),
+      ],
+    })
+    useEnvios.getState().adicionar(novo('a.mp3'))
+    useEnvios.getState().adicionar(novo('b.mp3'))
+    await vi.waitFor(() => expect(useEnvios.getState().envios[0].estado.fase).toBe('espera'))
+    expect(api.chamadas.filter((c) => c.caminho === '/midias/uploads')).toHaveLength(1)
+
+    useEnvios.getState().cancelar(useEnvios.getState().envios[0].id)
+
+    await vi.waitFor(() => expect(XhrFalso.instancias).toHaveLength(1))
+    expect(api.chamadas.filter((c) => c.caminho === '/midias/uploads')).toHaveLength(2)
+    expect(useEnvios.getState().envios[0].estado.fase).toBe('cancelado')
+  })
+
+  it('falha no concluir: "tentar de novo" repete só o concluir, sem nova policy nem novo arquivo', async () => {
+    const api = montarApi({ concluir: [json(503, { type: '/erros/x', title: 'x', status: 503 })] })
+    useEnvios.getState().adicionar(novo('a.mp3'))
+    await ate(() => XhrFalso.instancias.length === 1)
+    XhrFalso.instancias[0].responder(201)
+    await ate(() => useEnvios.getState().envios[0].estado.fase === 'erro')
+    expect(useEnvios.getState().envios[0].midiaId).toBe('m1')
+
+    useEnvios.getState().tentarDeNovo(useEnvios.getState().envios[0].id)
+
+    await ate(() => useEnvios.getState().envios[0].estado.fase === 'enviado')
+    expect(api.chamadas.map((c) => `${c.metodo} ${c.caminho}`)).toEqual([
+      'POST /midias/uploads',
+      'POST /midias/m1/concluir',
+      'POST /midias/m1/concluir',
+    ])
+    expect(XhrFalso.instancias).toHaveLength(1)
+    // O registro ainda vale: nada de DELETE, o arquivo já está no storage.
+    expect(api.chamadas.some((c) => c.metodo === 'DELETE')).toBe(false)
+  })
+
+  it('concluir recusado com 400: o retry continua sendo só o concluir, sem DELETE nem nova policy', async () => {
+    const api = montarApi({ concluir: [json(400, { type: '/erros/x', title: 'x', status: 400 })] })
+    useEnvios.getState().adicionar(novo('a.mp3'))
+    await ate(() => XhrFalso.instancias.length === 1)
+    XhrFalso.instancias[0].responder(201)
+    await ate(() => useEnvios.getState().envios[0].estado.fase === 'erro')
+
+    useEnvios.getState().tentarDeNovo(useEnvios.getState().envios[0].id)
+    await ate(() => useEnvios.getState().envios[0].estado.fase === 'enviado')
+
+    expect(api.chamadas.map((c) => `${c.metodo} ${c.caminho}`)).toEqual([
+      'POST /midias/uploads',
+      'POST /midias/m1/concluir',
+      'POST /midias/m1/concluir',
+    ])
+  })
+
+  it('DELETE do slot com 409 (um concluir ganhou a corrida): o envio segue como concluído', async () => {
+    montarApi({ excluir: [json(409, { type: '/erros/x', title: 'x', status: 409 })] })
+    useEnvios.getState().adicionar(novo('a.mp3'))
+    await ate(() => XhrFalso.instancias.length === 1)
+
+    XhrFalso.instancias[0].responder(403)
+
+    await ate(() => useEnvios.getState().envios[0].estado.fase === 'enviado')
+    const envio = useEnvios.getState().envios[0]
+    expect(envio.estado).toEqual({ fase: 'enviado', midiaId: 'm1' })
+    expect(envio.slotAberto).toBeUndefined()
+  })
+
+  it('cancelar um envio em andamento devolve o slot com DELETE, antes de o seguinte pedir policy', async () => {
+    const api = montarApi()
+    useEnvios.getState().adicionar(novo('a.mp3'))
+    useEnvios.getState().adicionar(novo('b.mp3'))
+    await ate(() => XhrFalso.instancias.length === 1)
+
+    useEnvios.getState().cancelar(useEnvios.getState().envios[0].id)
+
+    await ate(() => XhrFalso.instancias.length === 2)
+    expect(api.chamadas.map((c) => `${c.metodo} ${c.caminho}`)).toEqual([
+      'POST /midias/uploads',
+      'DELETE /midias/m1',
+      'POST /midias/uploads',
+    ])
+    expect(useEnvios.getState().envios[0].estado.fase).toBe('cancelado')
+    expect(useEnvios.getState().envios[0].slotAberto).toBeUndefined()
+  })
+
+  it('o storage recusando devolve o slot na hora, e "tentar de novo" pede policy nova', async () => {
+    const api = montarApi()
+    useEnvios.getState().adicionar(novo('a.mp3'))
+    await ate(() => XhrFalso.instancias.length === 1)
+    XhrFalso.instancias[0].responder(403)
+    await ate(() => api.chamadas.some((c) => c.metodo === 'DELETE'))
+    await ate(() => useEnvios.getState().envios[0].estado.fase === 'erro')
+
+    useEnvios.getState().tentarDeNovo(useEnvios.getState().envios[0].id)
+    await ate(() => XhrFalso.instancias.length === 2)
+
+    expect(api.chamadas.map((c) => `${c.metodo} ${c.caminho}`)).toEqual([
+      'POST /midias/uploads',
+      'DELETE /midias/m1',
+      'POST /midias/uploads',
+    ])
+  })
+
+  it('DELETE que falhou (rede): o "tentar de novo" o repete antes de pedir outra policy', async () => {
+    const api = montarApi({ excluir: [json(503, { type: '/erros/x', title: 'x', status: 503 })] })
+    useEnvios.getState().adicionar(novo('a.mp3'))
+    await ate(() => XhrFalso.instancias.length === 1)
+    XhrFalso.instancias[0].responder(403)
+    await ate(() => api.chamadas.some((c) => c.metodo === 'DELETE'))
+    await ate(() => useEnvios.getState().envios[0].estado.fase === 'erro')
+    expect(useEnvios.getState().envios[0].slotAberto).toBe('m1')
+
+    useEnvios.getState().tentarDeNovo(useEnvios.getState().envios[0].id)
+    await ate(() => XhrFalso.instancias.length === 2)
+
+    expect(api.chamadas.map((c) => `${c.metodo} ${c.caminho}`)).toEqual([
+      'POST /midias/uploads',
+      'DELETE /midias/m1',
+      'DELETE /midias/m1',
+      'POST /midias/uploads',
+    ])
   })
 })
 

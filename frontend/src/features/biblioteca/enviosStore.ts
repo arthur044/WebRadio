@@ -24,6 +24,17 @@ export interface Envio {
   titulo: string
   artista: string
   estado: FaseDoEnvio
+  /**
+   * Preenchido quando o arquivo já está no storage e só falta o `concluir`: se ele falhar, "tentar de novo" repete só o
+   * `concluir`, em vez de pedir outra policy (mais um dos 5 abertos) e reenviar até 250 MB.
+   */
+  midiaId?: string
+  /**
+   * `AguardandoUpload` aberto por este envio (um dos 5 do S-M06) enquanto o arquivo não chegou ao storage. Se o envio
+   * falha ou é cancelado antes disso, a tela o devolve com `DELETE /midias/{id}` (spec 08 v1.5); fica aqui até o
+   * `DELETE` dar certo, e o "tentar de novo" o repete antes de pedir uma policy nova.
+   */
+  slotAberto?: string
 }
 
 interface EnviosState {
@@ -33,6 +44,32 @@ interface EnviosState {
   tentarDeNovo: (id: string) => void
   /** Tira da lista os que já terminaram (enviado, erro ou cancelado). */
   limparConcluidos: () => void
+}
+
+function guardar(id: string, campos: Pick<Envio, 'midiaId' | 'slotAberto'>): void {
+  useEnvios.setState((s) => ({
+    envios: s.envios.map((e) => (e.id === id ? { ...e, ...campos } : e)),
+  }))
+}
+
+/**
+ * Devolve o slot de `AguardandoUpload` ao servidor (só no cancelamento, na recusa do storage ou na falha do upload; uma
+ * falha do `concluir` repete o `concluir`, nunca chama isto). 204 libera e 404 (já saiu) não deixa nada a devolver.
+ * 409 = um `concluir` ganhou a corrida, então o envio está concluído: a tela segue como concluído. Outra falha (rede,
+ * 5xx) mantém o `slotAberto` para a próxima tentativa; o servidor limpa sozinho no `UploadExpiraEmUtc`.
+ */
+async function desistirDoSlot(id: string, slot: string): Promise<void> {
+  try {
+    await apiFetch<void>(`/midias/${encodeURIComponent(slot)}`, { method: 'DELETE' })
+  } catch (err) {
+    if (!(err instanceof ApiError) || ![404, 409].includes(err.status)) return
+    if (err.status === 409) {
+      guardar(id, { midiaId: slot, slotAberto: undefined })
+      atualizar(id, { fase: 'enviado', midiaId: slot })
+      return
+    }
+  }
+  guardar(id, { slotAberto: undefined })
 }
 
 function atualizar(id: string, estado: FaseDoEnvio): void {
@@ -61,6 +98,8 @@ export const useEnvios = create<EnviosState>()((set, get) => ({
     if (fase === 'aguardando' || fase === 'espera') {
       limparEspera(id)
       atualizar(id, { fase: 'cancelado' })
+      // Com este em `espera` a fila estava parada: os `aguardando` seguintes andam agora.
+      void processarFila()
     } else if (fase === 'preparando' || fase === 'enviando') {
       controles.get(id)?.abort()
     }
@@ -142,48 +181,67 @@ async function executar(envio: Envio): Promise<void> {
   const { id, arquivo, tipo } = envio
   const controle = new AbortController()
   controles.set(id, controle)
+  let slot = envio.slotAberto
+  let midiaId = envio.midiaId
   try {
-    const recusa = recusaLocal(arquivo, tipo)
-    if (recusa) return atualizar(id, { fase: 'erro', mensagem: recusa })
+    // Sobra de uma tentativa anterior cujo `DELETE` não chegou: devolve antes de ocupar outro dos 5 abertos.
+    if (midiaId === undefined && slot !== undefined) {
+      await desistirDoSlot(id, slot)
+      slot = useEnvios.getState().envios.find((e) => e.id === id)?.slotAberto
+    }
+    if (midiaId === undefined) {
+      const recusa = recusaLocal(arquivo, tipo)
+      if (recusa) return atualizar(id, { fase: 'erro', mensagem: recusa })
 
-    atualizar(id, { fase: 'preparando' })
-    const policy = await apiFetch<UploadMidiaDto>('/midias/uploads', {
-      method: 'POST',
-      signal: controle.signal,
-      body: {
-        nomeOriginal: arquivo.name,
-        tipoMidia: tipo,
-        tamanhoBytes: arquivo.size,
-        mimeTypeDeclarado: mimeDeclarado(arquivo),
-        titulo: textoOuNulo(envio.titulo),
-        artista: textoOuNulo(envio.artista),
-      },
-    })
-
-    const destino = urlDaPolicy(policy.upload.url)
-    if (destino === null) {
-      return atualizar(id, {
-        fase: 'erro',
-        mensagem: 'O servidor devolveu um destino de envio inesperado.',
+      atualizar(id, { fase: 'preparando' })
+      const policy = await apiFetch<UploadMidiaDto>('/midias/uploads', {
+        method: 'POST',
+        signal: controle.signal,
+        body: {
+          nomeOriginal: arquivo.name,
+          tipoMidia: tipo,
+          tamanhoBytes: arquivo.size,
+          mimeTypeDeclarado: mimeDeclarado(arquivo),
+          titulo: textoOuNulo(envio.titulo),
+          artista: textoOuNulo(envio.artista),
+        },
       })
+
+      slot = policy.midiaId
+      guardar(id, { slotAberto: slot })
+
+      const destino = urlDaPolicy(policy.upload.url)
+      if (destino === null) {
+        atualizar(id, {
+          fase: 'erro',
+          mensagem: 'O servidor devolveu um destino de envio inesperado.',
+        })
+        return await desistirDoSlot(id, slot)
+      }
+
+      atualizar(id, { fase: 'enviando', progresso: 0 })
+      await enviarAoStorage(
+        destino.href,
+        policy.upload.campos,
+        arquivo,
+        (progresso) => atualizar(id, { fase: 'enviando', progresso }),
+        controle.signal,
+      )
+      // O arquivo já está no storage: daqui em diante, uma falha no `concluir` não refaz o envio.
+      midiaId = policy.midiaId
+      slot = undefined
+      guardar(id, { midiaId, slotAberto: undefined })
     }
 
-    atualizar(id, { fase: 'enviando', progresso: 0 })
-    await enviarAoStorage(
-      destino.href,
-      policy.upload.campos,
-      arquivo,
-      (progresso) => atualizar(id, { fase: 'enviando', progresso }),
-      controle.signal,
-    )
-
     atualizar(id, { fase: 'concluindo' })
-    await apiFetch<void>(`/midias/${encodeURIComponent(policy.midiaId)}/concluir`, {
-      method: 'POST',
-    })
-    atualizar(id, { fase: 'enviado', midiaId: policy.midiaId })
+    await apiFetch<void>(`/midias/${encodeURIComponent(midiaId)}/concluir`, { method: 'POST' })
+    atualizar(id, { fase: 'enviado', midiaId })
   } catch (err) {
-    if (controle.signal.aborted) return atualizar(id, { fase: 'cancelado' })
+    if (controle.signal.aborted) {
+      atualizar(id, { fase: 'cancelado' })
+      if (slot !== undefined) await desistirDoSlot(id, slot)
+      return
+    }
     if (err instanceof ApiError && err.status === 429) {
       const segundos = descreverErro(err).esperarSegundos ?? ESPERA_PADRAO_S
       atualizar(id, { fase: 'espera', ateEm: Date.now() + segundos * 1000 })
@@ -198,6 +256,8 @@ async function executar(envio: Envio): Promise<void> {
       return
     }
     atualizar(id, { fase: 'erro', mensagem: mensagemDeErro(err) })
+    // Falha antes do `concluir` (storage recusou, rede): o slot volta agora, antes de qualquer "tentar de novo".
+    if (slot !== undefined) await desistirDoSlot(id, slot)
   } finally {
     controles.delete(id)
   }

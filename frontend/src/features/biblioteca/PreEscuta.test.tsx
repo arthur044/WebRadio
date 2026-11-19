@@ -85,6 +85,25 @@ describe('PreEscuta (E4-P01): URL que vence no meio da pré-escuta', () => {
     expect(audio.currentTime).toBe(123.5)
   })
 
+  it('depois da renovação só toca sozinho quem estava tocando; quem pausou continua pausado', async () => {
+    montarApi()
+    render(<PreEscuta midia={midia} aoFechar={() => {}} />)
+    const audio = (await screen.findByLabelText('Pré-escuta de Faixa a')) as HTMLAudioElement
+    expect(audio.autoplay).toBe(true)
+
+    // Pausado (o `paused` do jsdom já nasce true) na hora do error: a URL nova não dá play.
+    fireEvent.error(audio)
+    await waitFor(() => expect(audio.getAttribute('src')).toBe(urlNum(2)))
+    expect(audio.autoplay).toBe(false)
+
+    // Tocando na hora do error: segue tocando.
+    Object.defineProperty(audio, 'paused', { value: false, configurable: true })
+    fireEvent.playing(audio)
+    fireEvent.error(audio)
+    await waitFor(() => expect(audio.getAttribute('src')).toBe(urlNum(3)))
+    expect(audio.autoplay).toBe(true)
+  })
+
   it('perto de expiraEmUtc busca a próxima URL sem trocar o src; o error usa essa, sem nova chamada', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const api = montarApi(90_000)

@@ -23,9 +23,9 @@ function EsperaDoEnvio({ ateEm }: { ateEm: number }) {
   }, [ateEm, iniciar])
   return (
     <p role="status" className="text-text-muted text-sm">
-      Limite de envios atingido (no máximo 5 abertos e 20 por hora). Tenta de novo em{' '}
-      {formatarEspera(espera.restante)}; quando o limite é o de envios abertos, a espera pode chegar
-      a 2 horas.
+      Limite de envios atingido (no máximo 5 abertos e 20 por hora). Nova tentativa automática em{' '}
+      {formatarEspera(espera.restante)}. Quando o limite é o de envios abertos, a espera pode chegar
+      a 2 horas: fechar a aba no meio de um envio deixa esse envio aberto até vencer.
     </p>
   )
 }
@@ -118,6 +118,15 @@ export function EnvioDeMidia() {
   const [titulo, setTitulo] = useState('')
   const [artista, setArtista] = useState('')
   const [erro, setErro] = useState<string | null>(null)
+
+  // F5 ou fechar a aba no meio do envio perde o upload e deixa o envio aberto no servidor até vencer.
+  const enviando = envios.some((e) => e.estado.fase === 'enviando')
+  useEffect(() => {
+    if (!enviando) return
+    const avisar = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener('beforeunload', avisar)
+    return () => window.removeEventListener('beforeunload', avisar)
+  }, [enviando])
 
   function enviar(e: FormEvent) {
     e.preventDefault()

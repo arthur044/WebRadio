@@ -44,7 +44,13 @@ export function BibliotecaPage() {
   const [filtros, setFiltros] = useState<FiltrosDaBiblioteca>(FILTROS_INICIAIS)
   // A busca vai para a API só depois de uma pausa na digitação.
   const [textoBusca, setTextoBusca] = useState('')
-  const [aviso, setAviso] = useState<string | null>(null)
+  // O aviso (edição salva, mídia só desativada...) vale para a lista que a pessoa estava vendo: sumir ao trocar de filtro ou de página.
+  const [avisoDaLista, setAvisoDaLista] = useState<{
+    texto: string
+    filtros: FiltrosDaBiblioteca
+  } | null>(null)
+  const aviso = avisoDaLista?.filtros === filtros ? avisoDaLista.texto : null
+  const setAviso = (texto: string) => setAvisoDaLista({ texto, filtros })
   const [preEscuta, setPreEscuta] = useState<MidiaDto | null>(null)
   const { data, isPending, isError, error, refetch, isPlaceholderData } = useMidias(filtros)
 

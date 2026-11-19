@@ -319,6 +319,22 @@ describe('Biblioteca (E4-P01 a E4-P03)', () => {
       expect(screen.queryByRole('dialog')).toBeNull()
     })
 
+    it('o aviso da edição some quando a pessoa troca de filtro', async () => {
+      montarApi([midia('a')])
+      renderBiblioteca()
+      const user = userEvent.setup()
+      await user.click(await screen.findByRole('button', { name: 'Editar Faixa a' }))
+      const titulo = await within(await screen.findByRole('dialog')).findByLabelText(/^Título/)
+      await user.clear(titulo)
+      await user.type(titulo, 'Nova')
+      await user.click(screen.getByRole('button', { name: 'Salvar' }))
+      await screen.findByText('Mídia atualizada.')
+
+      await user.selectOptions(within(screen.getByRole('search')).getByLabelText('Tipo'), 'Vinheta')
+
+      await waitFor(() => expect(screen.queryByText('Mídia atualizada.')).toBeNull())
+    })
+
     it('412: relê a mídia, avisa e mostra o formulário com os dados de agora e o ETag novo', async () => {
       const api = montarApi([midia('a')])
       renderBiblioteca()
