@@ -284,9 +284,15 @@ if [[ "$UP_CONCLUIR" == 202 ]] && espera_status "$LOC1" "$ID_MUSICA" Aprovado 15
   ETAG="$(curl --silent --max-time 10 --dump-header - --output /dev/null -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/midias/$ID_CAPA" | tr -d '\r' | grep -i -m1 '^etag:' | cut -d' ' -f2-)"
   r="$(curl --silent --max-time 10 --write-out '\n%{http_code}' -X PATCH -H 'Content-Type: application/json' -H "If-Match: $ETAG" -H "Authorization: Bearer $ADMIN" --data '{"ativo":false}' "$BASE/api/v1/midias/$ID_CAPA" || true)"
   confere "o Admin desativa a vinheta (PATCH 200)" test "${r##*$'\n'}" = 200
-  DESATIVADA_EM="$(sql "SELECT FORMAT(DATEADD(SECOND, 20, SYSUTCDATETIME()), 'yyyy-MM-dd HH:mm:ss')")"
-  sleep 60
-  confere "depois de desativada a vinheta não toca mais (nenhuma reprodução depois da folga de 20 s)" test "$(sql "SELECT COUNT(*) FROM midia.Reproducao WHERE MidiaId = '$ID_CAPA' AND IniciadoEmUtc > '$DESATIVADA_EM'")" = 0
+  # O request.dynamic do Liquidsoap pré-busca ~10 s de áudio (várias vinhetas de 3 s): o que já foi buscado antes do PATCH ainda toca. A folga cobre isso.
+  DESATIVADA_EM="$(sql "SELECT FORMAT(DATEADD(SECOND, 45, SYSUTCDATETIME()), 'yyyy-MM-dd HH:mm:ss')")"
+  sleep 90
+  TOCOU_DEPOIS="$(sql "SELECT COUNT(*) FROM midia.Reproducao WHERE MidiaId = '$ID_CAPA' AND IniciadoEmUtc > '$DESATIVADA_EM'")"
+  confere "depois de desativada a vinheta não toca mais (nenhuma reprodução depois da folga de 45 s)" test "$TOCOU_DEPOIS" = 0
+  if [[ "$TOCOU_DEPOIS" != 0 ]]; then
+    echo "  (diagnóstico: corte=$DESATIVADA_EM, agora=$(sql "SELECT FORMAT(SYSUTCDATETIME(), 'yyyy-MM-dd HH:mm:ss')"), ativo=$(sql "SELECT Ativo FROM midia.ArquivoMidia WHERE Id = '$ID_CAPA'"))"
+    sql "SELECT TOP 5 FORMAT(IniciadoEmUtc, 'HH:mm:ss') FROM midia.Reproducao WHERE MidiaId = '$ID_CAPA' ORDER BY IniciadoEmUtc DESC" | sed 's/^/  (reprodução em /; s/$/)/'
+  fi
 else
   falha "a música do pedido não chegou a Aprovado (policy $UP_POLICY, multipart $UP_POST, concluir $UP_CONCLUIR)"
 fi
