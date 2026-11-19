@@ -63,7 +63,7 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 /* ---------- 1. Schemas ---------- */
--- [Atlas/Sentinel] Idempotente: infra/sql/init-db.sql já cria estes 5 schemas (para o
+-- [Atlas/Sentinel] Idempotente: infra/sql/init-db.sql já cria estes 6 schemas (para o
 -- GRANT por schema do logins.sql funcionar antes do migrator existir). Rodar este
 -- arquivo depois não pode falhar com "schema já existe".
 IF SCHEMA_ID(N'seg') IS NULL EXEC(N'CREATE SCHEMA seg');        -- identidade e acesso
@@ -75,6 +75,8 @@ GO
 IF SCHEMA_ID(N'midia') IS NULL EXEC(N'CREATE SCHEMA midia');    -- arquivos e histórico de reprodução
 GO
 IF SCHEMA_ID(N'infra') IS NULL EXEC(N'CREATE SCHEMA infra');    -- outbox e mecanismos técnicos
+GO
+IF SCHEMA_ID(N'rel') IS NULL EXEC(N'CREATE SCHEMA rel');        -- relatórios (só procedures; 08, E4-D12)
 GO
 
 /* ---------- 2. seg.Usuario ---------- */
@@ -403,13 +405,51 @@ CREATE TABLE infra.EventoOutbox (
 CREATE INDEX IX_EventoOutbox_Pendentes ON infra.EventoOutbox (Id) INCLUDE (Tentativas) WHERE ProcessadoEmUtc IS NULL;
 GO
 
+/* ---------- 9.1 rel.usp_MaisTocadas (E4-A02, 08 E4-D12; relatório "mais tocadas") ----------
+   Contrato com a API (02, GET /relatorios/mais-tocadas): [{ MidiaId, Titulo, Artista, TipoMidia, Reproducoes }], da mais tocada para a menos.
+   Entradas inválidas -> THROW (severidade 16): 50101 período vazio ou nulo, 50102 período acima de 366 dias, 50103 @Top fora de 1..100.
+   O texto da procedure é o MESMO em docs/specs/03 e na migration 20261119033432_RelatorioMaisTocadas: o ddl-check compara os parâmetros e o hash
+   da definição (sem espaços em branco) dos dois lados, então qualquer divergência no corpo derruba o job. Para mudar a procedure, mude os dois.
+   Agrega e aplica o TOP ANTES do JOIN: ordena 100 linhas, não as milhares de mídias distintas do período. O desempate por MidiaId deixa o
+   resultado determinístico. OPTION (RECOMPILE): o plano ótimo muda com a largura do período (7 dias: seek curto; 366 dias: varredura do
+   IX_Reproducao_Periodo), e um plano em cache pelo primeiro @DeUtc/@AteUtc serviria mal o seguinte (parameter sniffing).
+   Permissão: EXECUTE no schema rel (infra/sql/logins.sql); a cadeia de propriedade (tudo é dbo) dispensa SELECT em midia para quem executa.
+   O comentário fica num lote à parte (GO): um comentário antes do CREATE entraria na definição gravada e o hash deixaria de bater. */
+GO
+CREATE PROCEDURE rel.usp_MaisTocadas
+    @DeUtc  datetime2(0),
+    @AteUtc datetime2(0),
+    @Top    int
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @DeUtc IS NULL OR @AteUtc IS NULL OR @AteUtc <= @DeUtc
+        THROW 50101, N'Período inválido: @DeUtc e @AteUtc são obrigatórios e @DeUtc deve ser anterior a @AteUtc.', 1;
+    IF @AteUtc > DATEADD(DAY, 366, @DeUtc)
+        THROW 50102, N'Período inválido: o máximo é de 366 dias.', 1;
+    IF @Top IS NULL OR @Top < 1 OR @Top > 100
+        THROW 50103, N'@Top inválido: use um valor de 1 a 100.', 1;
+
+    SELECT m.Id AS MidiaId, m.Titulo, m.Artista, m.TipoMidia, t.Reproducoes
+    FROM (SELECT TOP (@Top) r.MidiaId, COUNT(*) AS Reproducoes
+          FROM midia.Reproducao AS r
+          WHERE r.IniciadoEmUtc >= @DeUtc AND r.IniciadoEmUtc < @AteUtc
+          GROUP BY r.MidiaId
+          ORDER BY COUNT(*) DESC, r.MidiaId) AS t
+    JOIN midia.ArquivoMidia AS m ON m.Id = t.MidiaId
+    ORDER BY t.Reproducoes DESC, t.MidiaId
+    OPTION (RECOMPILE);
+END
+GO
+
 /* ---------- 10. Segurança de acesso (E1-A02, concluída) ----------
    [Atlas/v1.1] Implementação real em infra/sql/logins.sql — este bloco virou só um
    ponteiro para não manter duas cópias das GRANTs divergindo com o tempo. Três
    principals, nenhum sysadmin: webradio_migrator (db_ddladmin+datareader+datawriter,
-   só "migrator"), webradio_app (SELECT/INSERT/UPDATE/DELETE/EXECUTE nos 5 schemas,
-   api+worker), webradio_relatorio (SELECT em midia/grade/interacao, leitura para
-   relatório — EXECUTE em rel.* entra no Épico 3, quando o schema existir). Nomes de
+   só "migrator"), webradio_app (SELECT/INSERT/UPDATE/DELETE/EXECUTE nos 5 schemas de dados + EXECUTE em rel,
+   api+worker), webradio_relatorio (SELECT em midia/grade, leitura para
+   relatório; EXECUTE em rel.* para webradio_app e webradio_relatorio, E4-A02). Nomes de
    senha por sqlcmd: DB_APP_PASSWORD, DB_MIGRATOR_PASSWORD, DB_RELATORIO_PASSWORD
    (S-A10, docs/specs/05-seguranca-auditoria.md §5.1). Executado pelo "db-init" (D20)
    com a SA, logo após infra/sql/init-db.sql (E1-A04).
