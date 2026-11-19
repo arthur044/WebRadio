@@ -227,3 +227,60 @@ public class PlayoutSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         Assert.Equal(("Título do índice", "Banda"), (achada.Titulo, achada.Artista));
     }
 }
+
+/// <summary>E4-A02 contra SQL Server real: <c>rel.usp_MaisTocadas</c> pela API do Forge.</summary>
+public class RelatorioMaisTocadasSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
+{
+    private readonly Cenario _c = new(banco);
+
+    [SqlFact]
+    public async Task Ordena_por_reproducoes_aplica_o_top_e_respeita_o_periodo_com_ate_exclusivo()
+    {
+        var dono = (await _c.CriarUsuarioAsync(Cenario.Email(), Role.Locutor)).Id;
+        var ids = new List<Guid>();
+        await using (var db = _c.NovoDb())
+        {
+            await db.Reproducoes.ExecuteDeleteAsync();
+            var agora = DateTime.UtcNow;
+            foreach (var titulo in new[] { "A", "B", "C" })
+            {
+                var m = new ArquivoMidia(Guid.CreateVersion7(), "a.mp3", titulo, "Banda", TipoMidia.Musica, "audio/mpeg", 1000, dono, agora);
+                m.ConcluirUpload(1000, "etag", agora);
+                m.IniciarAnalise(agora);
+                m.RegistrarHashOriginal(new byte[32]);
+                m.Aprovar("audio/mpeg", Guid.NewGuid().ToByteArray().Concat(Guid.NewGuid().ToByteArray()).ToArray(), 200m, 900, ".mp3", new WebRadio.Application.Features.Midias.MidiaOptions().Limite(TipoMidia.Musica), agora);
+                db.ArquivosMidia.Add(m);
+                ids.Add(m.Id);
+            }
+
+            await db.SaveChangesAsync();
+            var de = new DateTime(2026, 11, 10, 0, 0, 0, DateTimeKind.Utc);
+            // A: 3 dentro, B: 2 dentro, C: 1 dentro + 1 exatamente em `ate` (exclusivo: fora) + 1 antes de `de`
+            foreach (var (id, n) in new[] { (ids[0], 3), (ids[1], 2), (ids[2], 1) })
+                for (var i = 0; i < n; i++) db.Reproducoes.Add(new Reproducao(id, null, null, de.AddHours(1 + i)));
+            db.Reproducoes.Add(new Reproducao(ids[2], null, null, de.AddDays(5)));
+            db.Reproducoes.Add(new Reproducao(ids[2], null, null, de.AddDays(-1)));
+            await db.SaveChangesAsync();
+        }
+
+        await using var leitura = _c.NovoDb();
+        var r = new RelatorioDeReproducoes(leitura);
+        var de2 = new DateTime(2026, 11, 10, 0, 0, 0, DateTimeKind.Utc);
+        var ate = de2.AddDays(5);
+
+        var todos = await r.MaisTocadasAsync(de2, ate, 20, default);
+        Assert.Equal([(ids[0], 3), (ids[1], 2), (ids[2], 1)], todos.Select(x => (x.MidiaId, x.Reproducoes)).ToArray());
+        Assert.Equal(("A", "Banda", TipoMidia.Musica), (todos[0].Titulo, todos[0].Artista, todos[0].TipoMidia));
+
+        var dois = await r.MaisTocadasAsync(de2, ate, 2, default);
+        Assert.Equal([ids[0], ids[1]], dois.Select(x => x.MidiaId).ToArray()); // o TOP corta antes do JOIN
+    }
+
+    [SqlFact]
+    public async Task Entrada_invalida_vira_erro_da_procedure_THROW()
+    {
+        await using var db = _c.NovoDb();
+        var r = new RelatorioDeReproducoes(db);
+        await Assert.ThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() => r.MaisTocadasAsync(DateTime.UtcNow, DateTime.UtcNow.AddDays(400), 20, default));
+    }
+}

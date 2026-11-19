@@ -121,6 +121,7 @@ public static class InfrastructureServiceCollectionExtensions
         AddStorage(services, configuration);
         // E4-F08: a fila do playout (SQL do Atlas), a faixa em voo e o sorteio.
         services.AddScoped<IFilaDoPlayout, FilaDoPlayout>();
+        services.AddScoped<WebRadio.Application.Features.Relatorios.IRelatorioDeReproducoes, RelatorioDeReproducoes>();
         services.AddSingleton<IFaixaEmVoo>(sp => new FaixaEmVoo(sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<FaixaEmVoo>>(), sp.GetService<IConnectionMultiplexer>()));
         services.AddSingleton<IAleatorio, AleatorioDoSistema>();
         services.AddSingleton<ITocandoAgoraStore>(sp => new TocandoAgoraStore(
