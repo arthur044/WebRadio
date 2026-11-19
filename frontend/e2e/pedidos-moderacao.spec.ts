@@ -73,7 +73,7 @@ test('o pedido chega à moderação, e a decisão chega ao ouvinte, sem recarreg
     await expect(naFila).toBeVisible({ timeout: 30_000 })
 
     // --- aprovar e depois marcar tocado: "Meus pedidos" do ouvinte A acompanha
-    await naFila.getByRole('button', { name: `Aprovar ${musicaA}` }).click()
+    await naFila.getByRole('button', { name: `Aprovar ${musicaA}`, exact: true }).click()
     await expect(itemA).toContainText('Aprovado', { timeout: 30_000 })
     await locutor.getByRole('button', { name: `Marcar ${musicaA} como tocado` }).click()
     await expect(itemA).toContainText('Tocado', { timeout: 30_000 })

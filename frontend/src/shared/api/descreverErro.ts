@@ -13,8 +13,11 @@ export interface ErroDescrito {
   esperarSegundos: number | null
 }
 
-/** Teto da espera mostrada: o servidor manda no máximo 300 s, e um valor absurdo não pode travar a tela. */
-const ESPERA_MAXIMA_S = 3600
+/**
+ * Teto da espera mostrada. O pedido de música manda no máximo 300 s, mas o limite de envios abertos da biblioteca
+ * (E4-F02) vai até o vencimento do upload mais antigo, 2 h; acima disso é valor absurdo, que não pode travar a tela.
+ */
+const ESPERA_MAXIMA_S = 7200
 
 function segundosDeEspera(valor: unknown): number | null {
   if (typeof valor !== 'number' || !Number.isFinite(valor) || valor <= 0) return null

@@ -42,6 +42,8 @@ function montarApi(inicial: { pendentes?: PedidoDto[]; aprovados?: PedidoDto[] }
     pendentes: inicial.pendentes ?? [],
     aprovados: inicial.aprovados ?? [],
     total: undefined as number | undefined,
+    // Músicas da biblioteca que o diálogo "Aprovar com mídia" oferece (`GET /midias?...`).
+    musicas: [] as object[],
     // Resposta forçada para a próxima ação de moderação (409, 403, 400...).
     proximaAcao: null as (() => Response) | null,
   }
@@ -66,6 +68,13 @@ function montarApi(inicial: { pendentes?: PedidoDto[]; aprovados?: PedidoDto[] }
           pagina: 1,
           tamanho: 100,
         })
+      }
+      if (metodo === 'GET' && caminho.startsWith('/midias?')) {
+        const busca = new URLSearchParams(caminho.split('?')[1]).get('busca')?.toLowerCase()
+        const itens = (estado.musicas as { titulo: string }[]).filter(
+          (m) => !busca || m.titulo.toLowerCase().includes(busca),
+        )
+        return json(200, { itens, total: itens.length, pagina: 1, tamanho: 10 })
       }
       const acao = /^\/pedidos\/([^/]+)\/(aprovar|rejeitar|marcar-tocado)$/.exec(caminho)
       if (metodo === 'POST' && acao) {
@@ -179,6 +188,117 @@ describe('Fila de moderação (E3-P03)', () => {
     expect(api.acoes()).toEqual([
       { metodo: 'POST', caminho: '/pedidos/c/marcar-tocado', corpo: undefined },
     ])
+  })
+
+  describe('aprovar com mídia (E4-P04)', () => {
+    const musica = (id: string, titulo: string, artista = 'Banda') => ({
+      id,
+      nomeOriginal: `${id}.mp3`,
+      titulo,
+      artista,
+      tipoMidia: 'Musica',
+      statusSanitizacao: 'Aprovado',
+      duracaoSegundos: 200,
+      ativo: true,
+    })
+
+    it('busca só músicas aprovadas e ativas, e aprovar manda { midiaId } da escolhida', async () => {
+      const api = montarApi({ pendentes: [pedido('a')] })
+      api.estado.musicas = [musica('m1', 'Aquarela', 'Toquinho'), musica('m2', 'Bolero')]
+      renderFila()
+      const user = userEvent.setup()
+
+      await user.click(
+        await screen.findByRole('button', { name: 'Aprovar Música a com mídia da biblioteca' }),
+      )
+      const dialogo = screen.getByRole('dialog')
+      expect(within(dialogo).getByLabelText(/Buscar na biblioteca/)).toHaveFocus()
+      const consulta = api.chamadas.find((c) => c.caminho.startsWith('/midias?'))!.caminho
+      expect(consulta).toBe('/midias?tipo=Musica&status=Aprovado&ativo=true&pagina=1&tamanho=10')
+
+      const confirmar = within(dialogo).getByRole('button', { name: 'Aprovar com esta mídia' })
+      expect(confirmar).toBeDisabled()
+      await user.click(await within(dialogo).findByLabelText(/Aquarela/))
+      await user.click(confirmar)
+
+      await screen.findByRole('button', { name: 'Marcar Música a como tocado' })
+      expect(api.acoes()).toEqual([
+        { metodo: 'POST', caminho: '/pedidos/a/aprovar', corpo: { midiaId: 'm1' } },
+      ])
+    })
+
+    it('a busca filtra a lista; trocar o texto desfaz a escolha', async () => {
+      const api = montarApi({ pendentes: [pedido('a')] })
+      api.estado.musicas = [musica('m1', 'Aquarela'), musica('m2', 'Bolero')]
+      renderFila()
+      const user = userEvent.setup()
+      await user.click(
+        await screen.findByRole('button', { name: 'Aprovar Música a com mídia da biblioteca' }),
+      )
+      const dialogo = screen.getByRole('dialog')
+      await user.click(await within(dialogo).findByLabelText(/Aquarela/))
+
+      await user.type(within(dialogo).getByLabelText(/Buscar na biblioteca/), 'bol')
+
+      await waitFor(() => expect(within(dialogo).queryByLabelText(/Aquarela/)).toBeNull())
+      expect(within(dialogo).getByLabelText(/Bolero/)).not.toBeChecked()
+      expect(within(dialogo).getByRole('button', { name: 'Aprovar com esta mídia' })).toBeDisabled()
+    })
+
+    it('título da biblioteca é texto puro; sem resultado mostra o aviso', async () => {
+      const api = montarApi({ pendentes: [pedido('a')] })
+      api.estado.musicas = [musica('m1', '<img src=x onerror=alert(1)>')]
+      renderFila()
+      const user = userEvent.setup()
+      await user.click(
+        await screen.findByRole('button', { name: 'Aprovar Música a com mídia da biblioteca' }),
+      )
+
+      expect(await screen.findByText('<img src=x onerror=alert(1)>')).toBeInTheDocument()
+      expect(document.body.querySelector('img, script')).toBeNull()
+
+      await user.type(screen.getByLabelText(/Buscar na biblioteca/), 'zzz')
+      expect(await screen.findByText('Nenhuma música encontrada.')).toBeInTheDocument()
+    })
+
+    it('mídia recusada pelo servidor (400) mostra o erro e o pedido continua pendente', async () => {
+      const api = montarApi({ pendentes: [pedido('a')] })
+      api.estado.musicas = [musica('m1', 'Aquarela')]
+      renderFila()
+      const user = userEvent.setup()
+      await user.click(
+        await screen.findByRole('button', { name: 'Aprovar Música a com mídia da biblioteca' }),
+      )
+      await user.click(await screen.findByLabelText(/Aquarela/))
+      api.estado.proximaAcao = () =>
+        json(400, {
+          type: '/erros/validacao',
+          title: 'x',
+          status: 400,
+          errors: { MidiaId: ['A mídia não está disponível para tocar.'] },
+        })
+
+      await user.click(screen.getByRole('button', { name: 'Aprovar com esta mídia' }))
+
+      expect(await screen.findByText('A mídia não está disponível para tocar.')).toBeInTheDocument()
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
+    it('cancelar fecha o diálogo sem chamar a API; aprovar sem mídia continua mandando {}', async () => {
+      const api = montarApi({ pendentes: [pedido('a')] })
+      renderFila()
+      const user = userEvent.setup()
+      await user.click(
+        await screen.findByRole('button', { name: 'Aprovar Música a com mídia da biblioteca' }),
+      )
+      await user.click(screen.getByRole('button', { name: 'Cancelar' }))
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(api.acoes()).toEqual([])
+
+      await user.click(screen.getByRole('button', { name: 'Aprovar Música a' }))
+      await screen.findByRole('button', { name: 'Marcar Música a como tocado' })
+      expect(api.acoes()).toEqual([{ metodo: 'POST', caminho: '/pedidos/a/aprovar', corpo: {} }])
+    })
   })
 
   describe('rejeitar', () => {

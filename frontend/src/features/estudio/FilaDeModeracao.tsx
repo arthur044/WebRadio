@@ -5,6 +5,7 @@ import { descreverErro } from '../../shared/api/descreverErro'
 import type { PedidoDto } from '../../shared/api/types'
 import { formatarDataHoraBrasilia } from '../../shared/lib/timezone'
 import { tamanhoDoTexto } from '../pedidos/limites'
+import { AprovarComMidiaDialogo } from './AprovarComMidiaDialogo'
 import {
   moderarPedido,
   removerDaFila,
@@ -102,6 +103,7 @@ function ItemDaFila({
   const queryClient = useQueryClient()
   const [ocupado, setOcupado] = useState(false)
   const [rejeitando, setRejeitando] = useState(false)
+  const [aprovandoComMidia, setAprovandoComMidia] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
   const rejeitarRef = useRef<HTMLButtonElement>(null)
   const devolverFoco = useRef(false)
@@ -114,12 +116,13 @@ function ItemDaFila({
     }
   }, [rejeitando])
 
-  async function agir(acao: AcaoDeModeracao, motivo?: string) {
+  async function agir(acao: AcaoDeModeracao, motivo?: string, midiaId?: string) {
     setOcupado(true)
     setAviso(null)
     try {
-      await moderarPedido(pedido.id, acao, motivo)
+      await moderarPedido(pedido.id, acao, { motivo, midiaId })
       setRejeitando(false)
+      setAprovandoComMidia(false)
       void queryClient.invalidateQueries({ queryKey: ['pedidos-moderacao'] })
     } catch (err) {
       const descrito = descreverErro(err)
@@ -129,7 +132,7 @@ function ItemDaFila({
         onJaModerado(descrito.mensagem)
         return
       }
-      setAviso(descrito.campos.motivo ?? descrito.mensagem)
+      setAviso(descrito.campos.motivo ?? descrito.campos.midiaId ?? descrito.mensagem)
     } finally {
       setOcupado(false)
     }
@@ -151,7 +154,7 @@ function ItemDaFila({
         De {pedido.nomeOuvinte} · {formatarDataHoraBrasilia(pedido.criadoEmUtc)}
       </p>
       {pedido.mensagem && <p className="text-sm break-words">&ldquo;{pedido.mensagem}&rdquo;</p>}
-      {aviso && !rejeitando && (
+      {aviso && !rejeitando && !aprovandoComMidia && (
         <p role="alert" className="text-on-air text-sm">
           {aviso}
         </p>
@@ -177,6 +180,17 @@ function ItemDaFila({
           onConfirmar={(motivo) => void agir('rejeitar', motivo)}
           onCancelar={cancelarRejeicao}
         />
+      ) : aprovandoComMidia ? (
+        <AprovarComMidiaDialogo
+          pedido={pedido}
+          ocupado={ocupado}
+          erro={aviso}
+          onConfirmar={(midiaId) => void agir('aprovar', undefined, midiaId)}
+          onCancelar={() => {
+            setAprovandoComMidia(false)
+            setAviso(null)
+          }}
+        />
       ) : (
         <span className="mt-1 flex gap-2">
           <button
@@ -187,6 +201,18 @@ function ItemDaFila({
             onClick={() => void agir('aprovar')}
           >
             Aprovar
+          </button>
+          <button
+            type="button"
+            className={botao}
+            disabled={ocupado}
+            aria-label={`Aprovar ${pedido.tituloMusica} com mídia da biblioteca`}
+            onClick={() => {
+              setAviso(null)
+              setAprovandoComMidia(true)
+            }}
+          >
+            Aprovar com mídia
           </button>
           <button
             ref={rejeitarRef}

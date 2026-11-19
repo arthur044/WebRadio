@@ -107,6 +107,7 @@ describe('invalidarEstadoDaRadio', () => {
 
     expect(invalidateQueries.mock.calls.map(([a]) => a.queryKey[0]).sort()).toEqual([
       'grade-semana',
+      'midias',
       'pedidos-meus',
       'pedidos-moderacao',
       'programa-ao-vivo',

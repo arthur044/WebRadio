@@ -15,13 +15,23 @@ export function usePedidosDaFila(status: StatusDaFila) {
 
 export type AcaoDeModeracao = 'aprovar' | 'rejeitar' | 'marcar-tocado'
 
-/** `aprovar` leva `{}` (o `midiaId` só existe a partir do Épico 4); `rejeitar`, o motivo; `marcar-tocado`, nada. */
+/**
+ * `aprovar` leva `{}` (o locutor toca de fora e marca como tocado) ou `{ midiaId }` (a mídia da biblioteca que o playout
+ * toca, E4-D6); `rejeitar`, o motivo; `marcar-tocado`, nada.
+ */
 export async function moderarPedido(
   id: string,
   acao: AcaoDeModeracao,
-  motivo?: string,
+  extras: { motivo?: string; midiaId?: string } = {},
 ): Promise<void> {
-  const corpo = acao === 'aprovar' ? {} : acao === 'rejeitar' ? { motivo } : undefined
+  const corpo =
+    acao === 'aprovar'
+      ? extras.midiaId
+        ? { midiaId: extras.midiaId }
+        : {}
+      : acao === 'rejeitar'
+        ? { motivo: extras.motivo }
+        : undefined
   await apiFetch<void>(`/pedidos/${encodeURIComponent(id)}/${acao}`, {
     method: 'POST',
     body: corpo,
