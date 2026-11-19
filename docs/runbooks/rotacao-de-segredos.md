@@ -51,6 +51,14 @@ Todo segredo gerado é **base64url sem padding**:
 - Sem: apóstrofos, aspas, barras invertidas, dólar, backticks, ponto e vírgula, equals
 - Comprimento: **≥ 24 caracteres** (F18 do Épico 1, §5 do `05-seguranca-auditoria.md`)
 - Requisitos de composição: maiúscula + minúscula + dígito (aplicado em laço até sucesso)
+- **Nunca começa com `-`** (desde o #134): um segredo iniciado em `-` vira flag em CLI que o recebe por argumento (o `mc admin user add` do `minio-init` caiu assim, e o erro imprimiu parte do segredo). Os geradores (`gerar-segredos.sh` e `.ps1`) já regeneram esse valor, o `minio-init` recusa o segredo com mensagem fixa (sem imprimir o valor) e passa `--` antes dos argumentos do `mc`.
+
+#### Ambiente que já tem segredo iniciado em `-`
+
+O `minio-init` desse ambiente deixa de subir ("`minio_api_secret_key começa com '-'`"). Para consertar:
+1. Gere de novo só o segredo afetado (`minio_api_access_key`, `minio_api_secret_key`, `minio_worker_access_key` ou `minio_worker_secret_key`), com os scripts acima, até começar por letra, dígito ou `_`.
+2. Rode `docker compose up -d minio-init` para recriar o usuário de serviço com o valor novo (o `mc admin user add` atualiza a secret de um usuário existente) e reinicie `api` e `worker`.
+3. Se o erro antigo do `mc` (`flag provided but not defined: -...`) chegou a um log, regere o segredo citado, recrie o usuário e apague o log do contêiner (`docker logs <projeto>-minio-init-1 2>&1 | grep 'flag provided but not defined'` acha o caso).
 
 ### Usando `gerar-segredos.sh` ou `.ps1`
 
