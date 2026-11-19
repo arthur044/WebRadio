@@ -150,6 +150,12 @@ server {
             deny all;
         }
         client_max_body_size 250m;
+        # Upload de até 250 MiB direto ao MinIO (E4-F07): sem buffer no nginx (o contêiner é read_only e o tmpfs conta na memória), no máximo 3 conexões e 30 POST/min por IP, e um
+        # prazo por leitura de 60 s (upload lento de mobile) no lugar dos 10 s globais. A policy (15 min) e o tamanho máximo continuam sendo do MinIO.
+        proxy_request_buffering off;
+        limit_conn conn_storage_upload 3;
+        limit_req zone=storage_upload burst=5 nodelay;
+        client_body_timeout 60s;
         access_log /dev/stdout anon_sem_query;
         # $minio_upstream ANTES do rewrite: "break" para o módulo rewrite ali mesmo,
         # então um "set" escrito depois de "break" nunca roda (fica vazio → 500).
@@ -166,6 +172,9 @@ server {
     # catch-all /storage/ → 404 (S-A05: nunca lista o bucket).
     location ~ ^/storage/midia/(.+)$ {
         include /etc/nginx/security-headers.conf;
+        # Áudio enviado por usuários: nosniff já vem do include acima; a CSP soma (não substitui) uma camada que impede o navegador de executar qualquer coisa que escape da
+        # recodificação (E4-F07, S-A05).
+        add_header Content-Security-Policy "default-src 'none'; sandbox" always;
         if ($has_amz_signature = 0) {
             return 404;
         }
@@ -203,6 +212,8 @@ server {
 
     location /storage/ {
         include /etc/nginx/security-headers.conf;
+        # O log padrão traz a query inteira, e a da pré-assinada carrega a assinatura (X-Amz-Signature): /storage/ nunca a registra (E4-F07).
+        access_log /dev/stdout anon_sem_query;
         return 404;
     }
 }

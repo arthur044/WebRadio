@@ -82,17 +82,27 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
         return $"{assinada.Scheme}://{assinada.Authority}{prefixo}{assinada.AbsolutePath}{assinada.Query}";
     }
 
+    /// <summary>
+    /// Tamanho, tipo e ETag do objeto SEM <c>HEAD</c> de bucket: o <c>StatObject</c> do SDK faz HEAD no BUCKET antes, e o MinIO o autoriza como <c>s3:ListBucket</c> SEM <c>s3:prefix</c>,
+    /// que a política do <c>svc-worker</c> (ListBucket só com <c>20??/*</c>, S-A04) nega. Em vez disso, um <c>GET</c> de 1 byte (<c>Range: bytes=0-0</c>) numa URL pré-assinada INTERNA de 60 s:
+    /// precisa só de <c>s3:GetObject</c>, e o tamanho sai do <c>Content-Range</c>. Objeto ausente → <c>null</c>.
+    /// </summary>
     public async Task<InfoObjeto?> HeadAsync(string bucket, string chave, CancellationToken ct = default)
     {
-        try
-        {
-            var stat = await _interno.StatObjectAsync(new StatObjectArgs().WithBucket(bucket).WithObject(chave), ct);
-            return new InfoObjeto(stat.Size, stat.ContentType, stat.ETag);
-        }
-        catch (ObjectNotFoundException)
-        {
-            return null;
-        }
+        var url = await _interno.PresignedGetObjectAsync(new PresignedGetObjectArgs().WithBucket(bucket).WithObject(chave).WithExpiry(60));
+        using var pedido = new HttpRequestMessage(HttpMethod.Get, url);
+        pedido.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
+        using var tempo = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        tempo.CancelAfter(TimeSpan.FromSeconds(15));
+        using var resposta = await _http.SendAsync(pedido, HttpCompletionOption.ResponseHeadersRead, tempo.Token);
+        if (resposta.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        // 416: objeto vazio (o Range não cabe); o registro nunca guarda tamanho 0, mas não é erro de storage.
+        if (resposta.StatusCode != System.Net.HttpStatusCode.RequestedRangeNotSatisfiable) resposta.EnsureSuccessStatusCode();
+
+        long tamanho = 0;
+        if (resposta.Content.Headers.ContentRange?.Length is { } total) tamanho = total;
+        else if (resposta.StatusCode == System.Net.HttpStatusCode.OK) tamanho = resposta.Content.Headers.ContentLength ?? 0; // o servidor ignorou o Range
+        return new InfoObjeto(tamanho, resposta.Content.Headers.ContentType?.MediaType ?? "application/octet-stream", resposta.Headers.ETag?.Tag ?? "");
     }
 
     public async Task<long> BaixarAsync(string bucket, string chave, string etagEsperado, long limiteBytes, Stream destino, CancellationToken ct = default)
