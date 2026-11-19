@@ -2,7 +2,7 @@
 # E1-F13/F05 — migrator: efbundle self-contained (linux-musl-x64) + infra/migrator/entrypoint.sh.
 # Contexto de build = RAIZ do repositório:  docker build -f backend/Dockerfile.migrator -t webradio-migrator .
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0.403-alpine3.24@sha256:cc02b814237a76c4735fb6eeee87181597b5e56f2ce458a435e527674d91f4d7 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.404-alpine3.24@sha256:0294f285d062afacc8b5f6d7febb0cd4ee879320e5585fa15f2f4ebf1feb9ba7 AS build
 WORKDIR /src
 # Versão do dotnet-ef = a do EF Core em Directory.Packages.props.
 RUN dotnet tool install dotnet-ef --version 10.0.13 --tool-path /tools
@@ -11,7 +11,7 @@ RUN dotnet restore backend/src/WebRadio.Infrastructure -r linux-musl-x64 && \
     /tools/dotnet-ef migrations bundle --project backend/src/WebRadio.Infrastructure \
     --self-contained -r linux-musl-x64 --force -o /out/efbundle
 
-FROM mcr.microsoft.com/dotnet/runtime:10.0.14-alpine3.24@sha256:54d48f739ebffdef82388056d420af37ed39c722b8d5ee5dedca6878537c2737
+FROM mcr.microsoft.com/dotnet/runtime:10.0.15-alpine3.24@sha256:7518aaad9e4328001518006a7e8b3fcf6ce8f8816355574f7264c1fa0a0ce188
 RUN apk add --no-cache bash icu-libs
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 # O efbundle extrai libmsalruntime.so (Microsoft.Identity.Client.NativeInterop, transitivo de Microsoft.Data.SqlClient 6.1.7)
