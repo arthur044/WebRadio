@@ -24,6 +24,14 @@ public sealed class SanitizerFalso : IAudioSanitizer
 
     public (FormatoDeAudio Formato, long Duracao, long Tamanho, TimeSpan Timeout)? Ultima { get; private set; }
 
+    public int Varreduras { get; private set; }
+
+    public int LimparJobsAbandonados(TimeSpan idadeMinima)
+    {
+        Varreduras++;
+        return 0;
+    }
+
     public Task<IJobDeSanitizacao> CriarJobAsync(Guid midiaId, CancellationToken ct = default)
     {
         Jobs++;
@@ -76,6 +84,17 @@ public sealed class ScannerFalso : IMalwareScanner
 
     public int Chamadas { get; private set; }
 
+    /// <summary>Código da indisponibilidade que a sonda do ciclo devolve (<c>null</c> = pronto).</summary>
+    public string? Indisponivel { get; set; }
+
+    public int Sondas { get; private set; }
+
+    public Task<string?> ConferirDisponibilidadeAsync(CancellationToken ct = default)
+    {
+        Sondas++;
+        return Task.FromResult(Indisponivel);
+    }
+
     public Task<ResultadoScan> EscanearAsync(Stream conteudo, CancellationToken ct = default)
     {
         Chamadas++;
@@ -85,13 +104,20 @@ public sealed class ScannerFalso : IMalwareScanner
 
 public sealed class MarcadorFalso : IMarcadorDeDegradacao
 {
-    public string? Motivo { get; private set; }
+    private readonly HashSet<string> _ativos = [];
 
-    public bool Degradado_ => Motivo is not null;
+    /// <summary>Cada chamada de <c>Degradado</c>, na ordem: o marcador sai A CADA ciclo (E4-D13).</summary>
+    public List<string> Emitidos { get; } = [];
 
-    public void Degradado(string motivo) => Motivo = motivo;
+    public string? Motivo => _ativos.Count == 0 ? null : string.Join(',', _ativos.Order());
 
-    public void Normal() => Motivo = null;
+    public void Degradado(string motivo)
+    {
+        Emitidos.Add(motivo);
+        _ativos.Add(motivo);
+    }
+
+    public void Recuperado(string motivo) => _ativos.Remove(motivo);
 }
 
 /// <summary>E4-F05: o pipeline do Worker, etapa por etapa, com fakes do storage, do scanner e do sanitizer (o SQL e o MinIO reais ficam nos testes de Infrastructure).</summary>
@@ -182,7 +208,7 @@ public sealed class PipelineDeMidiaTests
         var u = c.Sanitizer.Ultima!.Value;
         Assert.Equal(FormatoDeAudio.Ogg, u.Formato);
         Assert.Equal(20 * 60, u.Duracao);
-        Assert.Equal(250L * 1024 * 1024, u.Tamanho);
+        Assert.Equal(DetectorDeFormato.TamanhoMaximoDaSaida(20 * 60), u.Tamanho); // o tamanho ESPERADO da saída (CBR 192 kbps), não os 250 MiB do tipo
         Assert.Equal(TimeSpan.FromSeconds(300), u.Timeout); // E4-D15: ¼ de 20 min
     }
 
@@ -305,27 +331,112 @@ public sealed class PipelineDeMidiaTests
     }
 
     [Fact]
-    public async Task Antivirus_indisponivel_quatro_ciclos_seguidos_deixa_Pendente_com_tentativa_zero_e_nunca_aprova_sem_scan()
+    public async Task Antivirus_fora_quatro_ciclos_seguidos_nao_captura_nem_baixa_deixa_Pendente_com_tentativa_zero_e_emite_o_marcador_a_cada_ciclo()
     {
         var c = new Cena();
         var m = c.Pendente();
-        c.Scanner.Erro = new ScannerIndisponivelException("clamd fora");
+        c.Scanner.Indisponivel = MotivosDeDegradacao.Scanner;
 
         for (var i = 0; i < 4; i++) Assert.Equal(PassoDoPipeline.InfraestruturaFora, await c.Pipeline.ProcessarProximaAsync(default));
 
         var r = c.Recarregar(m.Id);
         Assert.Equal(StatusSanitizacao.Pendente, r.StatusSanitizacao);
         Assert.Equal(0, r.TentativasSanitizacao);
-        Assert.Equal("clamd fora", c.Marcador.Motivo);
+        Assert.Null(r.EmAnaliseDesdeUtc);
+        Assert.Equal(["scanner", "scanner", "scanner", "scanner"], c.Marcador.Emitidos); // a CADA ciclo, não só na transição
+        Assert.Equal(0, c.Sanitizer.Jobs); // nenhum download (o job nem foi criado)
+        Assert.Equal(0, c.Scanner.Chamadas);
         Assert.Equal(0, c.Sanitizer.Execucoes);
         Assert.Empty(c.F.Storage.Puts);
 
         // Quando o clamd volta, o MESMO arquivo é processado.
-        c.Scanner.Erro = null;
+        c.Scanner.Indisponivel = null;
         c.SanitizerAprova();
         Assert.NotEqual(PassoDoPipeline.FilaVazia, await c.Pipeline.ProcessarProximaAsync(default));
         Assert.Equal(StatusSanitizacao.Aprovado, c.Recarregar(m.Id).StatusSanitizacao);
-        Assert.Null(c.Marcador.Motivo); // saiu de Degraded
+        Assert.Null(c.Marcador.Motivo); // WORKER_RECUPERADO
+    }
+
+    [Fact]
+    public async Task Com_a_fila_vazia_o_marcador_sai_mesmo_assim_e_a_assinatura_velha_tem_o_proprio_codigo()
+    {
+        var c = new Cena();
+        c.Scanner.Indisponivel = MotivosDeDegradacao.AssinaturaVelha;
+
+        Assert.Equal(PassoDoPipeline.InfraestruturaFora, await c.Pipeline.ProcessarProximaAsync(default));
+        Assert.Equal(["assinatura_velha"], c.Marcador.Emitidos);
+
+        c.Scanner.Indisponivel = null;
+        Assert.Equal(PassoDoPipeline.FilaVazia, await c.Pipeline.ProcessarProximaAsync(default));
+        Assert.Null(c.Marcador.Motivo);
+    }
+
+    [Fact]
+    public async Task Antivirus_que_cai_entre_a_sonda_e_o_scan_devolve_a_tentativa_e_usa_o_codigo_da_excecao()
+    {
+        var c = new Cena();
+        var m = c.Pendente();
+        c.Scanner.Erro = new ScannerIndisponivelException("clamd caiu", codigo: MotivosDeDegradacao.AssinaturaVelha);
+
+        Assert.Equal(PassoDoPipeline.InfraestruturaFora, await c.Pipeline.ProcessarProximaAsync(default));
+
+        var r = c.Recarregar(m.Id);
+        Assert.Equal(StatusSanitizacao.Pendente, r.StatusSanitizacao);
+        Assert.Equal(0, r.TentativasSanitizacao);
+        Assert.Equal(["assinatura_velha"], c.Marcador.Emitidos);
+    }
+
+    [Fact]
+    public async Task Sanitizer_que_nao_pega_o_job_e_infraestrutura_a_tentativa_volta()
+    {
+        var c = new Cena();
+        var m = c.Pendente();
+        c.Sanitizer.ErroNoJob = new SanitizerNaoIniciouException();
+
+        Assert.Equal(PassoDoPipeline.InfraestruturaFora, await c.Pipeline.ProcessarProximaAsync(default));
+
+        var r = c.Recarregar(m.Id);
+        Assert.Equal(StatusSanitizacao.Pendente, r.StatusSanitizacao);
+        Assert.Equal(0, r.TentativasSanitizacao);
+        Assert.Empty(c.F.Storage.Apagados);
+    }
+
+    [Fact]
+    public async Task Download_com_404_e_do_arquivo_e_com_403_ou_5xx_e_infraestrutura()
+    {
+        var c = new Cena();
+        var m = c.Pendente();
+        c.F.Storage.ErroNoBaixar = new HttpRequestException("nao achou", null, System.Net.HttpStatusCode.NotFound);
+        await c.Pipeline.ProcessarProximaAsync(default);
+        Assert.Equal(StatusSanitizacao.Rejeitado, c.Recarregar(m.Id).StatusSanitizacao);
+
+        var d = new Cena();
+        var n = d.Pendente();
+        d.F.Storage.ErroNoBaixar = new HttpRequestException("fora", null, System.Net.HttpStatusCode.ServiceUnavailable);
+        Assert.Equal(PassoDoPipeline.InfraestruturaFora, await d.Pipeline.ProcessarProximaAsync(default));
+        var r = d.Recarregar(n.Id);
+        Assert.Equal(StatusSanitizacao.Pendente, r.StatusSanitizacao);
+        Assert.Equal(0, r.TentativasSanitizacao);
+    }
+
+    [Fact]
+    public async Task O_teto_da_saida_e_o_tamanho_esperado_da_duracao_maxima_e_nao_os_250_MiB_do_tipo()
+    {
+        var c = new Cena();
+        c.Pendente(tipo: TipoMidia.Musica, titulo: "x");
+        c.SanitizerAprova(segundos: 100m);
+        await c.Pipeline.ProcessarProximaAsync(default);
+
+        Assert.Equal(DetectorDeFormato.TamanhoMaximoDaSaida(20 * 60), c.Sanitizer.Ultima!.Value.Tamanho);
+        Assert.InRange(c.Sanitizer.Ultima!.Value.Tamanho, 28_000_000, 31_000_000);
+    }
+
+    [Fact]
+    public async Task Cada_ciclo_varre_os_jobs_abandonados_antes_de_capturar()
+    {
+        var c = new Cena();
+        await c.Pipeline.ProcessarProximaAsync(default);
+        Assert.Equal(1, c.Sanitizer.Varreduras);
     }
 
     [Fact]

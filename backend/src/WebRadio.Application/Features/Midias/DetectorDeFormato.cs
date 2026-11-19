@@ -27,6 +27,16 @@ public static class DetectorDeFormato
     /// Duração coerente com os bytes LIDOS (S-B09): a saída é CBR 192 kbps (24.000 bytes por segundo), 5% de tolerância mais 2 KB de cabeçalho (Xing/ID3). Um sanitizer comprometido
     /// que declara 10 s e entrega 200 MB, ou o contrário, não passa.
     /// </summary>
+    /// <summary>
+    /// Teto da saída para uma duração máxima: CBR 192 kbps por <paramref name="duracaoMaximaSegundos"/> + 1 s (o <c>-t</c> do sanitizer corta em duração máxima + 1 s), com a mesma tolerância
+    /// de <see cref="DuracaoCoerenteComOsBytes"/>. É o <c>tamanhoMaxSaidaBytes</c> do <c>job.json</c> e o teto de leitura do <c>out.mp3</c>.
+    /// </summary>
+    public static long TamanhoMaximoDaSaida(long duracaoMaximaSegundos)
+    {
+        var esperado = (duracaoMaximaSegundos + 1) * 24_000d;
+        return (long)Math.Ceiling(esperado * 1.05 + 2048);
+    }
+
     public static bool DuracaoCoerenteComOsBytes(long bytesLidos, decimal duracaoSegundos)
     {
         var esperado = (double)duracaoSegundos * 24_000d;

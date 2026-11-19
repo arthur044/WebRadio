@@ -11,7 +11,8 @@ public enum FormatoDeAudio
 
 /// <summary>
 /// Códigos de <c>motivo</c> do sanitizer (lista fechada, 08 E4-D1). Nunca é texto do stderr do ffmpeg: o Worker troca o código pela mensagem fixa da biblioteca.
-/// <see cref="Timeout"/> e <see cref="ResultadoInvalido"/> são falha de PROCESSAMENTO; <see cref="SaidaGrandeDemais"/> (a saída bateu no -fs: música cortada) é do arquivo. Os outros (contam tentativa, E4-D13); os demais são do arquivo (rejeição determinística).
+/// <see cref="Timeout"/>, <see cref="ResultadoInvalido"/> e <see cref="JobInvalido"/> são falha de PROCESSAMENTO (contam tentativa, E4-D13); todos os outros, inclusive
+/// <see cref="SaidaGrandeDemais"/> (a saída bateu no -fs: música cortada), são do arquivo (rejeição determinística).
 /// </summary>
 public enum MotivoDaSanitizacao
 {
@@ -39,6 +40,12 @@ public sealed record ResultadoSanitizacao(bool Aprovado, MotivoDaSanitizacao? Mo
 public interface IAudioSanitizer
 {
     Task<IJobDeSanitizacao> CriarJobAsync(Guid midiaId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Apaga os diretórios de job mais velhos que <paramref name="idadeMinima"/>: um Worker morto no meio deixa o <c>in.bin</c> (o original hostil) no tmpfs, e reiniciar o contêiner não
+    /// esvazia o volume. Só o líder chama, com nenhum job em curso. Devolve quantos apagou.
+    /// </summary>
+    int LimparJobsAbandonados(TimeSpan idadeMinima);
 }
 
 public interface IJobDeSanitizacao : IAsyncDisposable
@@ -50,8 +57,9 @@ public interface IJobDeSanitizacao : IAsyncDisposable
     Stream AbrirOriginalParaLeitura();
 
     /// <summary>
-    /// Escreve <c>job.json</c> e <c>pronto</c>, espera o <c>result.json</c> até <paramref name="timeoutDoSanitizer"/> + 15 s e lê <c>out.mp3</c> e <c>result.json</c> sem seguir
-    /// symlink, uma vez só, com teto (<c>result.json</c> ≤ 4 KB, <c>out.mp3</c> ≤ o limite de saída). Passou do prazo: <see cref="MotivoDaSanitizacao.Timeout"/>.
+    /// Escreve <c>job.json</c> e <c>pronto</c>, espera o sanitizer pegar o job (<c>iniciado</c>; não pegou no prazo: <see cref="SanitizerNaoIniciouException"/>, infraestrutura), espera o
+    /// <c>result.json</c> até <paramref name="timeoutDoSanitizer"/> + 15 s CONTADOS DO <c>iniciado</c> e lê <c>out.mp3</c> e <c>result.json</c> sem seguir symlink e sem bloquear em FIFO,
+    /// uma vez só, com teto (<c>result.json</c> ≤ 4 KB, <c>out.mp3</c> ≤ o limite de saída). Passou do prazo: <see cref="MotivoDaSanitizacao.Timeout"/>.
     /// </summary>
     Task<ResultadoSanitizacao> ExecutarAsync(FormatoDeAudio formato, long duracaoMaximaSegundos, long tamanhoMaximoDaSaidaBytes, TimeSpan timeoutDoSanitizer, CancellationToken ct = default);
 }
@@ -62,6 +70,13 @@ public interface IJobDeSanitizacao : IAsyncDisposable
 public interface IMalwareScanner
 {
     Task<ResultadoScan> EscanearAsync(Stream conteudo, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sonda de disponibilidade que o Worker faz a CADA ciclo, ANTES de capturar item ou baixar arquivo (E4-D13): <c>null</c> = pronto; senão o código fechado de
+    /// <see cref="MotivosDeDegradacao"/> (<c>scanner</c>: o antivírus não responde; <c>assinatura_velha</c>: a base passou da idade máxima ou não traz data). Com o antivírus fora,
+    /// nenhum item é capturado e nada é baixado.
+    /// </summary>
+    Task<string?> ConferirDisponibilidadeAsync(CancellationToken ct = default);
 }
 
 public enum ResultadoScan
@@ -77,10 +92,31 @@ public enum ResultadoScan
 /// Falha de INFRAESTRUTURA do antivírus (E4-D13): <c>clamd</c> recusou a conexão ou não responde, ou a assinatura está velha (S-A02 item 6). O item volta a
 /// <c>Pendente</c> e a tentativa é devolvida: um scanner parado nunca rejeita arquivo legítimo nem aprova sem scan.
 /// </summary>
-public sealed class ScannerIndisponivelException(string motivo, Exception? inner = null) : Exception($"Antivírus indisponível: {motivo}", inner)
+public sealed class ScannerIndisponivelException(string motivo, Exception? inner = null, string codigo = MotivosDeDegradacao.Scanner) : Exception($"Antivírus indisponível: {motivo}", inner)
 {
     public string Motivo { get; } = motivo;
+
+    /// <summary>Um de <see cref="MotivosDeDegradacao"/>: é o que vai ao marcador <c>WORKER_DEGRADADO motivo=</c> (nunca o texto livre).</summary>
+    public string Codigo { get; } = codigo;
 }
+
+/// <summary>Lista FECHADA de <c>motivo</c> do marcador <c>WORKER_DEGRADADO</c> (08 E4-D13).</summary>
+public static class MotivosDeDegradacao
+{
+    /// <summary><c>clamd</c> recusa a conexão ou não responde.</summary>
+    public const string Scanner = "scanner";
+
+    /// <summary>Base de assinaturas com mais de <c>Seguranca:IdadeMaximaAssinaturaDias</c>, ou sem data legível (E4-D7).</summary>
+    public const string AssinaturaVelha = "assinatura_velha";
+
+    /// <summary>A limpeza de <c>midia/</c> abortou: a consulta falhou ou apagaria objetos demais (E4-D11, F09).</summary>
+    public const string TravaApagao = "trava_apagao";
+}
+
+/// <summary>
+/// O sanitizer não pegou o job (não escreveu <c>iniciado</c> no prazo): falha de INFRAESTRUTURA (E4-D13), nunca do arquivo. O item volta a <c>Pendente</c> com a tentativa devolvida.
+/// </summary>
+public sealed class SanitizerNaoIniciouException() : Exception("O sanitizer não iniciou o job no prazo.");
 
 /// <summary>
 /// Falha atribuível ao ARQUIVO (E4-D13): o <c>clamd</c> caiu ou deu erro no meio do <c>INSTREAM</c>, estourou o tempo do scan ou recusou o tamanho. Conta como

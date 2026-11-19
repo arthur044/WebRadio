@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using WebRadio.Application.Abstracoes;
@@ -95,6 +96,91 @@ public sealed class SanitizerPorVolumeTests : IDisposable
         Assert.ThrowsAny<IOException>(() => job.AbrirOriginalParaEscrita()); // CreateNew: nunca reaproveita (nem segue symlink) um in.bin que já existe
     }
 
+    private static void CriarFifo(string caminho)
+    {
+        using var p = System.Diagnostics.Process.Start("mkfifo", caminho)!;
+        p.WaitForExit();
+        Assert.Equal(0, p.ExitCode);
+    }
+
+    [Fact]
+    public async Task Out_mp3_que_e_um_FIFO_nao_trava_a_fila_e_vira_ResultadoInvalido()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var tarefa = Executar(d =>
+        {
+            File.WriteAllText(Path.Combine(d, "result.json"), """{"ok":true,"duracaoSegundos":12.5,"streamsAudio":1,"codec":"flac"}""");
+            CriarFifo(Path.Combine(d, "out.mp3"));
+        });
+
+        var (r, _) = await tarefa.WaitAsync(TimeSpan.FromSeconds(10)); // sem o O_NONBLOCK o open(2) ficaria preso para sempre
+
+        Assert.False(r.Aprovado);
+        Assert.Equal(MotivoDaSanitizacao.ResultadoInvalido, r.Motivo);
+    }
+
+    [Fact]
+    public async Task Result_json_que_e_um_FIFO_nao_trava_a_fila_e_vira_ResultadoInvalido()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var (r, _) = await Executar(d => CriarFifo(Path.Combine(d, "result.json"))).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(MotivoDaSanitizacao.ResultadoInvalido, r.Motivo);
+    }
+
+    [Fact]
+    public async Task Sanitizer_que_nao_escreve_iniciado_no_prazo_e_infraestrutura()
+    {
+        var sanitizer = new SanitizerPorVolume(
+            new SanitizerOptions { DiretorioDeJobs = _raiz, IntervaloDeLeitura = TimeSpan.FromMilliseconds(10), PrazoParaIniciar = TimeSpan.FromMilliseconds(150) },
+            NullLogger<SanitizerPorVolume>.Instance);
+        await using var job = await sanitizer.CriarJobAsync(Guid.NewGuid());
+
+        await Assert.ThrowsAsync<SanitizerNaoIniciouException>(() => job.ExecutarAsync(FormatoDeAudio.Mp3, 60, 1_000_000, TimeSpan.FromSeconds(60)));
+    }
+
+    [Fact]
+    public async Task O_prazo_do_job_conta_a_partir_do_iniciado_e_nao_do_pronto()
+    {
+        // Pega o job 0,6 s depois do `pronto` e responde 0,8 s depois do `iniciado`: 1,4 s desde o `pronto`, dentro do prazo de 1 s só se ele correr do `iniciado`.
+        var (r, _) = await Executar(d =>
+        {
+            Thread.Sleep(600);
+            File.WriteAllBytes(Path.Combine(d, "iniciado"), []);
+            Thread.Sleep(800);
+            Ok(d);
+        }, timeout: TimeSpan.FromSeconds(1), folga: TimeSpan.Zero);
+
+        Assert.True(r.Aprovado);
+    }
+
+    [Fact]
+    public async Task O_prazo_do_job_estoura_depois_do_iniciado_sem_resultado()
+    {
+        var (r, _) = await Executar(d => File.WriteAllBytes(Path.Combine(d, "iniciado"), []), timeout: TimeSpan.FromMilliseconds(300), folga: TimeSpan.Zero);
+
+        Assert.Equal(MotivoDaSanitizacao.Timeout, r.Motivo);
+    }
+
+    [Fact]
+    public void A_varredura_apaga_so_diretorio_de_job_abandonado()
+    {
+        var velho = Path.Combine(_raiz, Guid.NewGuid().ToString("D"));
+        var novo = Path.Combine(_raiz, Guid.NewGuid().ToString("D"));
+        var alheio = Path.Combine(_raiz, "nao-e-job");
+        foreach (var d in new[] { velho, novo, alheio }) Directory.CreateDirectory(d);
+        File.WriteAllBytes(Path.Combine(velho, "in.bin"), [1, 2, 3]);
+        Directory.SetLastWriteTimeUtc(velho, DateTime.UtcNow.AddHours(-2));
+        Directory.SetLastWriteTimeUtc(alheio, DateTime.UtcNow.AddHours(-2));
+
+        var apagados = Novo().LimparJobsAbandonados(TimeSpan.FromHours(1));
+
+        Assert.Equal(1, apagados);
+        Assert.False(Directory.Exists(velho));
+        Assert.True(Directory.Exists(novo));
+        Assert.True(Directory.Exists(alheio));
+    }
+
     [Fact]
     public async Task Resultado_ok_traz_a_saida_a_duracao_o_codec_e_os_streams()
     {
@@ -183,13 +269,6 @@ public sealed class SanitizerPorVolumeTests : IDisposable
     }
 
     [Fact]
-    public async Task Sem_result_json_dentro_do_prazo_e_Timeout()
-    {
-        var (r, _) = await Executar(_ => { }, timeout: TimeSpan.FromMilliseconds(200), folga: TimeSpan.FromMilliseconds(200));
-        Assert.Equal(MotivoDaSanitizacao.Timeout, r.Motivo);
-    }
-
-    [Fact]
     public async Task Descartar_o_job_apaga_o_diretorio_inteiro()
     {
         var id = Guid.NewGuid();
@@ -216,25 +295,52 @@ public sealed class SanitizerPorVolumeTests : IDisposable
 public class MarcadorDeDegradacaoTests
 {
     [Fact]
-    public void Degradado_escreve_o_marcador_com_o_motivo_e_Normal_o_apaga()
+    public void Degradado_escreve_o_marcador_com_os_motivos_ativos_e_Recuperado_o_apaga_quando_o_ultimo_sai()
     {
         var arquivo = Path.Combine(Path.GetTempPath(), "wr-deg-" + Guid.NewGuid().ToString("N"));
         var m = new MarcadorDeDegradacao(arquivo, NullLogger<MarcadorDeDegradacao>.Instance);
 
-        m.Degradado("clamd fora");
-        Assert.Equal("clamd fora", File.ReadAllText(arquivo));
-        m.Degradado("base velha");
-        Assert.Equal("base velha", File.ReadAllText(arquivo));
+        m.Degradado("scanner");
+        Assert.Equal("scanner", File.ReadAllText(arquivo));
+        m.Degradado("trava_apagao");
+        Assert.Equal("scanner,trava_apagao", File.ReadAllText(arquivo));
 
-        m.Normal();
+        m.Recuperado("scanner");
+        Assert.Equal("trava_apagao", File.ReadAllText(arquivo));
+        m.Recuperado("trava_apagao");
         Assert.False(File.Exists(arquivo));
+    }
+
+    [Fact]
+    public void O_log_sai_a_cada_chamada_com_motivo_de_lista_fechada_e_a_recuperacao_so_uma_vez()
+    {
+        var linhas = new List<(LogLevel Nivel, string Texto)>();
+        var m = new MarcadorDeDegradacao(null, new CapturaDeLog<MarcadorDeDegradacao>(linhas));
+
+        for (var i = 0; i < 3; i++) m.Degradado("scanner");
+        m.Recuperado("scanner");
+        m.Recuperado("scanner"); // já recuperado: nada
+
+        Assert.Equal(3, linhas.Count(l => l.Nivel == LogLevel.Error && l.Texto == "WORKER_DEGRADADO motivo=scanner"));
+        Assert.Single(linhas, l => l.Nivel == LogLevel.Information && l.Texto == "WORKER_RECUPERADO motivo=scanner");
+        Assert.Throws<ArgumentException>(() => m.Degradado("clamd fora de novo, texto livre"));
     }
 
     [Fact]
     public void Sem_arquivo_nao_quebra()
     {
         var m = new MarcadorDeDegradacao(null, NullLogger<MarcadorDeDegradacao>.Instance);
-        m.Degradado("x");
-        m.Normal();
+        m.Degradado("scanner");
+        m.Recuperado("scanner");
+    }
+
+    private sealed class CapturaDeLog<T>(List<(LogLevel, string)> linhas) : ILogger<T>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            linhas.Add((logLevel, formatter(state, exception)));
     }
 }

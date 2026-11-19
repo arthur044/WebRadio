@@ -11,12 +11,13 @@ public interface ICapturaDeMidia
 }
 
 /// <summary>
-/// "Health Degraded" do Worker (E4-D7, E4-D13): o antivírus está fora ou com a base velha, então a fila não anda. O Worker não tem HTTP: o marcador é um log <c>Error</c> e um arquivo
-/// que o operador (e o smoke) enxergam; o healthcheck do contêiner continua sendo o heartbeat.
+/// "Worker degradado" (E4-D7, E4-D11, E4-D13): o healthcheck do contêiner é o heartbeat, então o estado vive num log <c>Error</c> <c>WORKER_DEGRADADO motivo=&lt;código&gt;</c> emitido A CADA
+/// CICLO enquanto a condição durar (quem lê o log depois de um rotate ainda acha o marcador), mais um arquivo-marcador para o operador e o smoke; ao sair da condição, um
+/// <c>Information</c> <c>WORKER_RECUPERADO motivo=&lt;código&gt;</c>. O <c>motivo</c> é sempre um de <see cref="MotivosDeDegradacao"/>.
 /// </summary>
 public interface IMarcadorDeDegradacao
 {
     void Degradado(string motivo);
 
-    void Normal();
+    void Recuperado(string motivo);
 }

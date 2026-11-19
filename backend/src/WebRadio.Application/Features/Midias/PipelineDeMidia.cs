@@ -60,10 +60,28 @@ public sealed class PipelineDeMidia(
     public const string MotivoInfectado = "o antivírus detectou ameaça no arquivo";
     public const string MotivoSaidaInvalida = "a saída da sanitização não passou na conferência";
 
-    /// <summary>Um item. O laço do Worker continua enquanto vier <see cref="PassoDoPipeline.Processada"/>; com a infraestrutura fora ele PARA até o próximo tick (sem girar em falso).</summary>
+    /// <summary>Diretório de job mais velho que isto, com nenhum job em curso (um item por vez), é de um Worker que morreu no meio: o <c>in.bin</c> hostil não pode ficar no tmpfs.</summary>
+    public static readonly TimeSpan IdadeDeJobAbandonado = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// Um item. O laço do Worker continua enquanto vier <see cref="PassoDoPipeline.Processada"/>; com a infraestrutura fora ele PARA até o próximo tick (sem girar em falso).
+    /// ANTES de capturar item ou baixar arquivo, sonda o antivírus (E4-D13): fora ou com a base velha, não captura nada (o item segue <c>Pendente</c> com a tentativa intacta) e emite
+    /// <c>WORKER_DEGRADADO motivo=&lt;código&gt;</c> NESTE ciclo, mesmo com a fila vazia.
+    /// </summary>
     public async Task<PassoDoPipeline> ProcessarProximaAsync(CancellationToken ct)
     {
+        sanitizer.LimparJobsAbandonados(IdadeDeJobAbandonado);
         await LiberarLeasesVencidosAsync(ct);
+
+        if (await scanner.ConferirDisponibilidadeAsync(ct) is { } indisponivel)
+        {
+            degradacao.Degradado(indisponivel);
+            return PassoDoPipeline.InfraestruturaFora;
+        }
+
+        degradacao.Recuperado(MotivosDeDegradacao.Scanner);
+        degradacao.Recuperado(MotivosDeDegradacao.AssinaturaVelha);
+
         if (await captura.CapturarProximaAsync(ct) is not { } id) return PassoDoPipeline.FilaVazia;
 
         var midia = await db.ArquivosMidia.FirstAsync(m => m.Id == id, ct);
@@ -78,8 +96,15 @@ public sealed class PipelineDeMidia(
         }
         catch (ScannerIndisponivelException e)
         {
-            degradacao.Degradado(e.Motivo);
+            // O antivírus caiu ENTRE a sonda e o scan: mesma regra, com o código fechado.
+            degradacao.Degradado(e.Codigo);
             logger.LogError("PIPELINE_MIDIA_ANTIVIRUS_INDISPONIVEL midia {MidiaId}: {Motivo}. O arquivo continua Pendente e a tentativa foi devolvida.", midia.Id, e.Motivo);
+            await DevolverAsync(midia, ct);
+            passo = PassoDoPipeline.InfraestruturaFora;
+        }
+        catch (SanitizerNaoIniciouException)
+        {
+            logger.LogError("PIPELINE_MIDIA_SANITIZER_NAO_INICIOU midia {MidiaId}: o sanitizer não pegou o job; o item volta a Pendente e a tentativa é devolvida.", midia.Id);
             await DevolverAsync(midia, ct);
             passo = PassoDoPipeline.InfraestruturaFora;
         }
@@ -105,16 +130,23 @@ public sealed class PipelineDeMidia(
         var o = opcoes.Value;
         var agora = clock.UtcNow;
         var emAnalise = await db.ArquivosMidia.Where(m => m.StatusSanitizacao == StatusSanitizacao.EmAnalise).ToListAsync(ct);
-        var mudou = false;
         foreach (var m in emAnalise.Where(m => m.EmAnaliseDesdeUtc is { } desde && agora - desde >= o.LeaseDoPipeline(m.TipoMidia, TimeoutDoScanSegundos)))
         {
-            m.LiberarLeaseExpirado(agora, o.LeaseDoPipeline(m.TipoMidia, TimeoutDoScanSegundos));
-            logger.LogWarning("PIPELINE_MIDIA_LEASE_VENCIDO midia {MidiaId} tentativas {Tentativas}", m.Id, m.TentativasSanitizacao);
-            if (m.StatusSanitizacao == StatusSanitizacao.Rejeitado) Notificar(m);
-            mudou = true;
+            // Um item por SaveChanges: a leitura acima não tem lock, então com dois Workers a corrida cai no RowVersion. Perder a corrida é "outro Worker já liberou" (Atlas), não erro.
+            try
+            {
+                m.LiberarLeaseExpirado(agora, o.LeaseDoPipeline(m.TipoMidia, TimeoutDoScanSegundos));
+                logger.LogWarning("PIPELINE_MIDIA_LEASE_VENCIDO midia {MidiaId} tentativas {Tentativas}", m.Id, m.TentativasSanitizacao);
+                var rejeitada = m.StatusSanitizacao == StatusSanitizacao.Rejeitado;
+                if (rejeitada) Notificar(m);
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                logger.LogDebug("PIPELINE_MIDIA_LEASE_JA_LIBERADO midia {MidiaId}: outro Worker liberou antes", m.Id);
+                db.ArquivosMidia.Entry(m).State = EntityState.Detached;
+            }
         }
-
-        if (mudou) await db.SaveChangesAsync(ct);
     }
 
     private async Task ProcessarAsync(ArquivoMidia midia, CancellationToken ct)
@@ -154,6 +186,12 @@ public sealed class PipelineDeMidia(
             await RejeitarAsync(midia, MensagemDo(MotivoDaSanitizacao.SaidaGrandeDemais), apagarObjeto: true, ct);
             return;
         }
+        catch (HttpRequestException e) when (e.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            // O objeto sumiu entre o HEAD e o GET (limpeza de órfão, DELETE concorrente): é do ARQUIVO. 403, 5xx e falha de conexão seguem como infraestrutura (E4-D13).
+            await RejeitarAsync(midia, MotivoArquivoAusente, apagarObjeto: false, ct);
+            return;
+        }
 
         // 3) hash do original (auditoria, não único) e magic bytes; só eles decidem o demuxer. Formato desconhecido: Rejeitado SEM chamar antivírus nem ffprobe.
         byte[] inicio = new byte[DetectorDeFormato.BytesNecessarios];
@@ -176,7 +214,6 @@ public sealed class PipelineDeMidia(
         // 4) ClamAV no ORIGINAL, antes do sanitizer (S-A02). Indisponível/ERROR sobem como exceção e são tratadas fora (infra × arquivo, E4-D13).
         ResultadoScan scan;
         await using (var leitura = job.AbrirOriginalParaLeitura()) scan = await scanner.EscanearAsync(leitura, ct);
-        degradacao.Normal();
         switch (scan)
         {
             case ResultadoScan.Infectado:
@@ -195,7 +232,8 @@ public sealed class PipelineDeMidia(
 
         // 5) sanitizer: o diretório do job, job.json e `pronto`; o resultado volta lido UMA vez, sem symlink e com teto.
         var timeout = o.TimeoutDoSanitizer(midia.TipoMidia);
-        var tamanhoMaxSaida = limite.TamanhoMaximoBytes;
+        // O teto de leitura e o -fs do sanitizer são o tamanho ESPERADO da saída (CBR 192 kbps pela duração máxima + 1 s do -t), não os 250 MiB do tipo (Sentinel B1).
+        var tamanhoMaxSaida = Math.Min(limite.TamanhoMaximoBytes, DetectorDeFormato.TamanhoMaximoDaSaida((long)limite.DuracaoMaxima.TotalSeconds));
         var resultado = await job.ExecutarAsync(formato, (long)limite.DuracaoMaxima.TotalSeconds, tamanhoMaxSaida, timeout, ct);
         if (!resultado.Aprovado)
         {
