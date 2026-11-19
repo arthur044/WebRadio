@@ -156,6 +156,17 @@ if grep -q -F '\n' <<<"$EVENTO"; then falha "caractere de controle no título do
 confere "artista da API no evento" grep -q -F '"artista":"Banda da API"' <<<"$EVENTO"
 confere "ocorridoEmUtc em ISO-8601 com Z" grep -q -E '"ocorridoEmUtc":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"' <<<"$EVENTO"
 
+echo "== X-Playout-Instancia (E4-D5) e a rotação vinda da API (E4-D4)"
+INSTANCIAS="$(docker logs "$P-api" 2>&1 | grep -o 'PROXIMA auth=ok instancia=[^ ]*' | sort -u)"
+confere "toda proxima leva o cabeçalho em UUID (nenhuma INVALIDA)" test -n "$INSTANCIAS" -a -z "$(grep -F INVALIDA <<<"$INSTANCIAS" || true)"
+confere "é UM só UUID por boot do Liquidsoap" test "$(wc -l <<<"$INSTANCIAS")" = 1
+api rotacao
+confere "a faixa da rotação (sem pedido) é buscada no MinIO interno" espera_log "$P-api" "MIDIA servida" 40
+confere "o evento da rotação leva o midiaId da biblioteca e NÃO leva pedidoId" espera_log "$P-api" '"midiaId":"44444444-4444-4444-4444-444444444444"' 40
+EVENTO_ROTACAO="$(docker logs "$P-api" 2>&1 | grep -F '44444444-4444-4444-4444-444444444444' | grep EVENTO | tail -n1)"
+confere "sem pedidoId no evento da rotação" test -z "$(grep -F '"pedidoId"' <<<"$EVENTO_ROTACAO" || true)"
+confere "título e artista da rotação no evento" grep -q -F '"artista":"Biblioteca"' <<<"$EVENTO_ROTACAO"
+
 echo "== metadado_seguro: a tabela de casos (S-A09, igual ao MetadadoSeguro do servidor)"
 sed -n '/^# >>> metadado_seguro/,/^# <<< metadado_seguro/p' infra/liquidsoap/radio.liq > "$TMP/metadado.liq"
 cat >> "$TMP/metadado.liq" <<'LIQ'

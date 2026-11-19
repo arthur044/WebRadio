@@ -39,6 +39,14 @@ public sealed class StorageDeMidia : IObjectStorage
         return Task.FromResult($"http://localhost/storage/{bucket}/{chave}?X-Amz-Signature=abc");
     }
 
+    public List<(string Bucket, string Chave, TimeSpan Validade)> Internas { get; } = [];
+
+    public Task<string> UrlGetPreAssinadaInternaAsync(string bucket, string chave, TimeSpan validade, CancellationToken ct = default)
+    {
+        Internas.Add((bucket, chave, validade));
+        return Task.FromResult($"http://minio:9000/{bucket}/{chave}?X-Amz-Signature=abc");
+    }
+
     public async Task<long> BaixarAsync(string bucket, string chave, string etagEsperado, long limiteBytes, Stream destino, CancellationToken ct = default)
     {
         if (ErroNoBaixar is not null) throw ErroNoBaixar;

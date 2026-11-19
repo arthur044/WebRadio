@@ -21,7 +21,7 @@
 ## Fora do Épico 3
 
 - **Pedido tocado pelo playout** (`fila_api`, `GET /internal/playout/proxima` devolvendo um pedido com mídia): depende da biblioteca de mídia, que é do **Épico 4**. Neste épico o `midiaId` do `aprovar` continua no contrato, mas nenhuma mídia `Aprovado` existe, então qualquer `midiaId` responde **400**. O locutor toca o pedido manualmente e marca `Tocado`. O `proxima` continua respondendo **204**.
-- **Relatório de mais tocadas** (`rel.usp_MaisTocadas`, rascunho em `docs/rascunho-relatorio-mais-tocadas.md`): precisa de `midia.Reproducao`, que exige `MidiaId`. Vai para o Épico 4.
+- **Relatório de mais tocadas** (`rel.usp_MaisTocadas`, o rascunho virou a procedure do E4-A02, seção 9.1 do `03`): precisa de `midia.Reproducao`, que exige `MidiaId`. Vai para o Épico 4.
 - **Sanitizer isolado para imagens**: a recodificação fica na API neste épico (S-B10) e muda para o `sanitizer` no Épico 4.
 - **Notificação ao ouvinte fora do site** (e-mail, push): fora da v1.
 

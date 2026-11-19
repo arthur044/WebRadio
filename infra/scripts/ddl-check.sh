@@ -72,12 +72,15 @@ if [[ "$linhas_03" -lt 100 || "$linhas_ef" -lt 100 ]]; then
 fi
 
 if diff -u --label "03-schema-sqlserver.sql" --label "migrations do EF" "$TMP/03.cat" "$TMP/ef.cat" > "$TMP/diff.txt"; then
-  echo "ddl-check: o 03 e as migrations do EF geram o mesmo schema ($linhas_03 itens: colunas, índices, FKs, CHECKs e DEFAULTs)."
+  echo "ddl-check: o 03 e as migrations do EF geram o mesmo schema ($linhas_03 itens: colunas, índices, FKs, CHECKs, DEFAULTs, schemas e procedures)."
   resultado="OK — o 03 e as migrations geram o mesmo schema ($linhas_03 itens comparados)."
   rc=0
 else
   cat "$TMP/diff.txt"
   echo "FALHA: o 03 e as migrations do EF divergem (acima)." >&2
+  if grep -q '^[-+]PROC|' "$TMP/diff.txt"; then
+    echo "Dica: uma PROC| diferente é o corpo (ou os parâmetros) da procedure: compare o texto no 03 (seção 9.1) com o da migration; os dois têm de ser iguais." >&2
+  fi
   resultado="FALHA — divergência entre o 03 e as migrations do EF."
   rc=1
 fi

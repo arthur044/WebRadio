@@ -12,6 +12,11 @@ public interface IObjectStorage
     /// <summary>GET pré-assinado pelo cliente público (S-A03): assina sem o prefixo /storage e o insere depois.</summary>
     Task<string> UrlGetPreAssinadaAsync(string bucket, string chave, TimeSpan validade, string? contentType = null, string? contentDisposition = null, CancellationToken ct = default);
 
+    /// <summary>
+    /// URL pré-assinada de GET para o host INTERNO (<c>http://minio:9000/...</c>): quem a usa (o Liquidsoap, E4-F08) fala com o MinIO direto, sem passar pelo nginx. Nunca é entregue a um navegador.
+    /// </summary>
+    Task<string> UrlGetPreAssinadaInternaAsync(string bucket, string chave, TimeSpan validade, CancellationToken ct = default) => throw new NotSupportedException();
+
     /// <summary>HEAD do objeto; null se não existir.</summary>
     Task<InfoObjeto?> HeadAsync(string bucket, string chave, CancellationToken ct = default);
 

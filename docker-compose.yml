@@ -371,7 +371,9 @@ services:
     tmpfs: ["/tmp:uid=100,gid=101"]
     # Só a rede playout: o Liquidsoap NÃO alcança sqlserver nem redis (DoD da F16).
     networks: [playout]
-    mem_limit: 256m
+    # 512m, medido: o boot do Liquidsoap (a stdlib e as bibliotecas do ffmpeg) chega a ~420 MiB de pico; sem swap, 448m passa e 384m ou menos é morto (exit 137, sem log), e com
+    # 256m só sobrevivia quando o runner deixava o contêiner usar swap: a causa do "Restarting (137)" intermitente do Compose do CI (#129, #112, D3).
+    mem_limit: 512m
     pids_limit: 100
     depends_on:
       icecast: { condition: service_healthy }

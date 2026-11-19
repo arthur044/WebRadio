@@ -24,6 +24,7 @@ public class PlayoutEndpointsTests
     private const string Eventos = "/api/v1/internal/playout/eventos";
     private static readonly string Token = new('a', 64);
     private static readonly string TokenAntigo = new('b', 64);
+    private static readonly string Instancia = "6f1d2c3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f";
 
     private static (ApiFactory F, HttpClient C) Novo(Action<ApiFactory>? configurar = null)
     {
@@ -36,6 +37,7 @@ public class PlayoutEndpointsTests
     {
         var req = new HttpRequestMessage(metodo, url);
         req.Headers.Add("X-Test-LocalPort", porta.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        req.Headers.Add("X-Playout-Instancia", Instancia); // obrigatório na proxima (E4-D5)
         if (token is not null) req.Headers.TryAddWithoutValidation("Authorization", $"{esquema} {token}");
         if (corpo is not null) req.Content = corpo as HttpContent ?? JsonContent.Create(corpo);
         return req;
@@ -142,6 +144,26 @@ public class PlayoutEndpointsTests
     }
 
     // ---- comportamento do esqueleto ----
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("nao-e-uuid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    [InlineData("6f1d2c3e4b5a4c7d8e9f0a1b2c3d4e5f")]
+    [InlineData("6f1d2c3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f; drop table")]
+    public async Task Proxima_exige_o_X_Playout_Instancia_em_UUID_senao_400_sem_ecoar_o_valor(string? cabecalho)
+    {
+        var (_, c) = Novo();
+        var req = Req(HttpMethod.Get, Proxima, token: Token);
+        req.Headers.Remove("X-Playout-Instancia");
+        if (cabecalho is not null) req.Headers.TryAddWithoutValidation("X-Playout-Instancia", cabecalho);
+
+        var r = await c.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        if (!string.IsNullOrEmpty(cabecalho)) Assert.DoesNotContain(cabecalho, await r.Content.ReadAsStringAsync());
+    }
 
     [Fact]
     public async Task Proxima_responde_204_sem_faixa_e_o_bearer_e_case_insensitive_no_esquema()
