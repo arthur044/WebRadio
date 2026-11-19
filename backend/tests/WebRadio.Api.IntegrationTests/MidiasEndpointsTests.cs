@@ -395,4 +395,32 @@ public class MidiasEndpointsTests
         Assert.False((await Json(r)).GetProperty("ativo").GetBoolean());
         Assert.Equal(HttpStatusCode.NotFound, (await Enviar(c.C, HttpMethod.Delete, $"{Rota}/{Guid.NewGuid()}", admin)).StatusCode);
     }
+
+    [Fact]
+    public async Task Dono_desiste_do_envio_em_AguardandoUpload_204_a_midia_fica_Rejeitada_cancelada_e_o_concluir_depois_e_409()
+    {
+        var c = NovaCena();
+        var id = Semear(c, StatusSanitizacao.AguardandoUpload, tipo: TipoMidia.Vinheta, titulo: "x");
+        var dono = await TokenDe(c.C, "locutor@example.com");
+
+        Assert.Equal(HttpStatusCode.NoContent, (await Enviar(c.C, HttpMethod.Delete, $"{Rota}/{id}", dono)).StatusCode);
+
+        var visto = await Json(await Enviar(c.C, HttpMethod.Get, $"{Rota}/{id}", dono));
+        Assert.Equal("Rejeitado", visto.GetProperty("statusSanitizacao").GetString());
+        Assert.True(visto.GetProperty("cancelado").GetBoolean());
+        Assert.Equal("Envio cancelado.", visto.GetProperty("motivoRejeicao").GetString());
+        Assert.Equal(HttpStatusCode.Conflict, (await Post(c.C, $"{Rota}/{id}/concluir", dono, "{}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Outro_locutor_nao_cancela_o_envio_alheio_e_o_dono_nao_apaga_mais_nada()
+    {
+        var c = NovaCena();
+        c.F.CriarUsuario("outro@example.com", Role.Locutor);
+        var emAguardo = Semear(c, StatusSanitizacao.AguardandoUpload, tipo: TipoMidia.Vinheta, titulo: "x");
+        var pendente = Semear(c, StatusSanitizacao.Pendente, tipo: TipoMidia.Vinheta, titulo: "y");
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await Enviar(c.C, HttpMethod.Delete, $"{Rota}/{emAguardo}", await TokenDe(c.C, "outro@example.com"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await Enviar(c.C, HttpMethod.Delete, $"{Rota}/{pendente}", await TokenDe(c.C, "locutor@example.com"))).StatusCode);
+    }
 }

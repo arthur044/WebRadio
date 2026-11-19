@@ -6,7 +6,7 @@ namespace WebRadio.Application.Features.Midias;
 
 /// <summary>
 /// 02 §6: <c>{ id, nomeOriginal, titulo, artista, tipoMidia, mimeType, tamanhoBytes, duracaoSegundos, statusSanitizacao, motivoRejeicao, dataUploadUtc,
-/// ativo, enviadoPorNome }</c>. Os hashes saem em hex só para o Admin (nulos para o Locutor). <c>Versao</c> (RowVersion em base64, o valor do <c>ETag</c>)
+/// ativo, enviadoPorNome, podeEditar, cancelado }</c> (<c>cancelado</c> = <c>Rejeitado</c> com <c>MotivosRejeicao.EnvioCancelado</c>). Os hashes saem em hex só para o Admin (nulos para o Locutor). <c>Versao</c> (RowVersion em base64, o valor do <c>ETag</c>)
 /// fica FORA do JSON.
 /// </summary>
 public sealed record MidiaDto(
@@ -26,6 +26,7 @@ public sealed record MidiaDto(
     string? HashSha256,
     string? HashOriginalSha256,
     bool PodeEditar,
+    bool Cancelado,
     [property: JsonIgnore] string Versao)
 {
     // Hashes, nome do arquivo e do autor não vão para o log com {Obj}.
@@ -43,6 +44,7 @@ public sealed record MidiaDto(
             admin && m.HashSHA256 is { } h ? Convert.ToHexStringLower(h) : null,
             admin && m.HashOriginalSHA256 is { } ho ? Convert.ToHexStringLower(ho) : null,
             PodeEditarA(m, admin, usuarioId),
+            m.Cancelado,
             Convert.ToBase64String(m.RowVersion));
 }
 

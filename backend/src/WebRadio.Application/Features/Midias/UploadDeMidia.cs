@@ -77,17 +77,26 @@ public sealed class LimiteDeUploadDeMidia(IRequestThrottle contadores, IIpHasher
 
     public static string ChaveOpaca(IIpHasher hasher, Guid usuario) => hasher.ChaveOpaca("midiaup:" + usuario.ToString("N"));
 
-    /// <summary>Conta a tentativa. Lança <see cref="LimiteExcedidoException"/> acima do limite; <c>true</c> = o Redis não respondeu (fallback SQL).</summary>
-    public async Task<bool> RegistrarAsync(Guid usuario, CancellationToken ct)
+    public static string ChaveDosBytes(IIpHasher hasher, Guid usuario) => hasher.ChaveOpaca("midiabytes:" + usuario.ToString("N"));
+
+    /// <summary>
+    /// Conta a tentativa (20/h) e soma os bytes declarados no orçamento por hora (08 v1.5). Lança <see cref="LimiteExcedidoException"/> acima de qualquer um dos dois; <c>true</c> = o Redis não
+    /// respondeu (fallback SQL). Um <c>POST</c> recusado por bytes devolve os bytes que somou (só a tentativa conta); o CANCELAMENTO do envio nunca devolve nada.
+    /// </summary>
+    public async Task<bool> RegistrarAsync(Guid usuario, long tamanhoBytes, CancellationToken ct)
     {
         var permissao = _disjuntor.Pedir();
         if (permissao == PermissaoDoRedis.Evitar) return true;
 
         var chave = $"throttle:midiaup:{ChaveOpaca(hasher, usuario)}";
+        var chaveBytes = $"throttle:{ChaveDosBytes(hasher, usuario)}";
+        var o = opcoes.Value;
         long n;
+        long? bytes = null;
         try
         {
             n = await contadores.IncrementarAsync(chave, Janela, ct);
+            if (n <= o.UploadsPorHora) bytes = await contadores.IncrementarPorAsync(chaveBytes, tamanhoBytes, Janela, ct);
         }
         catch (OperationCanceledException)
         {
@@ -97,14 +106,33 @@ public sealed class LimiteDeUploadDeMidia(IRequestThrottle contadores, IIpHasher
         catch (Exception e)
         {
             if (_disjuntor.Falha(permissao))
-                logger.LogWarning("MIDIA_UPLOAD_REDIS_INDISPONIVEL ({Tipo}): limite de 20/h no SQL por {Segundos}s (modo degradado)", e.GetType().Name, DisjuntorDoRedis.TempoAberto.TotalSeconds);
+                logger.LogWarning("MIDIA_UPLOAD_REDIS_INDISPONIVEL ({Tipo}): limites de 20/h e de bytes no SQL por {Segundos}s (modo degradado)", e.GetType().Name, DisjuntorDoRedis.TempoAberto.TotalSeconds);
             return true;
         }
 
         _disjuntor.Sucesso(permissao);
-        if (n <= opcoes.Value.UploadsPorHora) return false;
-        var restante = await contadores.TempoRestanteAsync(chave, ct);
-        throw new LimiteExcedidoException(restante is { } r && r > TimeSpan.Zero ? r : Janela);
+        if (n > o.UploadsPorHora)
+        {
+            var restante = await contadores.TempoRestanteAsync(chave, ct);
+            throw new LimiteExcedidoException(restante is { } r && r > TimeSpan.Zero ? r : Janela);
+        }
+
+        if (bytes!.Value > o.BytesDeclaradosPorHora)
+        {
+            try
+            {
+                await contadores.IncrementarPorAsync(chaveBytes, -tamanhoBytes, Janela, ct); // a tentativa recusada não come o orçamento
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                logger.LogWarning("MIDIA_UPLOAD_BYTES_NAO_DEVOLVIDOS ({Tipo})", e.GetType().Name);
+            }
+
+            var restante = await contadores.TempoRestanteAsync(chaveBytes, ct);
+            throw new LimiteExcedidoException(restante is { } r && r > TimeSpan.Zero ? r : Janela);
+        }
+
+        return false;
     }
 }
 
@@ -133,7 +161,7 @@ public sealed class IniciarUploadHandler(
     public async Task<UploadIniciadoDto> Handle(IniciarUploadCommand cmd, CancellationToken ct)
     {
         var destino = storage ?? throw new InvalidOperationException("Storage não configurado.");
-        var usarSql = await limite.RegistrarAsync(cmd.UsuarioId, ct);
+        var usarSql = await limite.RegistrarAsync(cmd.UsuarioId, cmd.TamanhoBytes, ct);
         var o = opcoes.Value;
         var agora = clock.UtcNow;
 
@@ -159,6 +187,19 @@ public sealed class IniciarUploadHandler(
                         .OrderBy(m => m.DataUploadUtc).Select(m => m.DataUploadUtc).ToListAsync(ct2);
                     if (datas.Count >= o.UploadsPorHora)
                         throw new LimiteExcedidoException(TimeSpan.FromTicks(Math.Max(TimeSpan.TicksPerSecond, (datas[datas.Count - o.UploadsPorHora] + LimiteDeUploadDeMidia.Janela - agora).Ticks)));
+
+                    // Orçamento de bytes: soma as linhas da hora, INCLUSIVE as canceladas (o cancelamento não devolve). O Retry-After é quando as mais antigas saem da janela o bastante para caber.
+                    var linhas = await db.ArquivosMidia.Where(m => m.EnviadoPorUsuarioId == cmd.UsuarioId && m.DataUploadUtc > corte)
+                        .OrderBy(m => m.DataUploadUtc).Select(m => new { m.DataUploadUtc, m.TamanhoBytes }).ToListAsync(ct2);
+                    var soma = linhas.Sum(l => l.TamanhoBytes) + cmd.TamanhoBytes;
+                    if (soma > o.BytesDeclaradosPorHora)
+                    {
+                        var i = 0;
+                        while (i < linhas.Count && soma > o.BytesDeclaradosPorHora) soma -= linhas[i++].TamanhoBytes;
+                        throw new LimiteExcedidoException(i == 0
+                            ? LimiteDeUploadDeMidia.Janela
+                            : TimeSpan.FromTicks(Math.Max(TimeSpan.TicksPerSecond, (linhas[i - 1].DataUploadUtc + LimiteDeUploadDeMidia.Janela - agora).Ticks)));
+                    }
                 }
 
                 db.ArquivosMidia.Add(midia);
@@ -219,6 +260,8 @@ public sealed class ConcluirUploadHandler(IRadioDbContext db, IClock clock, IObj
         var destino = storage ?? throw new InvalidOperationException("Storage não configurado.");
         var midia = await db.ArquivosMidia.FirstOrDefaultAsync(m => m.Id == cmd.MidiaId, ct);
         if (midia is null || (midia.EnviadoPorUsuarioId != cmd.UsuarioId && !cmd.EhAdmin)) throw new NaoEncontradoException("Mídia");
+        // Cancelada, vencida ou já concluída: 409 (02 §6), sem nem olhar o storage. A corrida com o cancelamento cai no RowVersion, abaixo.
+        if (midia.StatusSanitizacao != StatusSanitizacao.AguardandoUpload) throw new TransicaoInvalidaException("O envio não está mais aguardando o arquivo.");
 
         var info = await destino.HeadAsync(midia.Bucket, midia.ChaveStorage, ct)
             ?? throw Invalido("O arquivo ainda não chegou ao storage. Envie o arquivo antes de concluir.");
@@ -227,7 +270,15 @@ public sealed class ConcluirUploadHandler(IRadioDbContext db, IClock clock, IObj
         if (string.IsNullOrEmpty(etag)) throw Invalido("O storage não devolveu o ETag do arquivo.");
 
         midia.ConcluirUpload(info.TamanhoBytes, etag, clock.UtcNow);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // O dono cancelou (ou o Worker mexeu) entre a leitura e o UPDATE: exatamente um vence, o outro recebe 409.
+            throw new TransicaoInvalidaException("O envio foi cancelado ou mudou de status enquanto era concluído.");
+        }
     }
 
     private static ValidationException Invalido(string mensagem) => new([new FluentValidation.Results.ValidationFailure("midiaId", mensagem)]);

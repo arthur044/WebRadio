@@ -114,6 +114,91 @@ public sealed class GerirMidiaTests
         await Assert.ThrowsAsync<VersaoDesatualizadaException>(() => f.Editar.Handle(Patch(m, titulo: "x", versao: errada, admin: true, usuario: Guid.NewGuid()), default)); // Admin: 412
     }
 
+    // ---- desistência do envio (08 v1.5) ----
+
+    private static ArquivoMidia Aguardando(MidiasFixture f, Guid? dono = null) => f.Semear(StatusSanitizacao.AguardandoUpload, usuario: dono);
+
+    [Fact]
+    public async Task Dono_em_AguardandoUpload_cancela_a_mida_fica_Rejeitada_com_a_constante_o_log_sai_e_o_slot_volta()
+    {
+        var f = new MidiasFixture();
+        for (var i = 0; i < 4; i++) f.Semear(StatusSanitizacao.Pendente);
+        var m = Aguardando(f);
+        await Assert.ThrowsAsync<LimiteExcedidoException>(() => f.Iniciar.Handle(f.Comando(), default)); // 5 abertos
+
+        var r = await f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, f.Usuario, EhAdmin: false), default);
+
+        Assert.True(r.Excluida);
+        var salva = f.Db.ArquivosMidia.Single(x => x.Id == m.Id); // a linha FICA
+        Assert.Equal(StatusSanitizacao.Rejeitado, salva.StatusSanitizacao);
+        Assert.Equal(MotivosRejeicao.EnvioCancelado, salva.MotivoRejeicao);
+        Assert.True(salva.Cancelado);
+        Assert.True(MidiaDto.De(salva, null, admin: false, f.Usuario).Cancelado);
+        var log = Assert.Single(f.Logs.Linhas, l => l.StartsWith("MIDIA_ENVIO_CANCELADO"));
+        Assert.Contains(m.Id.ToString(), log);
+        Assert.DoesNotContain("a.mp3", log); // nunca o nome do arquivo
+        Assert.DoesNotContain(f.Logs.Linhas, l => l.StartsWith("MIDIA_EXCLUIDA"));
+        await f.Iniciar.Handle(f.Comando(), default); // o 6º POST passa: o slot voltou
+    }
+
+    [Fact]
+    public async Task Admin_tambem_cancela_o_envio_de_outro_usuario_em_AguardandoUpload()
+    {
+        var f = new MidiasFixture();
+        var m = Aguardando(f, dono: Guid.NewGuid());
+        var r = await f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid(), EhAdmin: true), default);
+        Assert.True(r.Excluida);
+        Assert.True(f.Db.ArquivosMidia.Single().Cancelado);
+    }
+
+    [Fact]
+    public async Task Locutor_nao_dono_em_AguardandoUpload_recebe_403_e_nada_muda()
+    {
+        var f = new MidiasFixture();
+        var m = Aguardando(f);
+        await Assert.ThrowsAsync<AcessoNegadoException>(() => f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid(), EhAdmin: false), default));
+        Assert.Equal(StatusSanitizacao.AguardandoUpload, f.Db.ArquivosMidia.Single().StatusSanitizacao);
+    }
+
+    [Theory]
+    [InlineData(StatusSanitizacao.Pendente)]
+    [InlineData(StatusSanitizacao.EmAnalise)]
+    [InlineData(StatusSanitizacao.Rejeitado)]
+    public async Task Dono_fora_de_AguardandoUpload_recebe_403(StatusSanitizacao status)
+    {
+        var f = new MidiasFixture();
+        var m = f.Semear(status);
+        await Assert.ThrowsAsync<AcessoNegadoException>(() => f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, f.Usuario, EhAdmin: false), default));
+    }
+
+    [Fact]
+    public async Task Dono_de_aprovada_recebe_403_e_de_desativada_404()
+    {
+        var f = new MidiasFixture();
+        var aprovada = f.SemearAprovada();
+        await Assert.ThrowsAsync<AcessoNegadoException>(() => f.Excluir.Handle(new ExcluirMidiaCommand(aprovada.Id, f.Usuario, EhAdmin: false), default));
+        var desativada = f.SemearAprovada(ativo: false, nome: "d.mp3");
+        await Assert.ThrowsAsync<NaoEncontradoException>(() => f.Excluir.Handle(new ExcluirMidiaCommand(desativada.Id, f.Usuario, EhAdmin: false), default));
+    }
+
+    [Fact]
+    public async Task Concluir_ganhou_a_corrida_o_cancelamento_recebe_409()
+    {
+        var f = new MidiasFixture();
+        var m = Aguardando(f);
+        var handler = new ExcluirMidiaHandler(new DbQueFalhaAoSalvar(f.Db, new DbUpdateConcurrencyException("RowVersion")), f.Relogio, f.Logs.Logger<ExcluirMidiaHandler>());
+        await Assert.ThrowsAsync<TransicaoInvalidaException>(() => handler.Handle(new ExcluirMidiaCommand(m.Id, f.Usuario, EhAdmin: false), default));
+        Assert.DoesNotContain(f.Logs.Linhas, l => l.StartsWith("MIDIA_ENVIO_CANCELADO"));
+    }
+
+    [Fact]
+    public void CancelarEnvio_so_vale_em_AguardandoUpload()
+    {
+        var f = new MidiasFixture();
+        var pendente = f.Semear(StatusSanitizacao.Pendente);
+        Assert.Throws<TransicaoInvalidaException>(() => pendente.CancelarEnvio(f.Relogio.UtcNow));
+    }
+
     [Fact]
     public async Task Id_inexistente_e_404()
     {
@@ -145,7 +230,7 @@ public sealed class GerirMidiaTests
         var m = f.SemearAprovada();
         var admin = Guid.NewGuid();
 
-        var r = await f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, admin), default);
+        var r = await f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, admin, EhAdmin: true), default);
 
         Assert.True(r.Excluida);
         Assert.Empty(f.Db.ArquivosMidia);
@@ -166,7 +251,7 @@ public sealed class GerirMidiaTests
         f.Db.Reproducoes.Add(new Reproducao(m.Id, null, null, f.Relogio.UtcNow));
         f.Db.SaveChanges();
 
-        var r = await f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid()), default);
+        var r = await f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid(), EhAdmin: true), default);
 
         Assert.False(r.Excluida);
         Assert.False(r.Midia!.Ativo);
@@ -180,12 +265,12 @@ public sealed class GerirMidiaTests
     {
         var f = new MidiasFixture();
         var m = f.Semear(StatusSanitizacao.EmAnalise);
-        await Assert.ThrowsAsync<TransicaoInvalidaException>(() => f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid()), default));
+        await Assert.ThrowsAsync<TransicaoInvalidaException>(() => f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid(), EhAdmin: true), default));
         Assert.Single(f.Db.ArquivosMidia);
     }
 
     /// <summary>Um IRadioDbContext que delega ao real e falha o SaveChanges como o SQL falharia (concorrência ou FK).</summary>
-    private sealed class DbQueFalhaAoSalvar(WebRadio.Application.Abstracoes.IRadioDbContext real, Exception erro) : WebRadio.Application.Abstracoes.IRadioDbContext
+    internal sealed class DbQueFalhaAoSalvar(WebRadio.Application.Abstracoes.IRadioDbContext real, Exception erro) : WebRadio.Application.Abstracoes.IRadioDbContext
     {
         public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Usuarios.Usuario> Usuarios => real.Usuarios;
         public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Autenticacao.RefreshToken> RefreshTokens => real.RefreshTokens;
@@ -204,9 +289,9 @@ public sealed class GerirMidiaTests
     {
         var f = new MidiasFixture();
         var m = f.SemearAprovada();
-        var handler = new ExcluirMidiaHandler(new DbQueFalhaAoSalvar(f.Db, new DbUpdateConcurrencyException("RowVersion")), f.Logs.Logger<ExcluirMidiaHandler>());
+        var handler = new ExcluirMidiaHandler(new DbQueFalhaAoSalvar(f.Db, new DbUpdateConcurrencyException("RowVersion")), f.Relogio, f.Logs.Logger<ExcluirMidiaHandler>());
 
-        var e = await Assert.ThrowsAsync<TransicaoInvalidaException>(() => handler.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid()), default));
+        var e = await Assert.ThrowsAsync<TransicaoInvalidaException>(() => handler.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid(), EhAdmin: true), default));
 
         Assert.Contains("mudou de status", e.Message);
         Assert.DoesNotContain(f.Logs.Linhas, l => l.Contains("MIDIA_EXCLUIDA"));
@@ -217,9 +302,9 @@ public sealed class GerirMidiaTests
     {
         var f = new MidiasFixture();
         var m = f.SemearAprovada();
-        var handler = new ExcluirMidiaHandler(new DbQueFalhaAoSalvar(f.Db, new DbUpdateException("FK")), f.Logs.Logger<ExcluirMidiaHandler>());
+        var handler = new ExcluirMidiaHandler(new DbQueFalhaAoSalvar(f.Db, new DbUpdateException("FK")), f.Relogio, f.Logs.Logger<ExcluirMidiaHandler>());
 
-        var e = await Assert.ThrowsAsync<TransicaoInvalidaException>(() => handler.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid()), default));
+        var e = await Assert.ThrowsAsync<TransicaoInvalidaException>(() => handler.Handle(new ExcluirMidiaCommand(m.Id, Guid.NewGuid(), EhAdmin: true), default));
 
         Assert.Contains("começou a tocar", e.Message);
         Assert.DoesNotContain(f.Logs.Linhas, l => l.Contains("MIDIA_EXCLUIDA"));
@@ -229,6 +314,6 @@ public sealed class GerirMidiaTests
     public async Task Excluir_id_inexistente_e_404()
     {
         var f = new MidiasFixture();
-        await Assert.ThrowsAsync<NaoEncontradoException>(() => f.Excluir.Handle(new ExcluirMidiaCommand(Guid.NewGuid(), Guid.NewGuid()), default));
+        await Assert.ThrowsAsync<NaoEncontradoException>(() => f.Excluir.Handle(new ExcluirMidiaCommand(Guid.NewGuid(), Guid.NewGuid(), EhAdmin: true), default));
     }
 }

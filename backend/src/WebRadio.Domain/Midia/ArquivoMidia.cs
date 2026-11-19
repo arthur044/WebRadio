@@ -4,6 +4,13 @@ using WebRadio.Domain.Erros;
 
 namespace WebRadio.Domain.Midia;
 
+/// <summary>Motivos de rejeição que o domínio e a <c>Manutencao</c> comparam por CONSTANTE, nunca por texto digitado (01 §2.5).</summary>
+public static class MotivosRejeicao
+{
+    /// <summary>O dono (ou o Admin) desistiu do envio em <c>AguardandoUpload</c> (08 v1.5).</summary>
+    public const string EnvioCancelado = "Envio cancelado.";
+}
+
 /// <summary>
 /// schema midia (MediaUpload). 01-dominio.md §2.5, v1.1.
 /// Invariante: Aprovado ⇒ MimeType, HashSHA256, DuracaoSegundos, SanitizadoEmUtc ≠ null (reforçado por CHECK no banco).
@@ -156,6 +163,23 @@ public sealed class ArquivoMidia : Entidade
         EtagUpload = etag;
         StatusSanitizacao = StatusSanitizacao.Pendente;
     }
+
+    /// <summary>
+    /// <c>DELETE /midias/{id}</c> do dono ou do Admin em <c>AguardandoUpload</c> (08 v1.5): vai a <c>Rejeitado</c> com <see cref="MotivosRejeicao.EnvioCancelado"/>. A linha FICA (o fallback SQL
+    /// dos limites do S-M06 continua contando o envio; a <c>Manutencao</c> a apaga em 24 h). Fora de <c>AguardandoUpload</c> → <see cref="TransicaoInvalidaException"/> (na API só na corrida com o <c>concluir</c>).
+    /// </summary>
+    public void CancelarEnvio(DateTime agora)
+    {
+        UtcGuard.Exigir(agora, nameof(agora));
+        GarantirStatus(StatusSanitizacao.AguardandoUpload);
+
+        StatusSanitizacao = StatusSanitizacao.Rejeitado;
+        MotivoRejeicao = MotivosRejeicao.EnvioCancelado;
+        SanitizadoEmUtc = agora;
+    }
+
+    /// <summary><c>Rejeitado</c> por <see cref="CancelarEnvio"/>: a tela mostra "Cancelado" e não "Rejeitada" (<c>MidiaDto.cancelado</c>).</summary>
+    public bool Cancelado => StatusSanitizacao == StatusSanitizacao.Rejeitado && MotivoRejeicao == MotivosRejeicao.EnvioCancelado;
 
     /// <summary>Worker pega o arquivo: EmAnalise, EmAnaliseDesdeUtc = agora (lease), TentativasSanitizacao + 1.</summary>
     public void IniciarAnalise(DateTime agora)

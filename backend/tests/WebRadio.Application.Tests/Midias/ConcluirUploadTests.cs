@@ -86,6 +86,24 @@ public sealed class ConcluirUploadTests
     }
 
     [Fact]
+    public async Task Concluir_de_envio_cancelado_e_409_mesmo_com_o_objeto_no_storage()
+    {
+        var (f, id) = await ComUploadFeitoAsync();
+        await f.Excluir.Handle(new ExcluirMidiaCommand(id, f.Usuario, EhAdmin: false), default);
+
+        await Assert.ThrowsAsync<TransicaoInvalidaException>(() => f.Concluir.Handle(new ConcluirUploadCommand(id, f.Usuario, false), default));
+        Assert.True(f.Db.ArquivosMidia.Single().Cancelado);
+    }
+
+    [Fact]
+    public async Task Concluir_que_perde_a_corrida_no_RowVersion_recebe_409()
+    {
+        var (f, id) = await ComUploadFeitoAsync();
+        var handler = new ConcluirUploadHandler(new GerirMidiaTests.DbQueFalhaAoSalvar(f.Db, new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("RowVersion")), f.Relogio, f.Storage);
+        await Assert.ThrowsAsync<TransicaoInvalidaException>(() => handler.Handle(new ConcluirUploadCommand(id, f.Usuario, false), default));
+    }
+
+    [Fact]
     public async Task O_concluir_vale_ate_o_prazo_do_registro_e_nao_so_ate_o_fim_da_policy_de_15_min()
     {
         var (f, id) = await ComUploadFeitoAsync();

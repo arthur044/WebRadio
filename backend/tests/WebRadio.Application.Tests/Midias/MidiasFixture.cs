@@ -126,7 +126,7 @@ public sealed class MidiasFixture
 
     public EditarMidiaHandler Editar => new(Db);
 
-    public ExcluirMidiaHandler Excluir => new(Db, Logs.Logger<ExcluirMidiaHandler>());
+    public ExcluirMidiaHandler Excluir => new(Db, Relogio, Logs.Logger<ExcluirMidiaHandler>());
 
     /// <summary>Uma mídia <c>Aprovado</c> direto no banco, com os dois hashes (para a lista, o preview e a exclusão).</summary>
     public ArquivoMidia SemearAprovada(string? titulo = "Aurora", string? artista = "Banda", TipoMidia tipo = TipoMidia.Musica, Guid? usuario = null, string nome = "aurora.mp3", bool ativo = true)

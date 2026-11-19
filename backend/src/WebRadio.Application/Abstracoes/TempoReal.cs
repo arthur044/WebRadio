@@ -58,6 +58,9 @@ public interface IRequestThrottle
     /// <summary>INCR chave; o TTL só é definido na primeira contagem (janela fixa). Devolve o valor depois do incremento.</summary>
     Task<long> IncrementarAsync(string chave, TimeSpan ttl, CancellationToken ct = default);
 
+    /// <summary>INCRBY chave valor (negativo desfaz); o TTL só é definido na criação (janela fixa). Devolve o valor depois da soma.</summary>
+    Task<long> IncrementarPorAsync(string chave, long valor, TimeSpan ttl, CancellationToken ct = default);
+
     /// <summary>Valor atual do contador, 0 se não existir.</summary>
     Task<long> LerAsync(string chave, CancellationToken ct = default);
 

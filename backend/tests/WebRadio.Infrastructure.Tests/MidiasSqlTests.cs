@@ -115,6 +115,8 @@ public class MidiasSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
 
         public Task<long> IncrementarAsync(string chave, TimeSpan ttl, CancellationToken ct = default) => throw Fora();
 
+        public Task<long> IncrementarPorAsync(string chave, long valor, TimeSpan ttl, CancellationToken ct = default) => throw Fora();
+
         public Task<long> LerAsync(string chave, CancellationToken ct = default) => throw Fora();
 
         public Task RemoverAsync(string chave, CancellationToken ct = default) => throw Fora();
@@ -187,13 +189,13 @@ public class MidiasSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
 
         await using (var db = _c.NovoDb())
         {
-            var r1 = await new ExcluirMidiaHandler(db, NullLogger<ExcluirMidiaHandler>.Instance).Handle(new ExcluirMidiaCommand(comReproducao, Guid.NewGuid()), default);
+            var r1 = await new ExcluirMidiaHandler(db, _c.Relogio, NullLogger<ExcluirMidiaHandler>.Instance).Handle(new ExcluirMidiaCommand(comReproducao, Guid.NewGuid(), true), default);
             Assert.False(r1.Excluida);
         }
 
         await using (var db = _c.NovoDb())
         {
-            var r2 = await new ExcluirMidiaHandler(db, NullLogger<ExcluirMidiaHandler>.Instance).Handle(new ExcluirMidiaCommand(livre, Guid.NewGuid()), default);
+            var r2 = await new ExcluirMidiaHandler(db, _c.Relogio, NullLogger<ExcluirMidiaHandler>.Instance).Handle(new ExcluirMidiaCommand(livre, Guid.NewGuid(), true), default);
             Assert.True(r2.Excluida);
         }
 

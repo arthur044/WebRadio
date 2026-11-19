@@ -173,6 +173,53 @@ public sealed class IniciarUploadTests
         Assert.Equal(20, f.Db.ArquivosMidia.Count());
     }
 
+    private static MidiaOptions ComOrcamentoDe3MiB() => new() { MaximoAbertos = 100, BytesDeclaradosPorHora = 3 * 1024 * 1024 };
+
+    [Fact]
+    public async Task O_orcamento_de_bytes_recusa_o_post_que_passa_do_limite_e_o_recusado_nao_come_o_orcamento()
+    {
+        var f = new MidiasFixture(ComOrcamentoDe3MiB());
+        for (var i = 0; i < 3; i++) await f.Iniciar.Handle(f.Comando(tamanho: 1_000_000), default); // 3.000.000 de 3.145.728
+
+        var e = await Assert.ThrowsAsync<LimiteExcedidoException>(() => f.Iniciar.Handle(f.Comando(tamanho: 1_000_000), default));
+        Assert.InRange(e.TenteDeNovoEm, TimeSpan.FromMinutes(59), TimeSpan.FromHours(1));
+        Assert.Equal(3, f.Db.ArquivosMidia.Count());
+
+        await f.Iniciar.Handle(f.Comando(tamanho: 100_000), default); // cabe: a recusa devolveu os bytes que somou
+        await Assert.ThrowsAsync<LimiteExcedidoException>(() => f.Iniciar.Handle(f.Comando(tamanho: 1_000_000), default));
+    }
+
+    [Fact]
+    public async Task O_cancelamento_nao_devolve_o_orcamento_de_bytes_nem_o_20_por_hora()
+    {
+        var f = new MidiasFixture(ComOrcamentoDe3MiB());
+        for (var i = 0; i < 3; i++) await f.Iniciar.Handle(f.Comando(tamanho: 1_000_000), default);
+        foreach (var m in f.Db.ArquivosMidia.ToList()) await f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, f.Usuario, EhAdmin: false), default);
+        Assert.All(f.Db.ArquivosMidia, m => Assert.True(m.Cancelado)); // as linhas ficam
+
+        await Assert.ThrowsAsync<LimiteExcedidoException>(() => f.Iniciar.Handle(f.Comando(tamanho: 1_000_000), default));
+    }
+
+    [Fact]
+    public async Task Com_o_redis_fora_o_orcamento_vem_do_sql_inclusive_as_canceladas_e_o_retry_after_e_a_saida_da_mais_antiga()
+    {
+        var f = new MidiasFixture(ComOrcamentoDe3MiB());
+        f.Redis.Fora = true;
+        await f.Iniciar.Handle(f.Comando(tamanho: 1_000_000), default); // t0
+        f.Relogio.UtcNow = f.Relogio.UtcNow.AddMinutes(10);
+        await f.Iniciar.Handle(f.Comando(tamanho: 1_000_000), default); // t0 + 10 min
+        f.Relogio.UtcNow = f.Relogio.UtcNow.AddMinutes(10);
+        await f.Iniciar.Handle(f.Comando(tamanho: 1_000_000), default); // t0 + 20 min
+        foreach (var m in f.Db.ArquivosMidia.ToList()) await f.Excluir.Handle(new ExcluirMidiaCommand(m.Id, f.Usuario, EhAdmin: false), default); // canceladas contam igual
+
+        f.Relogio.UtcNow = f.Relogio.UtcNow.AddMinutes(10); // t0 + 30 min
+        var e = await Assert.ThrowsAsync<LimiteExcedidoException>(() => f.Iniciar.Handle(f.Comando(tamanho: 1_000_000), default));
+        Assert.Equal(TimeSpan.FromMinutes(30), e.TenteDeNovoEm); // a mais antiga (t0) sai da janela em t0 + 60 min
+
+        f.Relogio.UtcNow = f.Relogio.UtcNow.AddMinutes(31);
+        await f.Iniciar.Handle(f.Comando(tamanho: 1_000_000), default);
+    }
+
     [Fact]
     public async Task Outro_usuario_tem_a_propria_cota()
     {

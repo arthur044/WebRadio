@@ -22,6 +22,14 @@ public sealed class MidiaOptions
     /// <summary>Uploads em <c>AguardandoUpload</c>, <c>Pendente</c> ou <c>EmAnalise</c> por usuário.</summary>
     public int MaximoAbertos { get; set; } = MaximoAbertosPadrao;
 
+    public const long BytesDeclaradosPorHoraPadrao = 1024 * MiB;
+
+    /// <summary>
+    /// <c>Midia:BytesDeclaradosPorHora</c> (08 v1.5, S-M06): orçamento de bytes declarados por usuário por hora. Sem ele, 20/h × 250 MiB enche a quarentena em 1 a 2 h; o cancelamento do
+    /// envio NÃO devolve o orçamento (nem o 20/h).
+    /// </summary>
+    public long BytesDeclaradosPorHora { get; set; } = BytesDeclaradosPorHoraPadrao;
+
     /// <summary><c>Midia:Upload</c>: prazo do registro em <c>AguardandoUpload</c> (E4-D11).</summary>
     public UploadOptions Upload { get; set; } = new();
 
@@ -88,11 +96,13 @@ public sealed class LimiteDoTipo
 public sealed class MidiaOptionsValidator : IValidateOptions<MidiaOptions>
 {
     public const long TetoDoBanco = 262_144_000;
+    private const long MiBMinimo = 1024 * 1024;
 
     public ValidateOptionsResult Validate(string? name, MidiaOptions o)
     {
         var erros = new List<string>();
         if (o.UploadsPorHora is < 1 or > 1000) erros.Add("Midia:UploadsPorHora deve estar entre 1 e 1000.");
+        if (o.BytesDeclaradosPorHora is < MiBMinimo or > 1_099_511_627_776) erros.Add("Midia:BytesDeclaradosPorHora deve estar entre 1 MiB e 1 TiB.");
         if (o.MaximoAbertos is < 1 or > 100) erros.Add("Midia:MaximoAbertos deve estar entre 1 e 100.");
         if (o.Upload.LimpezaAguardandoHoras is < 1 or > 24) erros.Add("Midia:Upload:LimpezaAguardandoHoras deve estar entre 1 e 24.");
         if (o.Sanitizacao.TimeoutSegundos is < 5 or > 3600) erros.Add("Midia:Sanitizacao:TimeoutSegundos deve estar entre 5 e 3600.");

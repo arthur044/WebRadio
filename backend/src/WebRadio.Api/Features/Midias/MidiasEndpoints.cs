@@ -79,9 +79,9 @@ public sealed class MidiasEndpoints : IEndpointModule
         g.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal user, IMediator mediator, CancellationToken ct) =>
         {
             if (!Guid.TryParse(user.FindFirstValue("sub"), out var admin)) return Results.Unauthorized();
-            var r = await mediator.Send(new ExcluirMidiaCommand(id, admin), ct);
+            var r = await mediator.Send(new ExcluirMidiaCommand(id, admin, user.IsInRole("Admin")), ct);
             return r.Excluida ? Results.NoContent() : Results.Ok(r.Midia);
-        }).RequireAuthorization("SomenteAdmin");
+        }); // PodeModerar do grupo: o handler decide (Admin exclui; o dono só desiste do envio em AguardandoUpload)
 
         g.MapPost("/{id:guid}/concluir", async (Guid id, ClaimsPrincipal user, IMediator mediator, CancellationToken ct) =>
         {

@@ -11,6 +11,10 @@ public sealed class RedisRequestThrottle(IConnectionMultiplexer redis) : IReques
     private const string ScriptIncremento =
         "local v = redis.call('INCR', KEYS[1]) if v == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end return v";
 
+    // INCRBY + PEXPIRE na criação (a chave só passa a existir aqui), atômico.
+    private const string ScriptIncrementoPor =
+        "local existia = redis.call('EXISTS', KEYS[1]) local v = redis.call('INCRBY', KEYS[1], ARGV[2]) if existia == 0 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end return v";
+
     // O SE.Redis não aceita CancellationToken: o WaitAsync(ct) só solta quem chama (o comando já enviado termina no servidor).
     public Task<bool> TentarReservarAsync(string chave, TimeSpan ttl, CancellationToken ct = default) =>
         redis.GetDatabase().StringSetAsync(Prefixo + chave, 1, ttl, When.NotExists).WaitAsync(ct);
@@ -18,6 +22,10 @@ public sealed class RedisRequestThrottle(IConnectionMultiplexer redis) : IReques
     public async Task<long> IncrementarAsync(string chave, TimeSpan ttl, CancellationToken ct = default) =>
         (long)await redis.GetDatabase().ScriptEvaluateAsync(
             ScriptIncremento, [(RedisKey)(Prefixo + chave)], [(RedisValue)(long)ttl.TotalMilliseconds]).WaitAsync(ct);
+
+    public async Task<long> IncrementarPorAsync(string chave, long valor, TimeSpan ttl, CancellationToken ct = default) =>
+        (long)await redis.GetDatabase().ScriptEvaluateAsync(
+            ScriptIncrementoPor, [(RedisKey)(Prefixo + chave)], [(RedisValue)(long)ttl.TotalMilliseconds, (RedisValue)valor]).WaitAsync(ct);
 
     public async Task<long> LerAsync(string chave, CancellationToken ct = default) =>
         (await redis.GetDatabase().StringGetAsync(Prefixo + chave).WaitAsync(ct)).TryParse(out long numero) ? numero : 0;

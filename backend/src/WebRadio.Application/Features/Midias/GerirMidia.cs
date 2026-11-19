@@ -7,6 +7,7 @@ using WebRadio.Application.Abstracoes;
 using WebRadio.Application.Comum;
 using WebRadio.Domain.Enums;
 using WebRadio.Domain.Erros;
+using WebRadio.Domain.Midia;
 
 namespace WebRadio.Application.Features.Midias;
 
@@ -70,8 +71,11 @@ public sealed class EditarMidiaHandler(IRadioDbContext db) : IRequestHandler<Edi
     private static string? Normalizar(string? texto) => string.IsNullOrWhiteSpace(texto) ? null : TextoSeguro.Normalizar(texto);
 }
 
-/// <summary><c>DELETE /midias/{id}</c> (Admin, E4-D14): sem reprodução, apaga o registro (204); com reprodução, só desativa (200 + DTO).</summary>
-public sealed record ExcluirMidiaCommand(Guid MidiaId, Guid SolicitanteId) : IRequest<ResultadoDaExclusao>;
+/// <summary>
+/// <c>DELETE /midias/{id}</c> (02 §6). Admin (E4-D14): sem reprodução, apaga o registro (204); com reprodução, só desativa (200 + DTO). <b>Desistência do envio</b> (08 v1.5): em mídia
+/// <c>AguardandoUpload</c>, o DONO (ou o Admin) a cancela (204): vai a <c>Rejeitado</c> com <see cref="MotivosRejeicao.EnvioCancelado"/>, a linha fica e o slot dos 5 abertos volta.
+/// </summary>
+public sealed record ExcluirMidiaCommand(Guid MidiaId, Guid SolicitanteId, bool EhAdmin) : IRequest<ResultadoDaExclusao>;
 
 public sealed record ResultadoDaExclusao(bool Excluida, MidiaDto? Midia);
 
@@ -80,11 +84,21 @@ public sealed record ResultadoDaExclusao(bool Excluida, MidiaDto? Midia);
 /// do envio, quem excluiu e o status na hora — o S-M03 guarda os hashes e o autor para inteligência de malware mesmo depois de o registro sumir. O arquivo em
 /// <c>midia/</c> é apagado pelo Worker como órfão (E4-D11): a API não tem <c>s3:DeleteObject</c> lá (S-A04). Mídia em análise não se exclui (o Worker a tem).
 /// </summary>
-public sealed class ExcluirMidiaHandler(IRadioDbContext db, ILogger<ExcluirMidiaHandler> logger) : IRequestHandler<ExcluirMidiaCommand, ResultadoDaExclusao>
+public sealed class ExcluirMidiaHandler(IRadioDbContext db, IClock clock, ILogger<ExcluirMidiaHandler> logger) : IRequestHandler<ExcluirMidiaCommand, ResultadoDaExclusao>
 {
     public async Task<ResultadoDaExclusao> Handle(ExcluirMidiaCommand cmd, CancellationToken ct)
     {
         var midia = await db.ArquivosMidia.FirstOrDefaultAsync(m => m.Id == cmd.MidiaId, ct) ?? throw new NaoEncontradoException("Mídia");
+        if (!cmd.EhAdmin)
+        {
+            // Locutor: 404 se ele não vê a mídia (desativada), 403 se vê e não é dele ou não está em AguardandoUpload. Dono = EnviadoPorUsuarioId contra o `sub` do token.
+            if (!midia.Ativo) throw new NaoEncontradoException("Mídia");
+            if (midia.EnviadoPorUsuarioId != cmd.SolicitanteId || midia.StatusSanitizacao != StatusSanitizacao.AguardandoUpload)
+                throw new AcessoNegadoException("Só o Admin exclui mídia; o dono só desiste de um envio que ainda aguarda o arquivo.");
+        }
+
+        if (midia.StatusSanitizacao == StatusSanitizacao.AguardandoUpload) return await CancelarEnvioAsync(midia, cmd.SolicitanteId, ct);
+
         if (midia.StatusSanitizacao == StatusSanitizacao.EmAnalise) throw new TransicaoInvalidaException("A mídia está em análise pelo Worker; tente de novo depois.");
 
         if (await db.Reproducoes.AnyAsync(r => r.MidiaId == midia.Id, ct))
@@ -116,6 +130,25 @@ public sealed class ExcluirMidiaHandler(IRadioDbContext db, ILogger<ExcluirMidia
         logger.LogInformation(
             "MIDIA_EXCLUIDA midia {MidiaId} status {Status} hashSha256 {HashSha256} hashOriginalSha256 {HashOriginalSha256} enviadoPor {EnviadoPorUsuarioId} excluidaPor {SolicitanteId}",
             id, status, hashSha, hashOriginal, enviadoPor, cmd.SolicitanteId);
+        return new ResultadoDaExclusao(true, null);
+    }
+
+    private async Task<ResultadoDaExclusao> CancelarEnvioAsync(ArquivoMidia midia, Guid solicitante, CancellationToken ct)
+    {
+        var (id, dono, tamanho) = (midia.Id, midia.EnviadoPorUsuarioId, midia.TamanhoBytes);
+        try
+        {
+            midia.CancelarEnvio(clock.UtcNow);
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Um concluir ganhou a corrida (RowVersion): exatamente um vence.
+            throw new TransicaoInvalidaException("O envio já foi concluído; não dá mais para cancelar.");
+        }
+
+        // Sem auditoria MidiaExcluida (não há hash); campos fechados, nunca o nome do arquivo.
+        logger.LogInformation("MIDIA_ENVIO_CANCELADO midia {MidiaId} usuario {UsuarioId} excluidaPor {SolicitanteId} tamanhoDeclarado {TamanhoDeclarado}", id, dono, solicitante, tamanho);
         return new ResultadoDaExclusao(true, null);
     }
 
