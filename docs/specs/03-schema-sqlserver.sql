@@ -261,7 +261,7 @@ CREATE INDEX IX_ArquivoMidia_HashOriginal ON midia.ArquivoMidia (HashOriginalSHA
 CREATE INDEX IX_ArquivoMidia_Biblioteca ON midia.ArquivoMidia (TipoMidia, StatusSanitizacao)
     INCLUDE (Titulo, Artista, DuracaoSegundos, Ativo);
 -- [Atlas/E4-A01a] Rotação (08, E4-D4): sorteio por chave. Só mídia que pode tocar (Aprovado e Ativo); o `Sorteio >= @r ORDER BY Sorteio`
--- é um seek de 3 leituras (de 786 do ORDER BY NEWID() na biblioteca de 40 mil músicas). Predicados com CONSTANTE, para o filtro casar.
+-- é seek: a rotação inteira (busca com o NOT EXISTS da janela de repetição) custa 11 leituras (5 + 6), de 786 do ORDER BY NEWID() na biblioteca de 40 mil músicas (parecer e4-a01a, R1/R2). Predicados com CONSTANTE, para o filtro casar.
 CREATE INDEX IX_ArquivoMidia_Rotacao ON midia.ArquivoMidia (TipoMidia, Sorteio)
     INCLUDE (Titulo, Artista) WHERE StatusSanitizacao = 4 AND Ativo = 1;
 -- Fila do Worker de sanitização e limpeza de uploads abandonados.
@@ -310,9 +310,9 @@ CREATE TABLE interacao.PedidoMusica (
 -- Fila de moderação (predicado com CONSTANTE Status = 1 para o índice filtrado ser usado).
 CREATE INDEX IX_PedidoMusica_Fila ON interacao.PedidoMusica (CriadoEmUtc)
     INCLUDE (NomeOuvinte, TituloMusica, Artista, Mensagem, ProgramaId) WHERE Status = 1;
--- Fila do playout: aprovados com mídia ainda não enviados ao Liquidsoap.
+-- Fila do playout: aprovados com mídia, enviados ou não ao Liquidsoap (o reenvio por instância precisa dos já enviados).
 -- [Atlas/E4-A01a] Refeito para o E4-D5: o predicado de entrega tem `OR` (nunca entregue, ou entregue a outra instância), que não implica o
--- filtro antigo (`EnviadoPlayoutEmUtc IS NULL`): 3.402 leituras de varredura do clustered contra 13 com este índice (105 mil pedidos). Chave em
+-- filtro antigo (`EnviadoPlayoutEmUtc IS NULL`): 3.402 leituras de varredura do clustered contra 23 com este índice, com pedidos elegíveis, ou 2 sem nenhum (105 mil pedidos; parecer e4-a01a, P1/P2). Chave em
 -- ModeradoEmUtc: a idade máxima de 24 h e o ORDER BY da CTE são seek/ordem do próprio índice; o filtro só guarda pedido com mídia ainda
 -- aprovado (Tocado sai do índice).
 CREATE INDEX IX_PedidoMusica_Playout ON interacao.PedidoMusica (ModeradoEmUtc)

@@ -48,7 +48,9 @@ echo "ok: $saida/medicao.txt"
 # Invariante que o E4-D5 exige: NUNCA o mesmo pedido para duas sessões. Medido: com o EXISTS da mídia na CTE o plano usa um nested loops
 # com pré-busca, que trava (U) as linhas seguintes do índice; então uma sessão pode receber 204 mesmo com pedido elegível (o pedido fica
 # para a chamada seguinte). Sem o EXISTS, as sessões recebem um pedido cada. O teste confere a invariante e imprime quantas receberam.
-cat >/tmp/conc.sql <<'SQL'
+conc="$(mktemp)"
+trap 'rm -f "$conc"; [ "${MANTER:-0}" = 1 ] || docker rm -f "$nome" >/dev/null 2>&1 || true' EXIT
+cat >"$conc" <<'SQL'
 SET NOCOUNT ON; SET QUOTED_IDENTIFIER ON; SET XACT_ABORT ON;
 DECLARE @agora datetime2(3) = SYSUTCDATETIME(), @instancia uniqueidentifier = NEWID(), @corte datetime2(3) = DATEADD(HOUR, -24, SYSUTCDATETIME());
 BEGIN TRAN;
@@ -63,7 +65,7 @@ UPDATE c SET EnviadoPlayoutEmUtc = @agora, EnviadoPlayoutInstancia = @instancia 
 WAITFOR DELAY '00:00:05';
 ROLLBACK;
 SQL
-docker cp /tmp/conc.sql "$nome:/tmp/conc.sql"; rm -f /tmp/conc.sql
+docker cp "$conc" "$nome:/tmp/conc.sql"
 : >"$saida/concorrencia.txt"
 for sessao in A B C D; do
     ( sql -d WebRadioPerf -h -1 -W -i /tmp/conc.sql | grep -E '^[0-9A-F]{8}-' | sed "s/^/$sessao /" >>"$saida/concorrencia.txt" ) &
