@@ -256,6 +256,10 @@ jobs:
       - name: infra/sanitizer/teste.sh
         run: infra/sanitizer/teste.sh
 
+      # minio-init com um mc de mentira (sem Docker): segredo iniciado em '-' recusado sem imprimir o valor, saída do mc fora do log, `--` antes dos argumentos.
+      - name: infra/minio/teste.sh
+        run: infra/minio/teste.sh
+
   # F17: o 03-schema-sqlserver.sql (contrato, ADR D14) e as migrations do EF precisam gerar o MESMO schema. Dois bancos
   # descartáveis no SQL Server do próprio job; o resultado (catálogo e diff) vai para o resumo do job, para o Atlas.
   ddl-check:
@@ -569,6 +573,8 @@ jobs:
         if: failure()
         run: |
           docker compose -f docker-compose.yml -f docker-compose.dev.yml ps -a
+          # Contêiner morto por falta de memória aparece aqui (o log do mc só diz "Killed"): OOMKilled=true.
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml ps -aq | xargs -r docker inspect -f '{{.Name}} exit={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}}'
           docker compose -f docker-compose.yml -f docker-compose.dev.yml logs --no-color --tail 80
 
       - name: Derrubar

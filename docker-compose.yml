@@ -172,7 +172,9 @@ services:
     secrets: [minio_root_user, minio_root_password, minio_api_access_key, minio_api_secret_key, minio_worker_access_key, minio_worker_secret_key]
     tmpfs: [/tmp]
     networks: [dados]
-    mem_limit: 128m
+    # 256m, medido (#128/#112): o pico do mc (Go) no `policy attach` passa de 128m e o contêiner morria por OOM (OOMKilled=true, "Killed" no log e
+    # "não consegui anexar a política" em 4 de 4 execuções contra um MinIO novo); com 144m ou mais passou sempre. 256m é ~1,8x o limiar medido.
+    mem_limit: 256m
     pids_limit: 50
     depends_on:
       minio: { condition: service_healthy }
