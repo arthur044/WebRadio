@@ -245,6 +245,10 @@ else
 fi
 
 # --- DoD 7: limites do S-M06 -------------------------------------------------------------------------------------------------
+# A API tem um limite global de 100 requisições por minuto por IP (janela FIXA, Program.cs). O DoD 7 faz bem mais que isso, e a janela que ele deixa aberta derrubaria o E2E que roda
+# logo depois (429 já nas primeiras chamadas): espera a janela virar antes e depois.
+esperar_janela() { echo "  (espera 62 s: a janela de 100/min por IP da API)"; sleep 62; }
+esperar_janela
 echo "== DoD 7: 20 por hora, 5 abertos e a quota"
 python3 -I -c 'import json; print(json.dumps({"nomeOriginal": "a.mp3", "tipoMidia": "Vinheta", "tamanhoBytes": 1000, "mimeTypeDeclarado": "audio/mpeg"}))' > "$TMP/pequeno.json"
 ruins=0
@@ -280,6 +284,8 @@ for metodo in GET PUT DELETE; do
   codigo="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X "$metodo" "$BASE/storage/quarentena/2026/01/00000000-0000-0000-0000-000000000000" || true)"
   confere "$metodo em /storage/quarentena/... é recusado ($codigo)" test "$codigo" = 403 -o "$codigo" = 405
 done
+
+esperar_janela
 
 echo
 if ((falhas > 0)); then
