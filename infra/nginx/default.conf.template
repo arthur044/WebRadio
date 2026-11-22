@@ -51,7 +51,7 @@ server {
     # --- API (mais restrito primeiro: /api/v1/auth/ vence por prefixo mais longo) ---
     location /api/v1/auth/ {
         include /etc/nginx/security-headers.conf;
-        limit_req zone=api_auth burst=10 nodelay;
+        limit_req zone=api_auth burst=30 nodelay;
         client_max_body_size 1m;
 
         include /etc/nginx/conf.d/proxy-api.inc;
@@ -92,7 +92,7 @@ server {
     # --- SignalR ---
     location /hubs/ {
         include /etc/nginx/security-headers.conf;
-        limit_conn conn_hubs 10;
+        limit_conn conn_hubs 50; # por IP: ouvintes atrás de NAT (escola, empresa, CGNAT) dividem o IP
         access_log /dev/stdout anon_sem_query;
 
         proxy_http_version 1.1;
@@ -110,7 +110,7 @@ server {
     # --- Stream (Icecast) — só GET/HEAD em radio.mp3, resto 404 (S-A07: sem /admin, sem SOURCE) ---
     location = /stream/radio.mp3 {
         include /etc/nginx/security-headers.conf;
-        limit_conn conn_stream 5;
+        limit_conn conn_stream 25; # por IP: ouvintes atrás de NAT dividem o IP (cada ouvinte = 1 conexão de stream). 25 e não 50: o Icecast aceita 200 no total (ICECAST_MAX_CLIENTES); 8 IPs enchem
         limit_except GET HEAD {
             deny all;
         }

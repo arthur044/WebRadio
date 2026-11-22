@@ -5,7 +5,7 @@
 # Só muda o que é de desenvolvimento: ambiente Development (seed da grade, scanner NoOp liberado) e portas
 # de diagnóstico em 127.0.0.1 (1433, console do MinIO 9001, harbor-borda 8005). Segredos: os mesmos arquivos.
 # Variáveis do `up`: SEED_DEV_DATA=true (seed de dev), RATE_LIMIT_GLOBAL=<n> (limite global de requisições por minuto e por IP da Api;
-# padrão aqui 2000, o de produção é 100 e a Api de produção recusa subir com mais que isso).
+# padrão aqui 2000, o de produção é 600 e a Api de produção recusa subir com mais que isso).
 # =============================================================================
 x-dev-env: &dev-env
   ASPNETCORE_ENVIRONMENT: Development

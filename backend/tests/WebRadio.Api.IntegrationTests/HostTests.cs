@@ -157,12 +157,12 @@ public class HostTests
     }
 
     [Fact]
-    public async Task RateLimiter_global_devolve_429_depois_de_100_por_minuto_do_mesmo_IP()
+    public async Task RateLimiter_global_devolve_429_depois_de_600_por_minuto_do_mesmo_IP()
     {
         var f = new ApiFactory { RemoteIp = IPAddress.Parse("203.0.113.50") };
         var c = Cliente(f, e => e.MapGet("/rl", () => "x").AllowAnonymous());
         HttpStatusCode ultimo = default;
-        for (var i = 0; i < 101; i++) ultimo = (await c.GetAsync("/rl")).StatusCode;
+        for (var i = 0; i < 601; i++) ultimo = (await c.GetAsync("/rl")).StatusCode;
         Assert.Equal(HttpStatusCode.TooManyRequests, ultimo);
     }
 
@@ -190,7 +190,7 @@ public class HostTests
     {
         var c = Cliente(new ApiFactory { RemoteIp = IPAddress.Parse("203.0.113.70") }, e => e.MapGet("/rl", () => "x").AllowAnonymous());
         HttpResponseMessage r = null!;
-        for (var i = 0; i < 101; i++) r = await c.GetAsync("/rl");
+        for (var i = 0; i < 601; i++) r = await c.GetAsync("/rl");
         Assert.Equal(HttpStatusCode.TooManyRequests, r.StatusCode);
         Assert.True(r.Headers.Contains("Retry-After"));
         Assert.Equal("application/problem+json", r.Content.Headers.ContentType?.MediaType);
@@ -279,9 +279,9 @@ public class HostTests
 
     // #146: o limite global só pode ser afrouxado em Development; fora dele a Api recusa subir (hardening de DDoS).
     [Theory]
-    [InlineData("101")]
+    [InlineData("601")]
     [InlineData("2000")]
-    public void Producao_com_limite_global_acima_de_100_falha_no_boot(string limite)
+    public void Producao_com_limite_global_acima_de_600_falha_no_boot(string limite)
     {
         var f = ProducaoCompleta();
         f.Config["RateLimit:LimiteGlobalPorMinuto"] = limite;
@@ -290,9 +290,9 @@ public class HostTests
 
     [Theory]
     [InlineData(null)]
+    [InlineData("600")]
     [InlineData("100")]
-    [InlineData("50")]
-    public void Producao_com_limite_global_ate_100_sobe(string? limite)
+    public void Producao_com_limite_global_ate_600_sobe(string? limite)
     {
         var f = ProducaoCompleta();
         if (limite is not null) f.Config["RateLimit:LimiteGlobalPorMinuto"] = limite;
@@ -333,12 +333,12 @@ public class HostTests
     }
 
     [Fact]
-    public async Task Limite_global_alto_em_Development_nao_corta_nos_100_antigos()
+    public async Task Limite_global_alto_em_Development_nao_corta_nos_600_do_padrao()
     {
         var f = new ApiFactory { RemoteIp = IPAddress.Parse("203.0.113.52") };
         f.Config["RateLimit:LimiteGlobalPorMinuto"] = "2000";
         var c = Cliente(f, e => e.MapGet("/rl", () => "x").AllowAnonymous());
-        for (var i = 0; i < 150; i++) Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/rl")).StatusCode);
+        for (var i = 0; i < 650; i++) Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/rl")).StatusCode);
     }
 
     [Fact]

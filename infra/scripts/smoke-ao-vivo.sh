@@ -131,7 +131,7 @@ LOC1="$(json 'd["accessToken"]' <<<"$resp")"; LOC1_ID="$(json 'd["usuario"]["id"
 ULTIMO_LOGIN=$SECONDS
 [[ "${GITHUB_ACTIONS:-}" == "true" ]] && echo "::add-mask::$LOC1"
 # O "outro locutor" é o próprio Admin (tem papel de transmissão e nenhum programa na janela): um login a menos, porque /auth/login tem
-# 5 por minuto por IP (janela fixa) e o smoke-compose.sh e o E2E logam no mesmo stack.
+# 30 por minuto por IP (janela fixa) e o smoke-compose.sh e o E2E logam no mesmo stack.
 ok "locutor1 autenticado"
 
 credencial() { # $1 token, $2 rótulo, $3 senha atual da conta; grava $TMP/cred-$2.{id,segredo}

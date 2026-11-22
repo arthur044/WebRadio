@@ -93,27 +93,38 @@ public class AuthEndpointsTests
     }
 
     [Fact]
-    public async Task Sexta_tentativa_do_mesmo_IP_e_401_identico_mesmo_com_senha_certa_e_outro_IP_ainda_loga()
+    public async Task Tentativa_31_do_mesmo_IP_e_401_identico_mesmo_com_senha_certa_e_outro_IP_ainda_loga()
     {
         var f = NovaFactory("203.0.113.20");
         f.CriarUsuario("ana@example.com", Role.Locutor);
         var c = Cliente(f);
 
+        // Contas diferentes: o bloqueio por (conta, IP) (5 falhas) não pode mascarar o limite por IP, que é o que se testa. 30/min (#NAT: ouvintes atrás do mesmo IP).
         string? corpoDeFalha = null;
-        for (var i = 0; i < 5; i++)
+        for (var i = 0; i < 30; i++)
         {
-            var r = await Login(c, "ana@example.com", "senha-errada-errada");
+            var r = await Login(c, $"fantasma{i}@example.com", "senha-errada-errada");
             Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode);
             corpoDeFalha = await r.Content.ReadAsStringAsync();
         }
 
-        var sexta = await Login(c, "ana@example.com", Senha); // senha CERTA, 6ª no minuto
-        Assert.Equal(HttpStatusCode.Unauthorized, sexta.StatusCode);
-        Assert.Equal(corpoDeFalha, await sexta.Content.ReadAsStringAsync());
-        Assert.False(sexta.Headers.Contains("Retry-After"));
+        var passou = await Login(c, "ana@example.com", Senha); // senha CERTA, 31ª no minuto
+        Assert.Equal(HttpStatusCode.Unauthorized, passou.StatusCode);
+        Assert.Equal(corpoDeFalha, await passou.Content.ReadAsStringAsync());
+        Assert.False(passou.Headers.Contains("Retry-After"));
 
         f.RemoteIp = IPAddress.Parse("198.51.100.77");
         Assert.Equal(HttpStatusCode.OK, (await Login(c, "ana@example.com", Senha)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Ate_30_logins_por_minuto_do_mesmo_IP_passam_ouvintes_atras_de_NAT()
+    {
+        var f = NovaFactory("203.0.113.21");
+        for (var i = 0; i < 30; i++) f.CriarUsuario($"nat{i}@example.com", Role.Ouvinte);
+        var c = Cliente(f);
+        for (var i = 0; i < 30; i++)
+            Assert.Equal(HttpStatusCode.OK, (await Login(c, $"nat{i}@example.com", Senha)).StatusCode);
     }
 
     [Fact]
@@ -239,8 +250,8 @@ public class AuthEndpointsTests
             .WithWebHostBuilder(b => b.ConfigureServices(s => s.AddSingleton<WebRadio.Application.Abstracoes.ISenhaHasher>(contado)))
             .CreateClient(new() { BaseAddress = new Uri("http://localhost") });
 
-        for (var i = 0; i < 5; i++) await Login(c, "naoexiste@example.com", Senha);
-        Assert.Equal(5, contado.Chamadas); // 1 PBKDF2 por tentativa que chegou ao handler
+        for (var i = 0; i < 30; i++) await Login(c, $"naoexiste{i}@example.com", Senha);
+        Assert.Equal(30, contado.Chamadas); // 1 PBKDF2 por tentativa que chegou ao handler
 
         for (var i = 0; i < 20; i++)
         {
@@ -248,7 +259,7 @@ public class AuthEndpointsTests
             Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode);
         }
 
-        Assert.Equal(5, contado.Chamadas); // as 20 rejeitadas pelo limiter não custaram CPU de hash
+        Assert.Equal(30, contado.Chamadas); // as 20 rejeitadas pelo limiter não custaram CPU de hash
     }
 
     [Fact]
