@@ -44,6 +44,7 @@ public sealed class AuthEndpoints : IEndpointModule
                 return RespostaDeSessao(http, r, emissor);
             })
             .AllowAnonymous()
+            .WithName(Taxa401DoLoginExtensions.NomeDoEndpointDeLogin)
             .RequireRateLimiting(PoliticaLogin);
 
         auth.MapPost("/registrar", async (RegistrarRequest req, HttpContext http, IMediator mediator, CancellationToken ct) =>

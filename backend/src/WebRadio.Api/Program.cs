@@ -228,6 +228,7 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseLimiteDeCorpoDeAuth();
 app.UseRouting();
+app.UseMarcaDoEndpointDeLogin(); // #9: marca o login para o AUTH_401_TAXA (o exception handler zera o endpoint)
 app.UseListenerInternoGuard();
 app.UseRateLimiter();
 app.UseAuthentication();

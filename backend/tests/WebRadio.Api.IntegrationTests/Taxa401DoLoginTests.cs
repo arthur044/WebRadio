@@ -67,6 +67,40 @@ public class Taxa401DoLoginTests
         Assert.Equal(2, contador.Coletar());
     }
 
+    [Theory]
+    [InlineData(3, LogLevel.Information)]
+    [InlineData(59, LogLevel.Information)]
+    [InlineData(60, LogLevel.Warning)] // 1 por segundo na média
+    [InlineData(600, LogLevel.Warning)]
+    public void Abaixo_de_1_por_segundo_e_Information_e_a_partir_de_1_por_segundo_e_Warning(int total, LogLevel esperado)
+    {
+        var contador = new ContadorDe401DoLogin();
+        var log = new LogFalso();
+        for (var i = 0; i < total; i++) contador.Registrar();
+
+        new Taxa401DoLoginJob(contador, log).Emitir();
+
+        Assert.Equal(esperado, Assert.Single(log.Linhas).Nivel);
+    }
+
+    [Theory]
+    [InlineData("/api/v1/auth/login/")]
+    [InlineData("/API/V1/AUTH/LOGIN")]
+    [InlineData("/api/v1/Auth/Login/")]
+    public async Task Variacoes_do_path_do_login_casam_o_mesmo_endpoint_e_tambem_contam(string caminho)
+    {
+        var f = new ApiFactory { RemoteIp = IPAddress.Parse("203.0.113.42") };
+        f.CriarUsuario("ana@example.com", Role.Locutor);
+        var c = f.CreateClient(new() { BaseAddress = new Uri("http://localhost") });
+        var contador = f.Services.GetRequiredService<ContadorDe401DoLogin>();
+        contador.Coletar();
+
+        var r = await c.PostAsJsonAsync(caminho, new { email = "ana@example.com", senha = "senha-errada-123" });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode); // a barra final e a caixa não escapam do endpoint
+        Assert.Equal(1, contador.Coletar()); // nem do alerta de força bruta
+    }
+
     /// <summary>O semáforo global de PBKDF2 (R1) com todas as vagas ocupadas: a espera estoura e o hasher lança <see cref="ServidorOcupadoException"/>.</summary>
     private sealed class HasherLotado : ISenhaHasher
     {
