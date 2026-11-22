@@ -116,11 +116,12 @@ Jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra 
 
 O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload foi fechado: as imagens construídas (Liquidsoap e `harbor-borda`) e as de SQL Server, Redis e MinIO não têm CRITICAL corrigível, e o trivy do CI falha se aparecer uma. O alpine do `minio-init` e os HIGH seguem só informativos (risco aceito (2) do B3, no `05`, §4).
 
-### Entregue depois (hotfixes, PRs #128, #134 e #135)
+### Entregue depois (hotfixes, PRs #128, #134, #135 e #150)
 
 - **#128**: a `main` ficou vermelha por NU1903 (DoS no ASP.NET Core, GHSA-wr8v-9x5q-ggcm): pacotes Microsoft.* e imagens `dotnet/*` foram para a 10.0.15, e o Dependabot passou a ignorar o major (11.x) desses pacotes. O mesmo PR corrigiu `libxslt` r4 no `web` e no `harbor-borda`, e o `minio-init`, que quebrava quando a secret key gerada começava com `-`.
 - **#134**: o `minio-init` morria por falta de memória com `mem_limit: 128m` (o `mc` passa disso no `policy attach`); passou para 256m. O `ler` do `minio-init` recusa segredo que começa com `-` sem imprimir o valor, e o job de Infra ganhou `infra/minio/teste.sh`.
 - **#135**: o gitleaks isenta o `65532:65532` (uid do sanitizer) no `smoke-midia.sh`, falso positivo que derrubava todo PR.
+- **#150**: o `liquidsoap` do Compose passou para `mem_limit: 512m`. O boot dele pica em ~420 MiB e o contêiner era morto (`Restarting (137)`) quando o runner não deixava usar swap; era a causa do #139.
 
 ### Pendente
 
@@ -161,12 +162,12 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 | Spec | Pacote de tarefas do Épico 4 (v1.6: o que o D2 mostrou, com os reviews do Guardian, do Sentinel e do Atlas) | #92, #108, #141 | Na `main` |
 | D1 | Imagens de terceiros sem CRITICAL corrigível e trivy bloqueando (E4-F01) | #95 | Na `main` |
 | D2 | Upload, sanitização, ClamAV, biblioteca e limpezas (backend): E4-F02 a F07, F09 e o `smoke-midia.sh` (F10, parte de upload) | #112 | Na `main` |
-| D3 | Playout pela biblioteca e relatório de mais tocadas (backend); abre com o A01a do Atlas (chave de sorteio e índices) | A01a: #111 | A01a na `main`; o resto (F08, A02, A01b) começando |
+| D3 | Playout pela biblioteca e relatório de mais tocadas (backend); abre com o A01a do Atlas (chave de sorteio e índices) | A01a: #111; #143 (rascunho) | A01a na `main`; o resto (F08, A02, A01b) começando |
 | D4 | Telas: biblioteca, envio, aprovar com mídia, mais tocadas | #110 | PR em rascunho, aguarda o D3 (aprovar com mídia e mais tocadas dependem dele) |
 
 - **Já na API**: `POST /midias/uploads` e `/midias/{id}/concluir` (envio direto ao storage por POST policy, com limites de 20 por hora e 5 abertos por usuário), `GET /midias` e `GET /midias/{id}`, preview, `PATCH`/`DELETE`, o pipeline do Worker e as limpezas da manutenção. O contrato está na §6 de [`docs/specs/02-api-rest.md`](docs/specs/02-api-rest.md).
 - **Ainda não existe**: tela de biblioteca ou de envio (D4) e playout pela biblioteca (D3): o pedido aprovado segue sem tocar sozinho e `GET /internal/playout/proxima` segue em 204.
-- **Pendências do D2** (issues #136 a #140): trava contra apagão em `midia/` numa biblioteca pequena (#136), a mesma trava na varredura da quarentena (#137), o marcador `WORKER_DEGRADADO motivo=sanitizer` (#138), o Liquidsoap com `Restarting (137)` intermitente no Compose do CI (#139) e o piso do `INCRBY` negativo no throttle na virada da hora (#140). O smoke não testa a recusa pela quota do bucket `quarentena` (o MinIO só a aplica depois da medição dele); confere que a quota está configurada.
+- **Pendências do D2** (issues #136 a #140; a #139, do Liquidsoap com `Restarting (137)`, foi corrigida pelo #150 e a issue segue aberta até o Nexus fechar): trava contra apagão em `midia/` numa biblioteca pequena (#136), a mesma trava na varredura da quarentena (#137), o marcador `WORKER_DEGRADADO motivo=sanitizer` (#138) e o piso do `INCRBY` negativo no throttle na virada da hora (#140). O smoke não testa a recusa pela quota do bucket `quarentena` (o MinIO só a aplica depois da medição dele); confere que a quota está configurada.
 - **Revisão**: todo PR do Épico 4 passa pelo Sentinel, por ser o épico do upload não confiável.
 
 ## O que vem a seguir
@@ -250,5 +251,5 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 ---
 
 **Versão**: Épico 3 fechado; Épico 4 em andamento (spec v1.6; D1, A01a e D2 na `main`)  
-**Última atualização**: 2026-11-19  
+**Última atualização**: 2026-11-22  
 **Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend), Lore (Documentação)
