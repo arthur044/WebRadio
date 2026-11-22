@@ -70,6 +70,7 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<TratadorDeExcecoes>();
 builder.Services.AddEndpointModules();
+builder.Services.AddTaxa401DoLogin(); // #9: AUTH_401_TAXA por minuto
 HealthEndpoints.AddHealthChecksDaApi(builder.Services, builder.Configuration);
 RealtimeEndpoints.AddRealtime(builder.Services, builder.Configuration);
 builder.Services.AddOpenApi();
@@ -230,6 +231,7 @@ if (!subnetValida)
     app.Logger.LogWarning("Rede:SubnetApp ausente: X-Forwarded-For será ignorado (aceitável só em Development).");
 
 app.UseForwardedHeaders();
+app.UseContagemDe401DoLogin();
 // Request logging ANTES do exception handler: erros de domínio (409/400) viram resposta tratada e saem como
 // Information; só exceção inesperada é logada como Error (uma vez, pelo TratadorDeExcecoes).
 app.UseSerilogRequestLogging();
@@ -237,6 +239,7 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseLimiteDeCorpoDeAuth();
 app.UseRouting();
+app.UseMarcaDoEndpointDeLogin(); // #9: marca o login para o AUTH_401_TAXA (o exception handler zera o endpoint)
 app.UseListenerInternoGuard();
 app.UseRateLimiter();
 app.UseAuthentication();

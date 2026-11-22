@@ -10,7 +10,7 @@ namespace WebRadio.Infrastructure.Seguranca;
 /// <summary>
 /// S-M10. A rotação é um UPDATE condicional (RevogadoEmUtc IS NULL): zero linhas afetadas = outro request já consumiu o
 /// token. Dentro da janela de 10 s o sucessor é devolvido de novo; como o banco guarda só o hash, o valor do sucessor é
-/// derivado do hash do pai com HKDF-SHA256 (chave = pepper, info = "refresh-successor"): reproduzível por quem tem o
+/// derivado do hash do pai com HKDF-SHA256 (chave = subchave <c>refresh</c> do pepper, #17; info = "refresh-successor"): reproduzível por quem tem o
 /// pepper, inalcançável sem ele. Depois da janela, o reuso revoga a família inteira (sinal de roubo).
 /// </summary>
 public sealed class RefreshTokenService(
@@ -21,6 +21,9 @@ public sealed class RefreshTokenService(
     ILogger<RefreshTokenService> logger) : IRefreshTokenService
 {
     public static readonly TimeSpan JanelaDeReuso = TimeSpan.FromSeconds(10);
+
+    // Subchave HKDF própria do refresh (#17): o pepper cru nunca entra na derivação do sucessor.
+    private readonly byte[] _chaveDoSucessor = SubchavesDoPepper.Derivar(pepper, SubchavesDoPepper.Refresh);
 
     public async Task<ResultadoRotacao> RotacionarAsync(string tokenBruto, byte[] ipHash, CancellationToken ct)
     {
@@ -36,8 +39,10 @@ public sealed class RefreshTokenService(
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             var agora = clock.UtcNow;
 
+            // A família tem teto absoluto (#18): passou de FamiliaCriadaEmUtc + 30 dias, a rotação é inválida mesmo que a ExpiraEmUtc deste token ainda esteja no futuro (linha anterior à coluna).
+            var diasDoTeto = RefreshToken.TetoDaFamilia.TotalDays;
             var reivindicado = await db.RefreshTokens
-                .Where(t => t.TokenHash == hash && t.RevogadoEmUtc == null && t.ExpiraEmUtc > agora)
+                .Where(t => t.TokenHash == hash && t.RevogadoEmUtc == null && t.ExpiraEmUtc > agora && t.FamiliaCriadaEmUtc.AddDays(diasDoTeto) > agora)
                 .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevogadoEmUtc, agora), ct);
 
             var atual = await db.RefreshTokens.AsNoTracking().FirstOrDefaultAsync(t => t.TokenHash == hash, ct);
@@ -45,7 +50,7 @@ public sealed class RefreshTokenService(
 
             ResultadoRotacao resultado;
             if (reivindicado == 1) resultado = await CriarSucessorAsync(atual, hash, ipHash, agora, ct);
-            else if (atual.RevogadoEmUtc is null) resultado = ResultadoRotacao.Invalido; // expirado, não reusado
+            else if (atual.RevogadoEmUtc is null) resultado = ResultadoRotacao.Invalido; // expirado ou família além do teto, não reusado
             else resultado = await TratarTokenRevogadoAsync(atual, hash, agora, ct);
 
             await tx.CommitAsync(ct);
@@ -87,7 +92,7 @@ public sealed class RefreshTokenService(
     private async Task<ResultadoRotacao> CriarSucessorAsync(RefreshToken pai, byte[] hashPai, byte[] ipHash, DateTime agora, CancellationToken ct)
     {
         var novo = DerivarSucessor(hashPai);
-        var sucessor = new RefreshToken(Guid.CreateVersion7(), pai.UsuarioId, novo.Hash, pai.FamiliaId, agora, tokens.DuracaoDoRefresh, ipHash);
+        var sucessor = new RefreshToken(Guid.CreateVersion7(), pai.UsuarioId, novo.Hash, pai.FamiliaId, agora, tokens.DuracaoDoRefresh, ipHash, familiaCriadaEmUtc: pai.FamiliaCriadaEmUtc);
 
         db.RefreshTokens.Add(sucessor);
         await db.SaveChangesAsync(ct);
@@ -129,5 +134,5 @@ public sealed class RefreshTokenService(
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevogadoEmUtc, agora), ct);
 
     private RefreshOpaco DerivarSucessor(byte[] hashPai) =>
-        RefreshOpaco.De(HKDF.DeriveKey(HashAlgorithmName.SHA256, pepper, RefreshOpaco.TamanhoEmBytes, salt: hashPai, info: "refresh-successor"u8.ToArray()));
+        RefreshOpaco.De(HKDF.DeriveKey(HashAlgorithmName.SHA256, _chaveDoSucessor, RefreshOpaco.TamanhoEmBytes, salt: hashPai, info: "refresh-successor"u8.ToArray()));
 }
