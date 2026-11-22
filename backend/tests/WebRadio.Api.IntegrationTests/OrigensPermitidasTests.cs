@@ -47,4 +47,37 @@ public class OrigensPermitidasTests
         Assert.False(o.Contem(null));
         Assert.False(o.Contem(""));
     }
+
+    private static Microsoft.AspNetCore.Http.DefaultHttpContext Req(string esquema, string host, string origem, string? fetchSite = null)
+    {
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        http.Request.Scheme = esquema;
+        http.Request.Host = new Microsoft.AspNetCore.Http.HostString(host);
+        http.Request.Headers.Origin = origem;
+        if (fetchSite is not null) http.Request.Headers["Sec-Fetch-Site"] = fetchSite;
+        return http;
+    }
+
+    // Admin pôs PUBLIC_AUTHORITY=radio.x:443: o Host chega com :443 e o Origin do navegador, sem. Antes: 403 em todo refresh/logout.
+    [Theory]
+    [InlineData("https", "radio.x:443", "https://radio.x")]
+    [InlineData("https", "radio.x", "https://radio.x:443")]
+    [InlineData("http", "radio.x:80", "http://radio.x")]
+    [InlineData("https", "Radio.X", "https://radio.x")]
+    [InlineData("https", "localhost:8080", "https://localhost:8080")]
+    public void Propria_origem_casa_com_ou_sem_a_porta_padrao(string esquema, string host, string origem)
+        => Assert.True(OrigemDaRequisicao.EhPermitida(Req(esquema, host, origem, "same-origin"), Com()));
+
+    [Theory]
+    [InlineData("https", "radio.x:8443", "https://radio.x")]   // porta não padrão faz diferença
+    [InlineData("https", "radio.x", "http://radio.x")]          // esquema diferente
+    [InlineData("https", "radio.x", "https://evil.example")]
+    [InlineData("https", "radio.x", "null")]
+    [InlineData("https", "radio.x", "")]                         // Origin ausente
+    public void Origem_que_nao_e_a_propria_e_recusada(string esquema, string host, string origem)
+        => Assert.False(OrigemDaRequisicao.EhPermitida(Req(esquema, host, origem), Com()));
+
+    [Fact]
+    public void Propria_origem_com_Sec_Fetch_Site_cross_site_continua_recusada()
+        => Assert.False(OrigemDaRequisicao.EhPermitida(Req("https", "radio.x:443", "https://radio.x", "cross-site"), Com()));
 }

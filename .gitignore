@@ -34,6 +34,9 @@ pnpm-debug.log*
 *.pem
 *.key
 secrets/
+# Overrides de operação (rotação da Jwt__SigningKey, limite do Worker): carregam caminho de segredo e só existem durante a operação.
+docker-compose.rotacao-jwt.yml
+docker-compose.limite.yml
 
 ## Maestri (canvas de orquestração dos agentes; não faz parte do repositório do produto)
 .maestri/
