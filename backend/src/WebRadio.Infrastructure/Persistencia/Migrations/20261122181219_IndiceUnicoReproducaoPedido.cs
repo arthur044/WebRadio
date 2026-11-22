@@ -5,7 +5,7 @@
 namespace WebRadio.Infrastructure.Persistencia.Migrations
 {
     /// <summary>
-    /// E4-A03 (#151, 08 E4-F08 v1.7): <c>UX_Reproducao_PedidoId</c> no lugar do <c>IX_Reproducao_PedidoId</c>. Antes de criar o único, apaga as duplicatas por <c>PedidoId</c> que um <c>FaixaIniciada</c> simultâneo
+    /// #151 (08 E4-F08, v1.7): <c>UX_Reproducao_PedidoId</c> no lugar do <c>IX_Reproducao_PedidoId</c>. Antes de criar o único, apaga as duplicatas por <c>PedidoId</c> que um <c>FaixaIniciada</c> simultâneo
     /// possa ter gravado (fica a primeira por <c>IniciadoEmUtc, Id</c>) e imprime quantas apagou (<c>REPRODUCAO_DEDUP</c>; aparece no sqlcmd e no ddl-check, não no efbundle). Esperado: 0.
     /// </summary>
     public partial class IndiceUnicoReproducaoPedido : Migration

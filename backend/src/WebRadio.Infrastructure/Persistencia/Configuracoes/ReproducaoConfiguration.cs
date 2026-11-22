@@ -45,7 +45,7 @@ public sealed class ReproducaoConfiguration : IEntityTypeConfiguration<Reproduca
         builder.HasIndex(r => r.MidiaId)
             .HasDatabaseName("IX_Reproducao_MidiaId");
 
-        // E4-A03 (#151): um pedido gera no máximo uma Reproducao. Filtrado, porque a rotação grava PedidoId nulo (o único sem filtro aceitaria uma linha nula só). Substitui o IX_Reproducao_PedidoId da convenção de FK.
+        // #151 (08 E4-F08, v1.7): um pedido gera no máximo uma Reproducao. Filtrado, porque a rotação grava PedidoId nulo (o único sem filtro aceitaria uma linha nula só). Substitui o IX_Reproducao_PedidoId da convenção de FK.
         builder.HasIndex(r => r.PedidoId)
             .IsUnique()
             .HasFilter("PedidoId IS NOT NULL")
