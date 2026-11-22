@@ -72,7 +72,7 @@ api() { # $1 método, $2 caminho, $3 token, $4 corpo JSON em arquivo (opcional);
 }
 status_de() { printf '%s' "${1%% *}"; }
 corpo_de() { printf '%s' "${1#* }"; }
-login() { # $1 e-mail, $2 senha; o /auth/login tem 5 por minuto por IP: espera e tenta de novo no 429
+login() { # $1 e-mail, $2 senha; o /auth/login tem 30 por minuto por IP: espera e tenta de novo no 429
   python3 -I -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "senha": sys.argv[2]}))' "$1" "$2" > "$TMP/login.json"
   local saida codigo
   for _ in 1 2 3 4 5 6; do
@@ -301,9 +301,9 @@ else
   falha "a música do pedido não chegou a Aprovado (policy $UP_POLICY, multipart $UP_POST, concluir $UP_CONCLUIR)"
 fi
 
-# A API tem um limite global de 100 requisições por minuto por IP (janela FIXA, Program.cs). O DoD 7 faz bem mais que isso, e a janela que ele deixa aberta derrubaria o E2E que roda
-# logo depois (429 já nas primeiras chamadas): espera a janela virar antes e depois.
-esperar_janela() { echo "  (espera 62 s: a janela de 100/min por IP da API)"; sleep 62; }
+# A API tem um limite global por IP em janela FIXA de 1 min (600 em produção, 2000 no Compose de dev/smoke: Program.cs e docker-compose.dev.yml). Por segurança contra uma
+# janela aberta derrubar o E2E que roda logo depois (429 nas primeiras chamadas), espera a janela virar antes e depois.
+esperar_janela() { echo "  (espera 62 s: a janela do limite global por IP da API)"; sleep 62; }
 esperar_janela
 echo "== DoD 7: 20 por hora, 5 abertos e a quota"
 python3 -I -c 'import json; print(json.dumps({"nomeOriginal": "a.mp3", "tipoMidia": "Vinheta", "tamanhoBytes": 1000, "mimeTypeDeclarado": "audio/mpeg"}))' > "$TMP/pequeno.json"
