@@ -1,6 +1,6 @@
 # Worker degradado: o que fazer com cada `WORKER_DEGRADADO`
 
-Runbook do alerta do Worker (spec [`08-epico-4-tarefas.md`](../specs/08-epico-4-tarefas.md), E4-D11 e E4-D13). Escrito pelo Forge; o Lore revisa o texto.
+Runbook do alerta do Worker (spec [`08-epico-4-tarefas.md`](../specs/08-epico-4-tarefas.md), E4-D11 e E4-D13).
 
 ## Como o alerta aparece
 
@@ -23,7 +23,7 @@ Há cinco motivos (lista fechada): `scanner`, `assinatura_velha`, `sanitizer`, `
 
 **O que significa.** O `clamd` recusa a conexão ou não responde ao `PING`. O Worker não captura nenhum item nem baixa nenhum arquivo enquanto isso durar.
 
-**O que se perde.** Nada. Os envios ficam `Pendente` e a tentativa é devolvida (um antivírus parado nunca rejeita arquivo legítimo nem aprova sem scan).
+**O que se perde.** Nada. Os envios ficam `Pendente` e o item não perde tentativa (um antivírus parado nunca rejeita arquivo legítimo nem aprova sem scan).
 
 **Passos.**
 
@@ -48,7 +48,7 @@ Há cinco motivos (lista fechada): `scanner`, `assinatura_velha`, `sanitizer`, `
 
 **O que significa.** Uma de duas coisas: o sanitizer não pegou o job no prazo (30 s), ou o diretório de jobs (`/jobs`, volume `sanitizer-jobs`, compartilhado entre o Worker e o sanitizer) está inacessível ao Worker.
 
-**O que se perde.** Nada. O item volta a `Pendente` e a tentativa é devolvida.
+**O que se perde.** Nada. O item volta a `Pendente` e não perde tentativa.
 
 **Passos.**
 
@@ -70,7 +70,7 @@ Há cinco motivos (lista fechada): `scanner`, `assinatura_velha`, `sanitizer`, `
 2. **Confira que o banco é o certo.** Esta é a verificação que importa: o Worker está apontando para o banco de produção, ele não foi restaurado de um backup antigo, e a biblioteca está lá?
    - Banco errado, vazio ou restaurado: **não suba o limite.** Corrija a conexão ou o banco; a trava está fazendo o trabalho dela.
    - Consulta falhou: resolva o SQL (conexão, credencial `webradio_app`); a próxima rodada tenta de novo.
-3. Se o banco está certo e os N órfãos são legítimos (por exemplo, uma limpeza em lote de mídias rejeitadas), **suba o limite por uma execução**. O teto é o menor entre `LimiteExclusao` e o maior entre o piso e 10%, então para apagar N órfãos suba **os dois**, `Manutencao__Midia__LimiteExclusao` e `Manutencao__Midia__PisoExclusao`, para `N` ou mais. O Worker recusa subir com `LimiteExclusao` acima de 500.
+3. Se o banco está certo e os N órfãos são legítimos (por exemplo, uma limpeza em lote de mídias rejeitadas), **suba o limite por uma execução**. O teto é `min(LimiteExclusao, max(PisoExclusao, 10%))`, então suba **os dois**, `Manutencao__Midia__LimiteExclusao` e `Manutencao__Midia__PisoExclusao`, para `N` ou mais. O Worker recusa subir com `LimiteExclusao` acima de 500.
 
    Num arquivo de override fora do git (por exemplo `docker-compose.limite.yml`):
 
@@ -89,11 +89,13 @@ Há cinco motivos (lista fechada): `scanner`, `assinatura_velha`, `sanitizer`, `
 4. Espere a rodada diária seguinte e confirme que passou (`WORKER_LIMPEZA_MIDIA` com a contagem apagada e `WORKER_RECUPERADO motivo=trava_apagao`).
 5. **Volte ao padrão**: apague o override e rode `docker compose up -d worker`. Um limite esquecido enfraquece a trava (por isso o teto de 500).
 
+**Não faça.** Subir o limite sem ter conferido o banco: com o banco errado, a rodada apaga a biblioteca que a trava existe para proteger.
+
 **Custo aceito do piso.** Com o banco vazio, a trava só pega depois de apagar até 5 objetos.
 
 ## `trava_apagao_quarentena`: a varredura de 30 minutos da quarentena abortou
 
-**O que significa.** A varredura de órfãos do prefixo `quarentena/` (a cada 30 min, `Manutencao:Quarentena:IntervaloOrfaosMinutos`) abortou **sem apagar nada**: a consulta ao banco falhou, ou ela apagaria mais de `Manutencao:Quarentena:LimiteExclusao` objetos (padrão 50, limite absoluto, sem percentual). A trava é própria da quarentena e só a própria varredura recupera o motivo (a rodada diária de `midia/` não toca nele).
+**O que significa.** A varredura de órfãos do prefixo `quarentena/` (a cada 30 min, `Manutencao:Quarentena:IntervaloOrfaosMinutos`) abortou **sem apagar nada**: a consulta ao banco falhou, ou ela apagaria mais de `Manutencao:Quarentena:LimiteExclusao` objetos (padrão 50, limite absoluto, sem percentual; o Worker recusa subir com esse valor acima de 500). A trava é própria da quarentena e só a própria varredura recupera o motivo (a rodada diária de `midia/` não toca nele).
 
 **O que se perde.** Nada, mas a quarentena não é limpa enquanto a trava estiver ativa, e a quota do bucket pode encher.
 
@@ -102,7 +104,7 @@ Há cinco motivos (lista fechada): `scanner`, `assinatura_velha`, `sanitizer`, `
 1. `docker compose logs --since 3h worker | grep WORKER_LIMPEZA_QUARENTENA_ABORTADA`: a causa e a contagem aparecem na linha.
 2. **Confira que o banco é o certo** (mesma verificação do `trava_apagao`). A quarentena guarda os originais de arquivos em `Quarentena` para análise (S-B06): num banco errado, passar do limite apagaria esses originais.
 3. Consulta falhou: resolva o SQL; a próxima varredura (até 30 min) tenta de novo.
-4. Banco certo e mais de 50 órfãos legítimos (um dia de muitas desistências de envio, por exemplo): suba **só** `Manutencao__Quarentena__LimiteExclusao` (até 500) por uma execução, com o mesmo override do passo 3 do `trava_apagao`:
+4. Banco certo e mais de 50 órfãos legítimos (um dia de muitas desistências de envio, por exemplo): suba **só** `Manutencao__Quarentena__LimiteExclusao` (o piso não existe na quarentena) por uma execução, no mesmo arquivo de override e com o mesmo `up -d worker` do `trava_apagao`:
 
    ```yaml
    services:
@@ -112,5 +114,7 @@ Há cinco motivos (lista fechada): `scanner`, `assinatura_velha`, `sanitizer`, `
    ```
 
 5. Espere a varredura seguinte (até 30 min), confirme `WORKER_RECUPERADO motivo=trava_apagao_quarentena` e **volte ao padrão** (apague o override e rode `docker compose up -d worker`).
+
+**Não faça.** Subir o limite sem ter conferido o banco: com o banco errado, a varredura apaga até os originais em `Quarentena` guardados para análise.
 
 **Custo aceito.** Com o banco vazio, a trava só pega depois de apagar até 50 objetos da quarentena.
