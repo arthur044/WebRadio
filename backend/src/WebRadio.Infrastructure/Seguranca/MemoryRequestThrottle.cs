@@ -40,7 +40,7 @@ public sealed class MemoryRequestThrottle(IClock clock) : IRequestThrottle
         lock (_trava)
         {
             var atual = Viva(chave);
-            var novo = (atual?.Valor ?? 0) + valor;
+            var novo = Math.Max(0, (atual?.Valor ?? 0) + valor); // piso em 0, como o Lua do Redis (#140)
             Gravar(chave, novo, atual?.ExpiraEmUtc ?? clock.UtcNow.Add(ttl));
             return Task.FromResult(novo);
         }

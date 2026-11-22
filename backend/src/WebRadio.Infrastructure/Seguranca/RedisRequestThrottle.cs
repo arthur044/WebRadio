@@ -11,9 +11,11 @@ public sealed class RedisRequestThrottle(IConnectionMultiplexer redis) : IReques
     private const string ScriptIncremento =
         "local v = redis.call('INCR', KEYS[1]) if v == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end return v";
 
-    // INCRBY + PEXPIRE na criação (a chave só passa a existir aqui), atômico.
+    // INCRBY + PEXPIRE na criação (a chave só passa a existir aqui), atômico. Piso em 0: devolver bytes/tentativas numa chave que acabou de virar a hora (ou com saldo menor) não deixa o contador negativo
+    // (um crédito negativo daria cota extra na hora seguinte; #140). SET ... KEEPTTL mantém a janela.
     private const string ScriptIncrementoPor =
-        "local existia = redis.call('EXISTS', KEYS[1]) local v = redis.call('INCRBY', KEYS[1], ARGV[2]) if existia == 0 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end return v";
+        "local existia = redis.call('EXISTS', KEYS[1]) local v = redis.call('INCRBY', KEYS[1], ARGV[2]) if existia == 0 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end " +
+        "if v < 0 then redis.call('SET', KEYS[1], 0, 'KEEPTTL') v = 0 end return v";
 
     // O SE.Redis não aceita CancellationToken: o WaitAsync(ct) só solta quem chama (o comando já enviado termina no servidor).
     public Task<bool> TentarReservarAsync(string chave, TimeSpan ttl, CancellationToken ct = default) =>
