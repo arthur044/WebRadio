@@ -58,10 +58,14 @@ export function RootLayout() {
     role === 'Admin'
       ? [
           ...navItems,
+          { to: '/biblioteca', label: 'Biblioteca' },
           { to: '/admin/grade', label: 'Admin' },
           { to: '/admin/divulgacoes', label: 'Divulgações' },
+          { to: '/admin/mais-tocadas', label: 'Mais tocadas' },
         ]
-      : navItems
+      : role === 'Locutor'
+        ? [...navItems, { to: '/biblioteca', label: 'Biblioteca' }]
+        : navItems
 
   return (
     <div className="bg-surface text-text flex min-h-svh flex-col">

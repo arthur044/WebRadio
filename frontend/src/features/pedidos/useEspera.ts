@@ -32,9 +32,12 @@ export function useEspera() {
   return { restante, iniciar, parar }
 }
 
-/** `272` -> `4:32`. */
+/** `272` -> `4:32`; de 1 h em diante, `5400` -> `1:30:00` (a espera do limite de envios chega a 2 h). */
 export function formatarEspera(segundos: number): string {
-  const min = Math.floor(segundos / 60)
+  const h = Math.floor(segundos / 3600)
+  const min = Math.floor((segundos % 3600) / 60)
   const seg = segundos % 60
-  return `${min}:${String(seg).padStart(2, '0')}`
+  const ss = String(seg).padStart(2, '0')
+  if (h === 0) return `${min}:${ss}`
+  return `${h}:${String(min).padStart(2, '0')}:${ss}`
 }

@@ -40,10 +40,14 @@ describe('descreverErro', () => {
     },
   )
 
-  it('429 com espera absurda: limita a 1 hora', () => {
+  it('429 com espera absurda: limita a 2 horas', () => {
     expect(descreverErro(erro(429, '/x', { retryAfterSeconds: 999_999 })).esperarSegundos).toBe(
-      3600,
+      7200,
     )
+  })
+
+  it('429 do limite de envios abertos (até 2 h) não é cortado em 1 h', () => {
+    expect(descreverErro(erro(429, '/x', { retryAfterSeconds: 7000 })).esperarSegundos).toBe(7000)
   })
 
   it('413: o arquivo passa do limite', () => {
