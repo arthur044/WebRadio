@@ -277,6 +277,70 @@ public class HostTests
     public void Producao_com_rede_hosts_e_redis_explicitos_sobe()
         => ProducaoCompleta().CreateClient().Dispose();
 
+    // #146: o limite global só pode ser afrouxado em Development; fora dele a Api recusa subir (hardening de DDoS).
+    [Theory]
+    [InlineData("101")]
+    [InlineData("2000")]
+    public void Producao_com_limite_global_acima_de_100_falha_no_boot(string limite)
+    {
+        var f = ProducaoCompleta();
+        f.Config["RateLimit:LimiteGlobalPorMinuto"] = limite;
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("100")]
+    [InlineData("50")]
+    public void Producao_com_limite_global_ate_100_sobe(string? limite)
+    {
+        var f = ProducaoCompleta();
+        if (limite is not null) f.Config["RateLimit:LimiteGlobalPorMinuto"] = limite;
+        f.CreateClient().Dispose();
+    }
+
+    [Fact]
+    public void Development_com_limite_global_alto_sobe()
+    {
+        var f = new ApiFactory();
+        f.Config["RateLimit:LimiteGlobalPorMinuto"] = "2000";
+        f.CreateClient().Dispose();
+    }
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("0")]
+    [InlineData("-5")]
+    [InlineData("100001")]
+    [InlineData("1e3")]
+    [InlineData("10.5")]
+    public void Limite_global_invalido_falha_no_boot_ate_em_Development(string limite)
+    {
+        var f = new ApiFactory();
+        f.Config["RateLimit:LimiteGlobalPorMinuto"] = limite;
+        Assert.ThrowsAny<Exception>(() => f.CreateClient());
+    }
+
+    [Fact]
+    public async Task Limite_global_configurado_e_o_que_vale_na_requisicao()
+    {
+        var f = new ApiFactory { RemoteIp = IPAddress.Parse("203.0.113.51") };
+        f.Config["RateLimit:LimiteGlobalPorMinuto"] = "2";
+        var c = Cliente(f, e => e.MapGet("/rl", () => "x").AllowAnonymous());
+        Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/rl")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/rl")).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await c.GetAsync("/rl")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Limite_global_alto_em_Development_nao_corta_nos_100_antigos()
+    {
+        var f = new ApiFactory { RemoteIp = IPAddress.Parse("203.0.113.52") };
+        f.Config["RateLimit:LimiteGlobalPorMinuto"] = "2000";
+        var c = Cliente(f, e => e.MapGet("/rl", () => "x").AllowAnonymous());
+        for (var i = 0; i < 150; i++) Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/rl")).StatusCode);
+    }
+
     [Fact]
     public void Producao_sem_Banco_Senha_falha_no_boot()
     {

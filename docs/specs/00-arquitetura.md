@@ -171,7 +171,7 @@ A regra de dependência é garantida por **teste de arquitetura** (NetArchTest),
 - `FallbackPolicy` = usuário autenticado: um endpoint anônimo precisa de `AllowAnonymous` explícito.
 - Borda nginx: `limit_req`/`limit_conn`, timeouts contra slowloris, CSP e headers de segurança em **todo** `location` (S-M13, S-M14), `X-Forwarded-For` sobrescrito, e `KnownNetworks` com a subnet fixa da rede `app` (S-A11). `/stream/` só aceita GET em `radio.mp3` (S-A07).
 - Harbor `:8005`: senha ≥ 24 caracteres, publicado só com lista de IPs permitidos ou VPN; em dev, `127.0.0.1`. Autenticação por locutor no Épico 2 (S-A08).
-- Limite de requisições (ASP.NET RateLimiter): global de 100/min por IP; `/auth/login` com 5/min por IP; `/pedidos` tem o throttle de domínio além disso.
+- Limite de requisições (ASP.NET RateLimiter): global de 100/min por IP (configurável por `RateLimit__LimiteGlobalPorMinuto`, 1 a 100000; acima de 100 só em Development, fora dele a Api recusa subir; o `docker-compose.dev.yml` usa 2000 para o smoke/E2E, `RATE_LIMIT_GLOBAL`); `/auth/login` com 5/min por IP; `/pedidos` tem o throttle de domínio além disso.
 - Contêineres sem root, segredos em `.env` (nunca versionado; o repositório tem `.env.example`), e SQL, MinIO e Redis sem porta pública fora do perfil dev.
 
 ## 5. Riscos
