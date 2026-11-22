@@ -51,7 +51,7 @@ server {
     # --- API (mais restrito primeiro: /api/v1/auth/ vence por prefixo mais longo) ---
     location /api/v1/auth/ {
         include /etc/nginx/security-headers.conf;
-        limit_req zone=api_auth burst=10 nodelay;
+        limit_req zone=api_auth burst=30 nodelay;
         client_max_body_size 1m;
 
         include /etc/nginx/conf.d/proxy-api.inc;
