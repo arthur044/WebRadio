@@ -17,17 +17,21 @@ export function atrasoDeRetry(tentativa: number): number {
 /**
  * `withAutomaticReconnect` só cobre queda DEPOIS de conectado, e a política padrão desiste após
  * 4 tentativas. Aqui o `start()` inicial (e a retomada após `onclose`) repete com backoff até
- * conseguir ou até `cancelado()` virar true (unmount).
+ * conseguir ou até `cancelado()` virar true (unmount). `aoConectar` roda depois de cada `start()` que deu certo: o
+ * handshake responde antes de a conexão entrar nos grupos (`RadioHub.OnConnectedAsync`), então um evento dessa janela
+ * se perde e só a releitura por REST o recupera (E4-146).
  */
 export async function iniciarComRetry(
   connection: Pick<import('@microsoft/signalr').HubConnection, 'start' | 'state'>,
   cancelado: () => boolean,
   esperar: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+  aoConectar?: () => void,
 ): Promise<void> {
   for (let tentativa = 0; !cancelado(); tentativa++) {
     if (connection.state !== HubConnectionState.Disconnected) return
     try {
       await connection.start()
+      if (!cancelado()) aoConectar?.()
       return
     } catch {
       // Sem hub (deploy/rede) — a UI segue só com REST; tenta de novo com backoff.
@@ -163,10 +167,15 @@ export function useRealtimeHub(): void {
 
     let cancelado = false
     // Rede de segurança: se mesmo assim a conexão fechar, volta a tentar com backoff.
-    connection.onclose(() => {
-      void iniciarComRetry(connection, () => cancelado)
-    })
-    void iniciarComRetry(connection, () => cancelado)
+    const iniciar = () =>
+      void iniciarComRetry(
+        connection,
+        () => cancelado,
+        undefined,
+        () => invalidarEstadoDaRadio(queryClient),
+      )
+    connection.onclose(iniciar)
+    iniciar()
 
     return () => {
       cancelado = true
