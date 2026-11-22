@@ -158,7 +158,7 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 
 | Pacote | Entrega | PR | Situação |
 |---|---|---|---|
-| Spec | Pacote de tarefas do Épico 4 (v1.5, com os reviews do Guardian, do Sentinel e do Atlas) | #92, #108 | Na `main` |
+| Spec | Pacote de tarefas do Épico 4 (v1.6: o que o D2 mostrou, com os reviews do Guardian, do Sentinel e do Atlas) | #92, #108, #141 | Na `main` |
 | D1 | Imagens de terceiros sem CRITICAL corrigível e trivy bloqueando (E4-F01) | #95 | Na `main` |
 | D2 | Upload, sanitização, ClamAV, biblioteca e limpezas (backend): E4-F02 a F07, F09 e o `smoke-midia.sh` (F10, parte de upload) | #112 | Na `main` |
 | D3 | Playout pela biblioteca e relatório de mais tocadas (backend); abre com o A01a do Atlas (chave de sorteio e índices) | A01a: #111 | A01a na `main`; o resto (F08, A02, A01b) começando |
@@ -249,6 +249,6 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 
 ---
 
-**Versão**: Épico 3 fechado; Épico 4 em andamento (spec v1.5; D1, A01a e D2 na `main`)  
+**Versão**: Épico 3 fechado; Épico 4 em andamento (spec v1.6; D1, A01a e D2 na `main`)  
 **Última atualização**: 2026-11-19  
 **Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend), Lore (Documentação)
