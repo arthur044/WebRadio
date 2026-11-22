@@ -110,7 +110,7 @@ server {
     # --- Stream (Icecast) — só GET/HEAD em radio.mp3, resto 404 (S-A07: sem /admin, sem SOURCE) ---
     location = /stream/radio.mp3 {
         include /etc/nginx/security-headers.conf;
-        limit_conn conn_stream 50; # por IP: ouvintes atrás de NAT dividem o IP (cada ouvinte = 1 conexão de stream)
+        limit_conn conn_stream 25; # por IP: ouvintes atrás de NAT dividem o IP (cada ouvinte = 1 conexão de stream). 25 e não 50: o Icecast aceita 200 no total (ICECAST_MAX_CLIENTES); 8 IPs enchem
         limit_except GET HEAD {
             deny all;
         }
