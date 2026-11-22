@@ -253,7 +253,7 @@ O Liquidsoap interpreta URIs com protocolos como `annotate:`, `process:` (que **
 > **Riscos aceitos dos limites por IP atrás de NAT (Nexus e Sentinel, PR #162, 2026-11-22; para a revisão de riscos com o usuário).** Escola, empresa e CGNAT de operadora dividem um IP, então os limites por IP subiram (global 600/min, login 30/min, `conn_stream` 25, `conn_hubs` 50; 00 §174).
 > (1) **BAIXO: `/auth/registrar` (3/h) e a sessão (30/min) por IP também sofrem com NAT**, e não foram mexidos na v1: uma conta nova atrás de um NAT cheio pode ter de esperar a janela. Aceito; só se mexe se aparecer queixa real.
 > (2) **Password spraying por IP 6 vezes maior** (de 5 para 30 tentativas/min por IP). Contra uma conta nada muda (5 falhas por conta e IP); o que cresce é uma senha comum contra muitas contas de um IP só (~43 mil por dia), pago em PBKDF2 por tentativa e limitado pelo semáforo (503). O `AUTH_401_TAXA` não pega um IP sozinho (0,5/s < 1/s): `docs/runbooks/auth-401-taxa.md`.
-> (3) **Capacidade do Icecast (200 clientes) não foi medida**: com 25 conexões por IP, 8 IPs enchem o stream. O teto (`ICECAST_MAX_CLIENTES`) e o `mem_limit` do Icecast (128m) se medem no deploy.
+> (3) **Capacidade do Icecast (200 clientes) não foi medida**: com 25 conexões por IP, 8 IPs enchem o stream. O teto (`ICECAST_MAX_CLIENTES`), o `mem_limit` do Icecast (128m) e o do `web` (128m, com `worker_connections` 4096 e 2 conexões por ouvinte) se medem no deploy.
 
 ---
 
