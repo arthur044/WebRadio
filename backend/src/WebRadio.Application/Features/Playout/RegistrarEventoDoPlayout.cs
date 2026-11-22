@@ -57,7 +57,7 @@ public sealed class RegistrarEventoDoPlayoutValidator : AbstractValidator<Regist
 /// <c>FaixaIniciada</c> (08 E4-F08): atualiza o "tocando agora" e publica <c>TocandoAgora</c> (com o <c>tipoMidia</c> da biblioteca); com <c>midiaId</c> grava a linha de <c>midia.Reproducao</c> (com o
 /// <c>PedidoId</c> e o <c>ProgramaId</c> da janela, regra do E3-D1) e, com <c>pedidoId</c> de um pedido <c>Aprovado</c> DESTA mídia, marca <c>Tocado</c> e publica <c>PedidoTocado</c> (par pedido/mídia que não
 /// bate é tratado como rotação). É idempotente só por pedido: o evento repetido do mesmo pedido não duplica a <c>Reproducao</c>, o <c>Tocado</c> nem o evento. Na rotação não há chave (o <c>radio.liq</c> não
-/// reenvia o evento) e <c>midia.Reproducao.PedidoId</c> não tem índice único (follow-up com o Atlas). O que tocou (<c>Reproducao</c> e <c>TocandoAgora</c>) é salvo antes do <c>Tocado</c>: o <c>RowVersion</c>
+/// reenvia o evento); com pedido, o <c>UX_Reproducao_PedidoId</c> (#151) decide a corrida de dois eventos simultâneos: o que perde o INSERT é tratado como repetido. O que tocou (<c>Reproducao</c> e <c>TocandoAgora</c>) é salvo antes do <c>Tocado</c>: o <c>RowVersion</c>
 /// decide a corrida com um <c>MarcarTocado</c> manual do locutor sem apagar a faixa do relatório.
 /// </summary>
 public sealed class RegistrarEventoDoPlayoutHandler(ITocandoAgoraStore tocandoAgora, IOutbox outbox, IRadioDbContext db, IConsultasDePedidos consultas, IClock clock)
@@ -72,6 +72,7 @@ public sealed class RegistrarEventoDoPlayoutHandler(ITocandoAgoraStore tocandoAg
         Guid? pedidoId = null;
         var pedidoNoAr = cmd.PedidoId; // o que vai ao "tocando agora" e ao hub: o do evento, menos o de um par pedido/mídia trocado
         PedidoMusica? aMarcar = null;
+        Reproducao? nova = null;
         var repetido = false;
 
         if (cmd.MidiaId is { } midiaId)
@@ -96,7 +97,8 @@ public sealed class RegistrarEventoDoPlayoutHandler(ITocandoAgoraStore tocandoAg
                 if (!repetido)
                 {
                     var programaId = await consultas.ProgramaDaJanelaAsync(ct);
-                    db.Reproducoes.Add(new Reproducao(midiaId, pedidoId, programaId, iniciadoEmUtc));
+                    nova = new Reproducao(midiaId, pedidoId, programaId, iniciadoEmUtc);
+                    db.Reproducoes.Add(nova);
                 }
             }
         }
@@ -112,7 +114,19 @@ public sealed class RegistrarEventoDoPlayoutHandler(ITocandoAgoraStore tocandoAg
         }
 
         // 1º salvamento: o que TOCOU (Reproducao e TocandoAgora) não depende da corrida do pedido; o Tocado vai separado, para a derrota no RowVersion não apagar a faixa do relatório e da janela de repetição.
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex is not DbUpdateConcurrencyException && nova?.PedidoId is not null)
+        {
+            // #151, UX_Reproducao_PedidoId: um FaixaIniciada simultâneo do MESMO pedido passou pelo AnyAsync antes de o outro salvar e perdeu a corrida do INSERT. O outro evento já gravou a linha e marca o
+            // Tocado: este está tratado. A linha perdedora e o TocandoAgora enfileirado saem do contexto, senão o próximo SaveChanges os reinsere. Qualquer outra falha do banco (FK, deadlock, concorrência) sobe.
+            if (!await JaHaReproducaoAsync(nova.PedidoId.Value, ct)) throw;
+            db.Reproducoes.Entry(nova).State = EntityState.Detached;
+            outbox.DescartarNaoSalvos();
+            return;
+        }
 
         if (aMarcar is null) return;
         aMarcar.MarcarTocado(clock.UtcNow);
@@ -127,6 +141,13 @@ public sealed class RegistrarEventoDoPlayoutHandler(ITocandoAgoraStore tocandoAg
             outbox.DescartarNaoSalvos();
         }
     }
+
+    /// <summary>
+    /// Confirma a violação do <c>UX_Reproducao_PedidoId</c> pela existência da OUTRA linha do pedido (a própria não foi gravada; o contexto está sujo, então <c>AsNoTracking</c>). Sem <c>SqlException</c> na Application, como o
+    /// <c>EhDuplicadaAsync</c> do pipeline de mídia; a única unicidade de <c>Reproducao</c> é a deste índice, então "já existe outra linha do pedido" e "violou o índice" são a mesma coisa.
+    /// </summary>
+    private async Task<bool> JaHaReproducaoAsync(Guid pedidoId, CancellationToken ct) =>
+        await db.Reproducoes.AsNoTracking().AnyAsync(r => r.PedidoId == pedidoId, ct);
 
     private static string? Limpar(string? texto) => string.IsNullOrWhiteSpace(texto) ? null : texto.Trim();
 }

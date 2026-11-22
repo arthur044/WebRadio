@@ -383,8 +383,11 @@ CREATE TABLE midia.Reproducao (
 CREATE INDEX IX_Reproducao_Periodo ON midia.Reproducao (IniciadoEmUtc) INCLUDE (MidiaId);
 CREATE INDEX IX_Reproducao_MidiaId ON midia.Reproducao (MidiaId);
 -- [Atlas] EF ForeignKeyIndexConvention (E1-A03, 2026-09-28): aceito, mesmo motivo do
--- IX_RefreshToken_SubstituidoPorId acima (2 índices, um por FK nullable).
-CREATE INDEX IX_Reproducao_PedidoId ON midia.Reproducao (PedidoId);
+-- IX_RefreshToken_SubstituidoPorId acima (índice por FK nullable).
+-- [Atlas, #151, 08 E4-F08 v1.7] PedidoId é ÚNICO e filtrado: um pedido gera no máximo uma Reproducao (o FaixaIniciada repetido ou simultâneo do mesmo pedido não duplica a linha
+-- nem infla o mais-tocadas). O filtro é obrigatório: a rotação grava PedidoId nulo e o SQL Server só aceita uma linha nula num único sem filtro. Substitui o
+-- IX_Reproducao_PedidoId (mesma chave; as buscas por PedidoId = @p usam este). A migration IndiceUnicoReproducaoPedido apaga as duplicatas antes de criá-lo.
+CREATE UNIQUE INDEX UX_Reproducao_PedidoId ON midia.Reproducao (PedidoId) WHERE PedidoId IS NOT NULL;
 CREATE INDEX IX_Reproducao_ProgramaId ON midia.Reproducao (ProgramaId);
 GO
 
