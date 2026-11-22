@@ -82,6 +82,7 @@ public static class WorkerServiceCollectionExtensions
         // E4-F09: limpezas de mídia (diária dentro da Manutencao e a varredura de órfãos da quarentena a cada 30 min).
         var limpeza = new LimpezaDeMidiaOptions();
         if (int.TryParse(configuration["Manutencao:Midia:LimiteExclusao"], out var limiteExclusao) && limiteExclusao > 0) limpeza.LimiteExclusaoDeObjetos = limiteExclusao;
+        if (int.TryParse(configuration["Manutencao:Midia:PisoExclusao"], out var pisoExclusao) && pisoExclusao >= 0) limpeza.PisoDeExclusaoDeObjetos = pisoExclusao;
         services.AddSingleton(limpeza);
         services.AddScoped<ILimpezaDeMidia, LimpezaDeMidia>();
         services.AddScoped(sp => new WebRadio.Application.Features.Midias.PipelineDeMidia(

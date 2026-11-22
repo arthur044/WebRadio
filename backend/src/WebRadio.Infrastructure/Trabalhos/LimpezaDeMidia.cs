@@ -14,8 +14,20 @@ public sealed class LimpezaDeMidiaOptions
     /// <summary>Trava contra apagão: a rodada de <c>midia/</c> aborta se apagaria mais que isto (objetos) ...</summary>
     public int LimiteExclusaoDeObjetos { get; set; } = 20;
 
-    /// <summary>... ou mais que esta fração do que listou (10%).</summary>
+    /// <summary>... ou mais que esta fração do que listou (10%)...</summary>
     public double LimiteExclusaoFracao { get; set; } = 0.10;
+
+    /// <summary>Piso absoluto padrão (#136): até 5 órfãos por rodada nunca disparam a trava percentual.</summary>
+    public const int PisoDeExclusaoPadrao = 5;
+
+    /// <summary>
+    /// ... exceto que a fração só vale ACIMA deste piso: numa biblioteca pequena (8 objetos, 2 órfãos = 25%) o percentual abortaria para sempre e o alerta <c>trava_apagao</c> nunca sairia.
+    /// O teto efetivo é <c>min(LimiteExclusaoDeObjetos, max(piso, fração × listados))</c>. O custo é aceito: um Worker em banco vazio apaga no máximo este piso de objetos.
+    /// </summary>
+    public int PisoDeExclusaoDeObjetos { get; set; } = PisoDeExclusaoPadrao;
+
+    /// <summary>O teto de objetos a apagar numa rodada que listou <paramref name="listados"/> objetos.</summary>
+    public int Teto(int listados) => Math.Min(LimiteExclusaoDeObjetos, Math.Max(PisoDeExclusaoDeObjetos, (int)Math.Floor(listados * LimiteExclusaoFracao)));
 
     /// <summary>Primeiro ano com objeto: a listagem é por prefixo de ano (<c>20??/</c>, a política do <c>svc-worker</c> só deixa listar assim).</summary>
     public int PrimeiroAno { get; set; } = 2026;
@@ -36,7 +48,7 @@ public interface ILimpezaDeMidia
     /// <summary>Rodada diária (dentro da <c>Manutencao</c>): cancelados, <c>AguardandoUpload</c> vencido e órfãos de <c>midia/</c> (com a trava contra apagão).</summary>
     Task<ResultadoDaLimpezaDeMidia> ExecutarDiariaAsync(CancellationToken ct);
 
-    /// <summary>A cada 30 min: órfãos do prefixo <c>quarentena/</c> (inclui o <c>Quarentena</c> com mais de 30 dias). Devolve quantos objetos apagou.</summary>
+    /// <summary>A cada 30 min: órfãos do prefixo <c>quarentena/</c> (inclui o <c>Quarentena</c> com mais de 30 dias), com a mesma trava contra apagão da rodada de <c>midia/</c> (#137). Devolve quantos objetos apagou.</summary>
     Task<int> VarrerOrfasDaQuarentenaAsync(CancellationToken ct);
 }
 
@@ -104,30 +116,52 @@ public sealed partial class LimpezaDeMidia(RadioDbContext db, IObjectStorage sto
         var objetos = await ListarPorAnoAsync(Buckets.Quarentena, ct);
         if (objetos is null) return 0;
 
+        var noFormato = 0;
         var candidatos = new Dictionary<Guid, string>();
         foreach (var o in objetos)
         {
-            if (o.UltimaModificacaoUtc >= corteDaIdade) continue;
             if (ChaveDaQuarentena().Match(o.Chave) is not { Success: true } m) continue;
+            noFormato++;
+            if (o.UltimaModificacaoUtc >= corteDaIdade) continue;
             candidatos[Guid.Parse(m.Groups["id"].Value)] = o.Chave;
         }
 
         // Quem AINDA deve ter objeto: AguardandoUpload, Pendente, EmAnalise, ou Quarentena dentro dos 30 dias. Reconferido por id, em lotes (limite de parâmetros do SQL).
+        // TRAVA CONTRA APAGÃO (#137, a mesma da rodada de midia/): se a consulta falhar, aborta sem apagar; um Worker apontando para um banco vazio ou restaurado veria TODO upload em andamento como órfão.
         var validos = new HashSet<Guid>();
-        foreach (var lote in candidatos.Keys.Chunk(LoteDeIds))
+        try
         {
-            var ids = lote;
-            var achados = await db.ArquivosMidia.AsNoTracking()
-                .Where(m => ids.Contains(m.Id) && (m.StatusSanitizacao == StatusSanitizacao.AguardandoUpload || m.StatusSanitizacao == StatusSanitizacao.Pendente
-                    || m.StatusSanitizacao == StatusSanitizacao.EmAnalise || (m.StatusSanitizacao == StatusSanitizacao.Quarentena && m.SanitizadoEmUtc >= corteDaRetencao)))
-                .Select(m => m.Id).ToListAsync(ct);
-            validos.UnionWith(achados);
+            foreach (var lote in candidatos.Keys.Chunk(LoteDeIds))
+            {
+                var ids = lote;
+                var achados = await db.ArquivosMidia.AsNoTracking()
+                    .Where(m => ids.Contains(m.Id) && (m.StatusSanitizacao == StatusSanitizacao.AguardandoUpload || m.StatusSanitizacao == StatusSanitizacao.Pendente
+                        || m.StatusSanitizacao == StatusSanitizacao.EmAnalise || (m.StatusSanitizacao == StatusSanitizacao.Quarentena && m.SanitizadoEmUtc >= corteDaRetencao)))
+                    .Select(m => m.Id).ToListAsync(ct);
+                validos.UnionWith(achados);
+            }
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            marcador.Degradado(MotivosDeDegradacao.TravaApagao);
+            logger.LogError("WORKER_LIMPEZA_QUARENTENA_ABORTADA ({Tipo}): a consulta ao banco falhou; nada foi apagado em quarentena/.", e.GetType().Name);
+            return 0;
+        }
+
+        var orfaos = candidatos.Where(x => !validos.Contains(x.Key)).ToList();
+        var teto = opcoes.Teto(noFormato);
+        if (orfaos.Count > teto)
+        {
+            // A recuperação do trava_apagao é da rodada diária de midia/: o marcador é um só, e uma varredura de 30 min que "recuperasse" apagaria em minutos o alerta de uma rodada diária.
+            marcador.Degradado(MotivosDeDegradacao.TravaApagao);
+            logger.LogError("WORKER_LIMPEZA_QUARENTENA_ABORTADA: {Orfaos} órfão(s) em {Listados} objeto(s) da quarentena passam do teto de {Teto}; nada foi apagado em quarentena/ (banco vazio ou restaurado?).",
+                orfaos.Count, noFormato, teto);
+            return 0;
         }
 
         var apagados = 0;
-        foreach (var (id, chave) in candidatos)
+        foreach (var (_, chave) in orfaos)
         {
-            if (validos.Contains(id)) continue;
             if (await TentarApagarObjetoAsync(Buckets.Quarentena, chave, ct)) apagados++;
         }
 
@@ -171,8 +205,8 @@ public sealed partial class LimpezaDeMidia(RadioDbContext db, IObjectStorage sto
         }
 
         var orfaos = listados.Where(x => !aprovados.Contains(x.Key) && x.Value.Quando < corte).ToList();
-        // Sempre cabe ao menos 1 órfão por rodada: com poucos objetos, 10% arredondaria para 0 e a limpeza nunca andaria.
-        var teto = Math.Min(opcoes.LimiteExclusaoDeObjetos, Math.Max(1, (int)Math.Floor(listados.Count * opcoes.LimiteExclusaoFracao)));
+        // Piso absoluto (#136): com poucos objetos, 10% arredondaria para quase nada e a limpeza nunca andaria.
+        var teto = opcoes.Teto(listados.Count);
         if (orfaos.Count > teto)
         {
             marcador.Degradado(MotivosDeDegradacao.TravaApagao);
