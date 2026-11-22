@@ -80,9 +80,7 @@ public static class WorkerServiceCollectionExtensions
         services.AddScoped<IOutbox, WebRadio.Infrastructure.Persistencia.Outbox.OutboxEf>();
         services.AddScoped<ICapturaDeMidia, CapturaDeMidia>();
         // E4-F09: limpezas de mídia (diária dentro da Manutencao e a varredura de órfãos da quarentena a cada 30 min).
-        var limpeza = new LimpezaDeMidiaOptions();
-        if (int.TryParse(configuration["Manutencao:Midia:LimiteExclusao"], out var limiteExclusao) && limiteExclusao > 0) limpeza.LimiteExclusaoDeObjetos = limiteExclusao;
-        if (int.TryParse(configuration["Manutencao:Midia:PisoExclusao"], out var pisoExclusao) && pisoExclusao >= 0) limpeza.PisoDeExclusaoDeObjetos = pisoExclusao;
+        var limpeza = LimpezaDeMidiaOptions.Ler(configuration); // acima de 500 em Manutencao:Midia:LimiteExclusao ou Manutencao:Quarentena:LimiteExclusao: o Worker recusa subir
         services.AddSingleton(limpeza);
         services.AddScoped<ILimpezaDeMidia, LimpezaDeMidia>();
         services.AddScoped(sp => new WebRadio.Application.Features.Midias.PipelineDeMidia(

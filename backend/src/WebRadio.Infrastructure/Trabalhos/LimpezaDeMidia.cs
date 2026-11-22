@@ -26,8 +26,34 @@ public sealed class LimpezaDeMidiaOptions
     /// </summary>
     public int PisoDeExclusaoDeObjetos { get; set; } = PisoDeExclusaoPadrao;
 
-    /// <summary>O teto de objetos a apagar numa rodada que listou <paramref name="listados"/> objetos.</summary>
+    /// <summary>O teto de objetos a apagar numa rodada de <c>midia/</c> que listou <paramref name="listados"/> objetos.</summary>
     public int Teto(int listados) => Math.Min(LimiteExclusaoDeObjetos, Math.Max(PisoDeExclusaoDeObjetos, (int)Math.Floor(listados * LimiteExclusaoFracao)));
+
+    /// <summary>Limite padrão da varredura da quarentena (v1.7, #153): absoluto, sem percentual nem piso. A quarentena só guarda envios em andamento, cancelados e originais em <c>Quarentena</c>.</summary>
+    public const int LimiteDaQuarentenaPadrao = 50;
+
+    /// <summary>Trava própria da varredura de 30 min: abortar se apagaria MAIS que isto (<c>Manutencao:Quarentena:LimiteExclusao</c>).</summary>
+    public int LimiteDaQuarentena { get; set; } = LimiteDaQuarentenaPadrao;
+
+    /// <summary>O Worker recusa subir com um limite acima disto: um valor esquecido de uma saída do operador não pode desligar a trava.</summary>
+    public const int LimiteMaximoPermitido = 500;
+
+    /// <summary>Lê <c>Manutencao:Midia:LimiteExclusao</c>, <c>Manutencao:Midia:PisoExclusao</c> e <c>Manutencao:Quarentena:LimiteExclusao</c>. Acima de 500 lança (recusa subir).</summary>
+    public static LimpezaDeMidiaOptions Ler(Microsoft.Extensions.Configuration.IConfiguration configuration)
+    {
+        var o = new LimpezaDeMidiaOptions();
+        if (LerLimite(configuration, "Manutencao:Midia:LimiteExclusao") is { } midia) o.LimiteExclusaoDeObjetos = midia;
+        if (int.TryParse(configuration["Manutencao:Midia:PisoExclusao"], out var piso) && piso >= 0) o.PisoDeExclusaoDeObjetos = piso;
+        if (LerLimite(configuration, "Manutencao:Quarentena:LimiteExclusao") is { } quarentena) o.LimiteDaQuarentena = quarentena;
+        return o;
+    }
+
+    private static int? LerLimite(Microsoft.Extensions.Configuration.IConfiguration configuration, string chave)
+    {
+        if (!int.TryParse(configuration[chave], out var valor) || valor <= 0) return null;
+        if (valor > LimiteMaximoPermitido) throw new InvalidOperationException($"{chave} = {valor} passa do máximo de {LimiteMaximoPermitido}: o Worker recusa subir (um limite esquecido desligaria a trava contra apagão).");
+        return valor;
+    }
 
     /// <summary>Primeiro ano com objeto: a listagem é por prefixo de ano (<c>20??/</c>, a política do <c>svc-worker</c> só deixa listar assim).</summary>
     public int PrimeiroAno { get; set; } = 2026;
@@ -48,7 +74,7 @@ public interface ILimpezaDeMidia
     /// <summary>Rodada diária (dentro da <c>Manutencao</c>): cancelados, <c>AguardandoUpload</c> vencido e órfãos de <c>midia/</c> (com a trava contra apagão).</summary>
     Task<ResultadoDaLimpezaDeMidia> ExecutarDiariaAsync(CancellationToken ct);
 
-    /// <summary>A cada 30 min: órfãos do prefixo <c>quarentena/</c> (inclui o <c>Quarentena</c> com mais de 30 dias), com a mesma trava contra apagão da rodada de <c>midia/</c> (#137). Devolve quantos objetos apagou.</summary>
+    /// <summary>A cada 30 min: órfãos do prefixo <c>quarentena/</c> (inclui o <c>Quarentena</c> com mais de 30 dias), com trava própria contra apagão (limite absoluto 50, motivo <c>trava_apagao_quarentena</c>; #137, #153). Devolve quantos objetos apagou.</summary>
     Task<int> VarrerOrfasDaQuarentenaAsync(CancellationToken ct);
 }
 
@@ -127,7 +153,7 @@ public sealed partial class LimpezaDeMidia(RadioDbContext db, IObjectStorage sto
         }
 
         // Quem AINDA deve ter objeto: AguardandoUpload, Pendente, EmAnalise, ou Quarentena dentro dos 30 dias. Reconferido por id, em lotes (limite de parâmetros do SQL).
-        // TRAVA CONTRA APAGÃO (#137, a mesma da rodada de midia/): se a consulta falhar, aborta sem apagar; um Worker apontando para um banco vazio ou restaurado veria TODO upload em andamento como órfão.
+        // TRAVA CONTRA APAGÃO PRÓPRIA (#137, #153): se a consulta falhar, ou se apagaria mais que o limite absoluto, aborta sem apagar, com o motivo trava_apagao_quarentena; um Worker em banco vazio ou restaurado veria todo upload em andamento como órfão.
         var validos = new HashSet<Guid>();
         try
         {
@@ -143,21 +169,21 @@ public sealed partial class LimpezaDeMidia(RadioDbContext db, IObjectStorage sto
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            marcador.Degradado(MotivosDeDegradacao.TravaApagao);
+            marcador.Degradado(MotivosDeDegradacao.TravaApagaoQuarentena);
             logger.LogError("WORKER_LIMPEZA_QUARENTENA_ABORTADA ({Tipo}): a consulta ao banco falhou; nada foi apagado em quarentena/.", e.GetType().Name);
             return 0;
         }
 
         var orfaos = candidatos.Where(x => !validos.Contains(x.Key)).ToList();
-        var teto = opcoes.Teto(noFormato);
-        if (orfaos.Count > teto)
+        if (orfaos.Count > opcoes.LimiteDaQuarentena)
         {
-            // A recuperação do trava_apagao é da rodada diária de midia/: o marcador é um só, e uma varredura de 30 min que "recuperasse" apagaria em minutos o alerta de uma rodada diária.
-            marcador.Degradado(MotivosDeDegradacao.TravaApagao);
-            logger.LogError("WORKER_LIMPEZA_QUARENTENA_ABORTADA: {Orfaos} órfão(s) em {Listados} objeto(s) da quarentena passam do teto de {Teto}; nada foi apagado em quarentena/ (banco vazio ou restaurado?).",
-                orfaos.Count, noFormato, teto);
+            marcador.Degradado(MotivosDeDegradacao.TravaApagaoQuarentena);
+            logger.LogError("WORKER_LIMPEZA_QUARENTENA_ABORTADA: {Orfaos} órfão(s) em {Listados} objeto(s) da quarentena passam do limite de {Limite}; nada foi apagado em quarentena/ (banco vazio ou restaurado?).",
+                orfaos.Count, noFormato, opcoes.LimiteDaQuarentena);
             return 0;
         }
+
+        marcador.Recuperado(MotivosDeDegradacao.TravaApagaoQuarentena); // motivo próprio: emitido e recuperado só por esta varredura (a rodada diária de midia/ não toca nele)
 
         var apagados = 0;
         foreach (var (_, chave) in orfaos)

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using WebRadio.Application.Abstracoes;
 using WebRadio.Domain.Enums;
@@ -359,7 +360,7 @@ public class LimpezaDeMidiaSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeT
         Assert.True((await acima.Limpeza().ExecutarDiariaAsync(default)).TravaDeApagao);
     }
 
-    // ---- #137: a mesma trava na varredura de 30 min da quarentena ----
+    // ---- #137/#153: trava PRÓPRIA da varredura de 30 min da quarentena (limite absoluto 50, motivo trava_apagao_quarentena) ----
 
     private static void ObjetosDaQuarentena(Cena c, int quantos, DateTime quando)
     {
@@ -367,16 +368,17 @@ public class LimpezaDeMidiaSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeT
     }
 
     [SqlFact]
-    public async Task Varredura_da_quarentena_com_banco_vazio_ou_restaurado_aborta_sem_apagar_e_emite_a_trava()
+    public async Task Varredura_da_quarentena_com_banco_vazio_passa_do_limite_aborta_sem_apagar_e_emite_a_trava_da_quarentena()
     {
         var c = await NovaCenaAsync(); // nenhum registro: todo upload em andamento pareceria órfão
-        ObjetosDaQuarentena(c, 50, c.Relogio.UtcNow.AddHours(-3));
+        ObjetosDaQuarentena(c, LimpezaDeMidiaOptions.LimiteDaQuarentenaPadrao + 1, c.Relogio.UtcNow.AddHours(-3));
 
         var apagados = await c.Limpeza().VarrerOrfasDaQuarentenaAsync(default);
 
         Assert.Equal(0, apagados);
-        Assert.Equal(50, c.Storage.Objetos.Count);
-        Assert.Equal(["trava_apagao"], c.Marcador.Degradados);
+        Assert.Equal(LimpezaDeMidiaOptions.LimiteDaQuarentenaPadrao + 1, c.Storage.Objetos.Count);
+        Assert.Equal(["trava_apagao_quarentena"], c.Marcador.Degradados); // nunca o trava_apagao da rodada de midia/
+        Assert.Empty(c.Marcador.Recuperados);
     }
 
     [SqlFact]
@@ -391,40 +393,70 @@ public class LimpezaDeMidiaSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeT
 
         Assert.Equal(0, apagados);
         Assert.Equal(3, c.Storage.Objetos.Count);
-        Assert.Equal(["trava_apagao"], c.Marcador.Degradados);
+        Assert.Equal(["trava_apagao_quarentena"], c.Marcador.Degradados);
     }
 
     [SqlFact]
-    public async Task Varredura_da_quarentena_apaga_ate_o_piso_e_ate_10_por_cento_acima_dele_e_o_resto_aborta()
+    public async Task Varredura_da_quarentena_apaga_ate_o_limite_absoluto_sem_percentual_e_recupera_so_o_motivo_dela()
     {
         var antigo = DateTime.UtcNow.AddHours(-3);
 
-        // 8 uploads vivos (Pendente) + 2 órfãos (20%): dentro do piso, apaga
+        // 8 uploads vivos (Pendente) + 6 órfãos (43%): um lote de desistências legítimas acima do piso antigo de 5 e muito acima de 10%; apaga
         var a = await NovaCenaAsync();
         for (var i = 0; i < 8; i++) a.Storage.Por("quarentena", a.Midia(StatusSanitizacao.Pendente, TimeSpan.FromHours(3)).ChaveStorage, antigo);
-        ObjetosDaQuarentena(a, 2, antigo);
-        Assert.Equal(2, await a.Limpeza().VarrerOrfasDaQuarentenaAsync(default));
+        ObjetosDaQuarentena(a, 6, antigo);
+        Assert.Equal(6, await a.Limpeza().VarrerOrfasDaQuarentenaAsync(default));
         Assert.Empty(a.Marcador.Degradados);
+        Assert.Equal(["trava_apagao_quarentena"], a.Marcador.Recuperados); // só o motivo dela; o trava_apagao é da rodada diária de midia/
 
-        // 100 vivos + 21 órfãos: passa de 20 objetos e de 10%: aborta
+        // exatamente o limite (50): apaga
         var b = await NovaCenaAsync();
-        for (var i = 0; i < 100; i++) b.Storage.Por("quarentena", b.Midia(StatusSanitizacao.Pendente, TimeSpan.FromHours(3)).ChaveStorage, antigo);
-        ObjetosDaQuarentena(b, 21, antigo);
-        Assert.Equal(0, await b.Limpeza().VarrerOrfasDaQuarentenaAsync(default));
-        Assert.Equal(121, b.Storage.Objetos.Count);
-        Assert.Equal(["trava_apagao"], b.Marcador.Degradados);
+        ObjetosDaQuarentena(b, LimpezaDeMidiaOptions.LimiteDaQuarentenaPadrao, antigo);
+        Assert.Equal(LimpezaDeMidiaOptions.LimiteDaQuarentenaPadrao, await b.Limpeza().VarrerOrfasDaQuarentenaAsync(default));
+
+        // limite + 1: aborta
+        var d = await NovaCenaAsync();
+        ObjetosDaQuarentena(d, LimpezaDeMidiaOptions.LimiteDaQuarentenaPadrao + 1, antigo);
+        Assert.Equal(0, await d.Limpeza().VarrerOrfasDaQuarentenaAsync(default));
     }
 
     [SqlFact]
-    public async Task Varredura_da_quarentena_nunca_recupera_o_trava_apagao_que_e_da_rodada_diaria_de_midia()
+    public async Task O_limite_da_quarentena_e_configuravel_e_a_rodada_diaria_de_midia_nunca_recupera_o_motivo_da_quarentena()
     {
-        // O marcador é um só: se a varredura de 30 min "recuperasse", apagaria o alerta da rodada diária de midia/ em minutos.
+        var antigo = DateTime.UtcNow.AddHours(-3);
         var c = await NovaCenaAsync();
-        c.Storage.Por("quarentena", c.Midia(StatusSanitizacao.Pendente, TimeSpan.FromHours(3)).ChaveStorage, c.Relogio.UtcNow.AddHours(-3));
+        ObjetosDaQuarentena(c, 7, antigo);
+        var limpeza = new LimpezaDeMidia(c.Db, c.Storage, c.Relogio, c.Marcador, new LimpezaDeMidiaOptions { PrimeiroAno = DateTime.UtcNow.Year, LimiteDaQuarentena = 6 }, NullLogger<LimpezaDeMidia>.Instance);
 
-        await c.Limpeza().VarrerOrfasDaQuarentenaAsync(default);
+        Assert.Equal(0, await limpeza.VarrerOrfasDaQuarentenaAsync(default)); // 7 > 6: o operador baixou o limite
+        Assert.Equal(["trava_apagao_quarentena"], c.Marcador.Degradados);
 
-        Assert.Empty(c.Marcador.Recuperados);
+        await limpeza.ExecutarDiariaAsync(default); // a rodada diária de midia/ não recupera o motivo da quarentena
+        Assert.DoesNotContain("trava_apagao_quarentena", c.Marcador.Recuperados);
+    }
+
+    [Theory]
+    [InlineData("500", true)]
+    [InlineData("501", false)]
+    [InlineData("100000", false)]
+    public void LimiteExclusao_acima_de_500_e_recusado_na_subida_para_midia_e_para_a_quarentena(string valor, bool aceito)
+    {
+        foreach (var chave in new[] { "Manutencao:Midia:LimiteExclusao", "Manutencao:Quarentena:LimiteExclusao" })
+        {
+            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { [chave] = valor }).Build();
+            if (aceito)
+                Assert.NotNull(LimpezaDeMidiaOptions.Ler(config));
+            else
+                Assert.Throws<InvalidOperationException>(() => { _ = LimpezaDeMidiaOptions.Ler(config); });
+        }
+    }
+
+    [Fact]
+    public void Sem_configuracao_os_padroes_da_spec_valem_20_e_piso_5_para_midia_e_50_para_a_quarentena()
+    {
+        var o = LimpezaDeMidiaOptions.Ler(new ConfigurationBuilder().Build());
+
+        Assert.Equal((20, 5, 50), (o.LimiteExclusaoDeObjetos, o.PisoDeExclusaoDeObjetos, o.LimiteDaQuarentena));
     }
 
     [SqlFact]
