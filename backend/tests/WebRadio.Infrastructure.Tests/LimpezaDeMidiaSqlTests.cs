@@ -306,6 +306,127 @@ public class LimpezaDeMidiaSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeT
         Assert.Equal(["trava_apagao"], c.Marcador.Degradados);
     }
 
+    // ---- #136: piso absoluto da trava de midia/ ----
+
+    private static void Orfaos(Cena c, int quantos, DateTime quando)
+    {
+        for (var i = 0; i < quantos; i++) c.Storage.Por("midia", $"{c.Relogio.UtcNow.Year}/{c.Relogio.UtcNow.Month:00}/{Guid.NewGuid()}.mp3", quando);
+    }
+
+    [SqlFact]
+    public async Task Biblioteca_pequena_apaga_ate_o_piso_de_orfaos_mesmo_acima_de_10_por_cento_e_acima_do_piso_aborta()
+    {
+        var antigo = DateTime.UtcNow.AddDays(-2);
+
+        // 8 aprovadas + 2 órfãs = 20% (antes: aborta para sempre, com o alerta eterno); com o piso, apaga
+        var a = await NovaCenaAsync();
+        for (var i = 0; i < 8; i++) ObjetoDeMidia(a, a.Midia(StatusSanitizacao.Aprovado, TimeSpan.FromDays(3)), antigo);
+        Orfaos(a, 2, antigo);
+        var ra = await a.Limpeza().ExecutarDiariaAsync(default);
+        Assert.False(ra.TravaDeApagao);
+        Assert.Equal(2, ra.OrfaosDeMidia);
+        Assert.Equal(8, a.Storage.Objetos.Count);
+
+        // exatamente o piso (5) numa biblioteca de 8: ainda apaga
+        var b = await NovaCenaAsync();
+        for (var i = 0; i < 8; i++) ObjetoDeMidia(b, b.Midia(StatusSanitizacao.Aprovado, TimeSpan.FromDays(3)), antigo);
+        Orfaos(b, LimpezaDeMidiaOptions.PisoDeExclusaoPadrao, antigo);
+        Assert.Equal(LimpezaDeMidiaOptions.PisoDeExclusaoPadrao, (await b.Limpeza().ExecutarDiariaAsync(default)).OrfaosDeMidia);
+
+        // piso + 1: aborta sem apagar e emite a trava (um banco restaurado não vira licença para apagar a biblioteca)
+        var c = await NovaCenaAsync();
+        for (var i = 0; i < 8; i++) ObjetoDeMidia(c, c.Midia(StatusSanitizacao.Aprovado, TimeSpan.FromDays(3)), antigo);
+        Orfaos(c, LimpezaDeMidiaOptions.PisoDeExclusaoPadrao + 1, antigo);
+        var rc = await c.Limpeza().ExecutarDiariaAsync(default);
+        Assert.True(rc.TravaDeApagao);
+        Assert.Equal(8 + LimpezaDeMidiaOptions.PisoDeExclusaoPadrao + 1, c.Storage.Objetos.Count);
+        Assert.Equal(["trava_apagao"], c.Marcador.Degradados);
+    }
+
+    [SqlFact]
+    public async Task O_limite_percentual_continua_valendo_acima_do_piso()
+    {
+        // 100 aprovadas + 11 órfãs = 9,9% de 111 (teto 11): apaga; +1 passa do teto e aborta
+        var antigo = DateTime.UtcNow.AddDays(-2);
+        var ok = await NovaCenaAsync();
+        for (var i = 0; i < 100; i++) ObjetoDeMidia(ok, ok.Midia(StatusSanitizacao.Aprovado, TimeSpan.FromDays(3)), antigo);
+        Orfaos(ok, 11, antigo);
+        Assert.Equal(11, (await ok.Limpeza().ExecutarDiariaAsync(default)).OrfaosDeMidia);
+
+        var acima = await NovaCenaAsync();
+        for (var i = 0; i < 100; i++) ObjetoDeMidia(acima, acima.Midia(StatusSanitizacao.Aprovado, TimeSpan.FromDays(3)), antigo);
+        Orfaos(acima, 12, antigo);
+        Assert.True((await acima.Limpeza().ExecutarDiariaAsync(default)).TravaDeApagao);
+    }
+
+    // ---- #137: a mesma trava na varredura de 30 min da quarentena ----
+
+    private static void ObjetosDaQuarentena(Cena c, int quantos, DateTime quando)
+    {
+        for (var i = 0; i < quantos; i++) c.Storage.Por("quarentena", $"{c.Relogio.UtcNow.Year}/{c.Relogio.UtcNow.Month:00}/{Guid.NewGuid()}", quando);
+    }
+
+    [SqlFact]
+    public async Task Varredura_da_quarentena_com_banco_vazio_ou_restaurado_aborta_sem_apagar_e_emite_a_trava()
+    {
+        var c = await NovaCenaAsync(); // nenhum registro: todo upload em andamento pareceria órfão
+        ObjetosDaQuarentena(c, 50, c.Relogio.UtcNow.AddHours(-3));
+
+        var apagados = await c.Limpeza().VarrerOrfasDaQuarentenaAsync(default);
+
+        Assert.Equal(0, apagados);
+        Assert.Equal(50, c.Storage.Objetos.Count);
+        Assert.Equal(["trava_apagao"], c.Marcador.Degradados);
+    }
+
+    [SqlFact]
+    public async Task Varredura_da_quarentena_com_a_consulta_ao_banco_falhando_aborta_sem_apagar_e_sem_excecao()
+    {
+        var c = await NovaCenaAsync();
+        ObjetosDaQuarentena(c, 3, c.Relogio.UtcNow.AddHours(-3));
+        var semBanco = new RadioDbContext(new DbContextOptionsBuilder<RadioDbContext>()
+            .UseSqlServer("Server=127.0.0.1,1;Database=nao-existe;User Id=x;Password=x;Connect Timeout=2;TrustServerCertificate=true").Options);
+
+        var apagados = await c.Limpeza(semBanco).VarrerOrfasDaQuarentenaAsync(default);
+
+        Assert.Equal(0, apagados);
+        Assert.Equal(3, c.Storage.Objetos.Count);
+        Assert.Equal(["trava_apagao"], c.Marcador.Degradados);
+    }
+
+    [SqlFact]
+    public async Task Varredura_da_quarentena_apaga_ate_o_piso_e_ate_10_por_cento_acima_dele_e_o_resto_aborta()
+    {
+        var antigo = DateTime.UtcNow.AddHours(-3);
+
+        // 8 uploads vivos (Pendente) + 2 órfãos (20%): dentro do piso, apaga
+        var a = await NovaCenaAsync();
+        for (var i = 0; i < 8; i++) a.Storage.Por("quarentena", a.Midia(StatusSanitizacao.Pendente, TimeSpan.FromHours(3)).ChaveStorage, antigo);
+        ObjetosDaQuarentena(a, 2, antigo);
+        Assert.Equal(2, await a.Limpeza().VarrerOrfasDaQuarentenaAsync(default));
+        Assert.Empty(a.Marcador.Degradados);
+
+        // 100 vivos + 21 órfãos: passa de 20 objetos e de 10%: aborta
+        var b = await NovaCenaAsync();
+        for (var i = 0; i < 100; i++) b.Storage.Por("quarentena", b.Midia(StatusSanitizacao.Pendente, TimeSpan.FromHours(3)).ChaveStorage, antigo);
+        ObjetosDaQuarentena(b, 21, antigo);
+        Assert.Equal(0, await b.Limpeza().VarrerOrfasDaQuarentenaAsync(default));
+        Assert.Equal(121, b.Storage.Objetos.Count);
+        Assert.Equal(["trava_apagao"], b.Marcador.Degradados);
+    }
+
+    [SqlFact]
+    public async Task Varredura_da_quarentena_nunca_recupera_o_trava_apagao_que_e_da_rodada_diaria_de_midia()
+    {
+        // O marcador é um só: se a varredura de 30 min "recuperasse", apagaria o alerta da rodada diária de midia/ em minutos.
+        var c = await NovaCenaAsync();
+        c.Storage.Por("quarentena", c.Midia(StatusSanitizacao.Pendente, TimeSpan.FromHours(3)).ChaveStorage, c.Relogio.UtcNow.AddHours(-3));
+
+        await c.Limpeza().VarrerOrfasDaQuarentenaAsync(default);
+
+        Assert.Empty(c.Marcador.Recuperados);
+    }
+
     [SqlFact]
     public async Task Falha_de_permissao_na_listagem_vira_aviso_e_nao_excecao()
     {
