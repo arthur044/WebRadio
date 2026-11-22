@@ -10,7 +10,7 @@
 > - **O `ALTER LOGIN` do Passo 2 é o único trecho que age no estado real.** Executado sozinho, deixa o login com uma senha que o Compose não conhece.
 > - **O rascunho expõe segredos na linha de comando** (`echo '<segredo>' |`, argumentos, `rm` simples de arquivos com segredo). Não copie esse padrão.
 > - **Os prazos de rotação da tabela divergem** dos da tabela 5.1 do `05`, que é a que vale.
-> - **A chave anterior não está ligada no Compose.** A API aceita `Jwt:SigningKeyAnterior` e `Playout:TokenAnterior`, mas o `docker-compose.yml` não tem segredo para eles; a rotação sem derrubar sessões descrita abaixo ainda não funciona no stack. **A `Jwt__SigningKey` tem runbook novo e conferido: [`rotacao-jwt-signing-key.md`](rotacao-jwt-signing-key.md) (override de Compose para a chave anterior). Use esse e ignore a seção de JWT daqui.**
+> - **O `docker-compose.yml` não traz segredo padrão para `Jwt:SigningKeyAnterior` nem para `Playout:TokenAnterior`** (a API aceita os dois). Para o JWT há o override do [`rotacao-jwt-signing-key.md`](rotacao-jwt-signing-key.md), que é o procedimento a seguir. Para o `Playout:TokenAnterior`, a rotação sem derrubar sessões ainda não funciona no stack.
 >
 > Conferido pelo Sentinel no review do PR #32. A fonte normativa dos segredos e do impacto de cada troca é a tabela 5.1 do [`05-seguranca-auditoria.md`](../specs/05-seguranca-auditoria.md).
 
@@ -177,7 +177,7 @@ Procure por:
 
 ## Rotação de chave JWT (`Jwt__SigningKey`)
 
-> **Substituída por [`rotacao-jwt-signing-key.md`](rotacao-jwt-signing-key.md)** (#10). Esta seção é o rascunho antigo: o refresh não depende da chave JWT (ninguém precisa logar de novo) e os comandos de `docker secret`/`docker service` não existem neste stack.
+> **Substituída por [`rotacao-jwt-signing-key.md`](rotacao-jwt-signing-key.md)** (#10). **Ignore o Impacto e os passos abaixo.** Esta seção é o rascunho antigo: o refresh não depende da chave JWT (ninguém precisa logar de novo) e os comandos de `docker secret`/`docker service` não existem neste stack.
 
 ### Impacto
 

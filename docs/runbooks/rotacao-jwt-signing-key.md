@@ -85,28 +85,35 @@ docker inspect -f '{{.State.StartedAt}}' "$(docker compose ps -q api)"
 
 Quem tem a chave forja um access token de **qualquer** usuário, inclusive Admin, até ela sair de circulação. Por isso, no vazamento **não se liga a chave anterior**: a chave vazada deixa de valer no momento em que a API sobe com a nova. A claim `sv` (versão de segurança) **não protege** aqui: `sub` e `sv` são fáceis de obter, e quem tem a chave assina o que quiser.
 
-1. **Anote a hora (UTC)** (`date -u +%FT%TZ`) e troque a chave:
+1. **Copie o log da Api para fora do contêiner, antes de qualquer outra coisa.** O `--force-recreate` do passo 3 remove o contêiner antigo e, com ele, o log `json-file` da janela do incidente (a auditoria do passo 6 depende dele). O log guarda **até 14 dias, mas o teto real é de 30 MB por serviço** (10 MB × 3 arquivos; ver `docs/operacao-logs.md`): com tráfego, a janela pode já ter saído.
+
+   ```bash
+   umask 077
+   docker compose logs --no-color api > api-incidente.log   # arquivo de acesso restrito; guarde-o fora do repositório
+   ```
+
+2. **Anote a hora (UTC)** (`date -u +%FT%TZ`) e troque a chave:
 
    ```bash
    rm secrets/jwt_signing_key        # comprometida: não há o que preservar
    infra/scripts/gerar-segredos.sh prod   # só a jwt_signing_key deve ser criada (ver o passo 2 da rotação programada)
    ```
 
-2. **Recrie a API**, com `--force-recreate` (sem ele a API segue com a chave vazada, ver acima):
+3. **Recrie a API**, com `--force-recreate` (sem ele a API segue com a chave vazada, ver acima):
 
    ```bash
    docker compose up -d --force-recreate --wait api
    ```
 
-3. **Confirme que o contêiner novo é o que está no ar**: `StartedAt` posterior à hora do passo 1 (comando da seção anterior) e `healthy`. Só depois disso a chave vazada deixou de valer.
-4. Todos os access tokens somem na hora. Os clientes recebem 401, refazem o refresh (que não depende da chave) e voltam sem novo login. Os 401 dessa hora são **clientes legítimos**: o pico é esperado e **não** indica token forjado.
-5. **Audite o que um token forjado pode ter feito** entre a hora do vazamento (ou a mais antiga que se suspeite; na dúvida, desde a emissão da chave) e o passo 2. Um token forjado de Admin ou Locutor faz tudo o que o papel permite; procure e **revogue ou desfaça o que não reconhecer**:
+4. **Confirme que o contêiner novo é o que está no ar**: `StartedAt` posterior à hora do passo 2 (comando da seção "Por que `--force-recreate`") e `healthy`. Só depois disso a chave vazada deixou de valer.
+5. Todos os access tokens somem na hora. Os clientes recebem 401, refazem o refresh (que não depende da chave) e voltam sem novo login. Os 401 de API dessa hora são **clientes legítimos**: o pico é esperado e **não** indica token forjado. O alerta `AUTH_401_TAXA` conta só o `/auth/login` e **não** vai subir com isso (ver [`auth-401-taxa.md`](auth-401-taxa.md)); não procure o pico nele.
+6. **Audite o que um token forjado pode ter feito** entre a hora do vazamento (ou a mais antiga que se suspeite; na dúvida, desde a emissão da chave) e o passo 3. Um token forjado de Admin ou Locutor faz tudo o que o papel permite; procure e **revogue ou desfaça o que não reconhecer**:
    - **Contas e papéis**: usuários criados (`POST /api/v1/usuarios`), papel alterado ou conta ativada/desativada (`PATCH /api/v1/usuarios/{id}`), desbloqueios de login (`POST /api/v1/usuarios/{id}/desbloquear-login`). Confira no banco os Admins e Locutores existentes e o `CriadoEmUtc` deles.
    - **Credenciais de transmissão**: geradas ou revogadas (`/api/v1/locutores/me/credencial-transmissao` e `/api/v1/usuarios/{id}/credencial-transmissao`). Credencial que ninguém reconhece: revogue (quem transmite ao vivo é quem tem uma).
    - **Conteúdo**: mídias (`/api/v1/midias`), divulgações (`/api/v1/divulgacoes`) e programas (`/api/v1/programas`) criados, editados ou apagados; pedidos aprovados ou rejeitados (`/api/v1/pedidos/...`).
-   - **Como achar**: o log da Api registra método, caminho (sem a query) e status de cada requisição, mas **não** quem a fez. Liste as escritas na janela e compare com o que a equipe fez: `docker compose logs --since <hora> api | grep -E '"RequestMethod":"(POST|PUT|PATCH|DELETE)"'`. O log guarda **até 14 dias, mas o teto real é de 30 MB por serviço** (`json-file` com 10 MB × 3 arquivos; ver `docs/operacao-logs.md`): com tráfego, a janela do incidente pode já ter saído do log. **Copie o log da Api para fora do contêiner logo no início da resposta** (`docker compose logs --no-color api > api-incidente.log`, em arquivo de acesso restrito) e, passado o que o log guarda, só o banco sobra.
-6. Se o vazamento veio junto com acesso ao banco ou a cookies, avalie também revogar as sessões (troca de senha do usuário ou desativação) e rotacionar o `Seguranca__Pepper` só se o Sentinel mandar (a tabela 5.1 do `05` diz o custo).
-7. Registre o incidente (hora do vazamento, hora da troca, o que foi encontrado na auditoria) e avise o Sentinel.
+   - **Como achar**: o log da Api registra método, caminho (sem a query) e status de cada requisição, mas **não** quem a fez. Liste as escritas na janela **no `api-incidente.log` do passo 1** (o contêiner antigo já não existe) e compare com o que a equipe fez: `grep -E '"RequestMethod":"(POST|PUT|PATCH|DELETE)"' api-incidente.log`. O que já tinha saído do log antes da cópia só se acha no banco.
+7. Se o vazamento veio junto com acesso ao banco ou a cookies, avalie também revogar as sessões (troca de senha do usuário ou desativação) e rotacionar o `Seguranca__Pepper` só se o Sentinel mandar (a tabela 5.1 do `05` diz o custo).
+8. Registre o incidente (hora do vazamento, hora da troca, o que foi encontrado na auditoria) e avise o Sentinel.
 
 ## Voltar atrás
 
@@ -119,7 +126,7 @@ docker compose up -d --force-recreate --wait api
 rm -f docker-compose.rotacao-jwt.yml
 ```
 
-Confira o `StartedAt` posterior à hora anotada. Isso volta à chave antiga (que ainda assina e valida) e a rotação pode ser refeita depois. Depois do passo 7, a chave antiga já não existe: não há volta, só uma rotação nova.
+O `mv` **sobrescreve a chave nova**: ela é descartada, e uma nova rotação gera outra depois. Confira o `StartedAt` posterior à hora anotada. Isso volta à chave antiga (que ainda assina e valida) e a rotação pode ser refeita depois. Depois do passo 7, a chave antiga já não existe: não há volta, só uma rotação nova.
 
 ## Erros comuns
 
@@ -128,5 +135,5 @@ Confira o `StartedAt` posterior à hora anotada. Isso volta à chave antiga (que
 | A API não fica `healthy` e o log diz que `Jwt:SigningKeyAnterior` é igual à `Jwt:SigningKey` | O passo 1 copiou em vez de mover, ou o passo 2 não gerou chave nova | Gere de fato uma chave nova (apague `secrets/jwt_signing_key`, rode o `gerar-segredos.sh prod`) |
 | A API não fica `healthy` e o log diz que `Jwt:SigningKey` tem menos de 32 bytes ou não é base64url | Arquivo vazio ou editado à mão | Apague o arquivo e gere de novo com o script |
 | Muitos 401 logo depois da troca, mesmo com a anterior ligada | O override não entrou (esqueceu o `-f docker-compose.rotacao-jwt.yml`) | Refaça o passo 3 e o `config`; suba a API de novo com os dois `-f` |
-| `docker compose` reclama que `secrets/jwt_signing_key_anterior` não existe | Arquivo apagado antes de tirar o override do `up` | Suba sem o override (passo 7) |
+| `docker compose` reclama que `secrets/jwt_signing_key_anterior` não existe | Você apagou `secrets/jwt_signing_key_anterior` enquanto o override ainda estava em uso | Suba sem o override (passo 7) |
 | Troquei o arquivo e a API continua aceitando a chave antiga (ou o login não muda) | O `up` sem `--force-recreate` não recria o contêiner: o Compose não vê mudança no conteúdo do segredo | `docker compose up -d --force-recreate --wait api` e confira o `StartedAt` |
