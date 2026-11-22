@@ -92,7 +92,7 @@ server {
     # --- SignalR ---
     location /hubs/ {
         include /etc/nginx/security-headers.conf;
-        limit_conn conn_hubs 10;
+        limit_conn conn_hubs 50; # por IP: ouvintes atrás de NAT (escola, empresa, CGNAT) dividem o IP
         access_log /dev/stdout anon_sem_query;
 
         proxy_http_version 1.1;
@@ -110,7 +110,7 @@ server {
     # --- Stream (Icecast) — só GET/HEAD em radio.mp3, resto 404 (S-A07: sem /admin, sem SOURCE) ---
     location = /stream/radio.mp3 {
         include /etc/nginx/security-headers.conf;
-        limit_conn conn_stream 5;
+        limit_conn conn_stream 50; # por IP: ouvintes atrás de NAT dividem o IP (cada ouvinte = 1 conexão de stream)
         limit_except GET HEAD {
             deny all;
         }

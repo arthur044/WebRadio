@@ -164,10 +164,12 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy("SomenteAdmin", p => p.RequireAuthenticatedUser().RequireRole("Admin"))
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 
-// Limite global de 100/min por IP (00-arquitetura.md §164). O IP só serve de chave de partição; nunca é logado.
+// Limite global de 600/min por IP (00-arquitetura.md §174). O IP só serve de chave de partição; nunca é logado.
+// Por que 600 e não 100: ouvintes atrás de NAT (CGNAT de operadora, escola, empresa) dividem UM IP; com 100/min por IP a audiência inteira de uma
+// rede passava a tomar 429. É um teto por IP; o abuso fino é do login (por conta e IP), do semáforo de PBKDF2 e do pedido (domínio).
 // RateLimit:LimiteGlobalPorMinuto (env RateLimit__LimiteGlobalPorMinuto) existe para o Compose de smoke/E2E (#146): o browser e o
-// smoke saem todos do mesmo IP e passam de 100/min. Subir acima de 100 só vale em Development; fora dele a API recusa subir.
-const int LimiteGlobalPadrao = 100;
+// smoke saem todos do mesmo IP. Acima de 600 só vale em Development; fora dele a API recusa subir.
+const int LimiteGlobalPadrao = 600;
 var limiteGlobalTexto = builder.Configuration["RateLimit:LimiteGlobalPorMinuto"];
 var limiteGlobal = LimiteGlobalPadrao;
 if (!string.IsNullOrWhiteSpace(limiteGlobalTexto)
@@ -180,9 +182,10 @@ if (limiteGlobal > LimiteGlobalPadrao && !builder.Environment.IsDevelopment())
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    // Login e registro: limite ESTRITO por IP, num balde separado do global (a chave é a mesma IpChave).
+    // Login e registro: limite ESTRITO por IP, num balde separado do global (a chave é a mesma IpChave). Login: 30/min (era 5; ouvintes atrás de NAT dividem o IP,
+    // e o bloqueio por conta e IP e o semáforo de PBKDF2 é que seguram a força bruta).
     o.AddPolicy(AuthEndpoints.PoliticaLogin, ctx => RateLimitPartition.GetFixedWindowLimiter(IpChave.De(ctx.Connection.RemoteIpAddress),
-        _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(1) }));
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1) }));
     o.AddPolicy(AuthEndpoints.PoliticaRegistrar, ctx => RateLimitPartition.GetFixedWindowLimiter(IpChave.De(ctx.Connection.RemoteIpAddress),
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 3, Window = TimeSpan.FromHours(1) }));
     o.AddPolicy(AuthEndpoints.PoliticaTrocarSenha, ctx => RateLimitPartition.GetFixedWindowLimiter(IpChave.De(ctx.Connection.RemoteIpAddress),
