@@ -124,6 +124,14 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 - **#150**: o `liquidsoap` do Compose passou para `mem_limit: 512m`. O boot dele pica em ~420 MiB e o contêiner era morto (`Restarting (137)`) quando o runner não deixava usar swap; era a causa do #139. O `smoke-compose.sh` afirma os mínimos de memória do Liquidsoap, do Worker (768m, do D2) e do `minio-init` (256m, do #134).
 - **Dependabot**: #142, #147, #148 e #149 na `main`. O #144 (`@microsoft/signalr` 11) fica segurado até o .NET 11.
 
+### Entregue depois (segurança de auth, limites por IP e tempo real)
+
+- **#159, segurança de login antes do deploy** (fecha #9, #17 e #18): a família do refresh token tem teto absoluto de 30 dias (`FamiliaCriadaEmUtc`; a rotação além do teto vira 401 e novo login); o pepper deriva uma subchave por uso com HKDF (`ip`, `pseudonimo`, `chave`, `device`, `refresh`), então o pepper cru não entra mais em HMAC; e o log `AUTH_401_TAXA` conta os 401 do `/auth/login` por minuto. O semáforo global de PBKDF2 (503 com `Retry-After`) já estava na `main`. Os hashes de IP e de dispositivo e os contadores de throttle zeram na troca, e sessões com família de mais de 30 dias pedem novo login uma vez.
+- **#161 e #162, limites por IP para ouvintes atrás de NAT** (escola, empresa e CGNAT dividem um IP): global da API 600/min (era 100) e `/auth/login` 30/min (era 5); no nginx, `/stream/` 25 conexões por IP, `/hubs/` 50, `/api/v1/auth/` 10 r/s com burst 30 e `worker_connections` 4096. O limite global é configurável (`RateLimit__LimiteGlobalPorMinuto`): fora de Development a API recusa subir com valor acima de 600; o `docker-compose.dev.yml` sobe com 2000 para o smoke e o E2E. Não mudam: bloqueio por conta e IP, semáforo de PBKDF2, throttle de pedidos, registrar (3/h), trocar senha (10/min) e sessão (30/min). A capacidade do Icecast (200 clientes) se mede no deploy.
+- **#160, hub em tempo real** (fecha #146): o frontend relê o estado da rádio por REST depois de cada conexão do hub, não só na reconexão; antes um evento na janela entre o handshake e a entrada nos grupos se perdia. A janela diminui, mas não some: fechá-la pede um sinal do servidor depois do `OnConnectedAsync`.
+- **#156, índice único de `Reproducao`** (fecha #151): `UX_Reproducao_PedidoId` filtrado por `PedidoId`, com a migration `20261122181219_IndiceUnicoReproducaoPedido` (remove duplicados e cria o índice). O `FaixaIniciada` trata a violação como evento já tratado.
+- **Runbook novo**: [`docs/runbooks/auth-401-taxa.md`](docs/runbooks/auth-401-taxa.md) explica o `AUTH_401_TAXA`. Com o limite de 30/min por IP, um IP sozinho nunca chega ao `Warning` de 1/s, então um *password spraying* de um IP só fica em `Information`; o runbook diz como reconhecê-lo.
+
 ### Pendente
 
 - Execução do `gerar-segredos.ps1` em Windows real e subida da base de produção num job.
@@ -156,7 +164,7 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 
 ## Status do Épico 4
 
-**Em andamento: os quatro pacotes (D1 a D4) estão na `main`; faltam o índice único de `Reproducao` (#151, PR #156 do Atlas) e o A01b do Atlas.** O Épico 4 entrega biblioteca de mídia, upload, sanitização e playout: locutor e Admin enviam áudio direto ao storage, o Worker passa o original pelo antivírus e o `sanitizer` recodifica para MP3; só a saída recodificada entra na biblioteca. O pedido aprovado com mídia passa a tocar sozinho pelo playout, e o Admin ganha o relatório de mais tocadas. O pacote de tarefas, as decisões e a Definição de Pronto estão em [`docs/specs/08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md).
+**Em andamento: os quatro pacotes (D1 a D4) estão na `main`; falta o A01b do Atlas.** O Épico 4 entrega biblioteca de mídia, upload, sanitização e playout: locutor e Admin enviam áudio direto ao storage, o Worker passa o original pelo antivírus e o `sanitizer` recodifica para MP3; só a saída recodificada entra na biblioteca. O pedido aprovado com mídia passa a tocar sozinho pelo playout, e o Admin ganha o relatório de mais tocadas. O pacote de tarefas, as decisões e a Definição de Pronto estão em [`docs/specs/08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md).
 
 | Pacote | Entrega | PR | Situação |
 |---|---|---|---|
@@ -166,22 +174,22 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 | D2 | Upload, sanitização, ClamAV, biblioteca e limpezas (backend): E4-F02 a F07, F09 e o `smoke-midia.sh` (F10, parte de upload) | #112 | Na `main` |
 | D3 | Playout pela biblioteca e relatório de mais tocadas (backend): A01a (chave de sorteio e índices), E4-F08, E4-A02 e a parte de playout do F10 | #111, #143 | Na `main` |
 | D4 | Telas: biblioteca, envio, aprovar com mídia, mais tocadas (E4-P01 a P05) | #110 | Na `main` |
-| A01b | Planos de execução com dataset sintético de 50.000 mídias (Atlas), depois do #151 | Sem PR | Pendente |
+| A01b | Planos de execução com dataset sintético de 50.000 mídias (Atlas), depois do #151 | Sem PR | Pendente, com o Atlas |
 | Pendências do D2 | Piso na trava de `midia/`, trava própria da quarentena, motivo `sanitizer` e piso do `INCRBY` (issues #136, #137, #138, #140 e #153), com o runbook do Worker | #152, #157 | Na `main` |
-| Índice único de `Reproducao` | `UX_Reproducao_PedidoId` filtrado, para o `FaixaIniciada` concorrente (issue #151) | #156 | Em review |
+| Índice único de `Reproducao` | `UX_Reproducao_PedidoId` filtrado, para o `FaixaIniciada` concorrente (issue #151) | #156 | Na `main` |
 
 - **Já na API**: `POST /midias/uploads` e `/midias/{id}/concluir` (envio direto ao storage por POST policy, com limites de 20 por hora e 5 abertos por usuário), `GET /midias` e `GET /midias/{id}`, preview, `PATCH`/`DELETE`, o pipeline do Worker e as limpezas da manutenção. O contrato está na §6 de [`docs/specs/02-api-rest.md`](docs/specs/02-api-rest.md).
 - **Playout (D3)**: `GET /internal/playout/proxima` devolve o pedido aprovado com mídia (E4-D5) ou, sem pedido, uma faixa da rotação (E4-D4: pesos 8/2/1 entre `Musica`, `Vinheta` e `Comercial`, com janelas de repetição); a URL é pré-assinada interna de 30 min e o cabeçalho `X-Playout-Instancia` é obrigatório. `FaixaIniciada` grava a `Reproducao`, marca o pedido como `Tocado` e publica `PedidoTocado` e `TocandoAgora` com `tipoMidia`. `GET /relatorios/mais-tocadas` (Admin) lê a `rel.usp_MaisTocadas`.
 - **Telas (D4)**: `/biblioteca` (Locutor e Admin: lista, filtros, status ao vivo, pré-escuta), envio por policy com progresso, fila e 429 com contagem regressiva, edição com `If-Match`, "Aprovar com mídia" na moderação e `/admin/mais-tocadas`.
 - **Pendências do D2 (resolvidas)**: piso de 5 objetos na trava contra apagão de `midia/` (#136), trava própria na varredura da quarentena, de 30 min, com limite absoluto de 50 e o motivo `trava_apagao_quarentena` (#137 e #153), o marcador `WORKER_DEGRADADO motivo=sanitizer` (#138) e o piso do `INCRBY` negativo no throttle (#140). O Worker recusa `LimiteExclusao` acima de 500. O smoke não testa a recusa pela quota do bucket `quarentena` (o MinIO só a aplica depois da medição dele); confere que a quota está configurada.
 - **Operação do Worker**: o que fazer com cada `WORKER_DEGRADADO` (`scanner`, `assinatura_velha`, `sanitizer`, `trava_apagao`, `trava_apagao_quarentena`) está em [`docs/runbooks/worker-degradado.md`](docs/runbooks/worker-degradado.md), com a saída do operador nas duas travas.
-- **Índice único de `Reproducao` (#151)**: `UX_Reproducao_PedidoId` filtrado por `PedidoId`, definido na spec v1.7 e entregue pelo Atlas no #156, ainda em review.
+- **Índice único de `Reproducao` (#151)**: `UX_Reproducao_PedidoId` filtrado por `PedidoId`, definido na spec v1.7 e entregue pelo Atlas no #156, na `main`.
 - **Regra de testes (2026-11-22)**: teste automatizado novo só para auth/segurança e dados/SQL; o resto é teste manual. O smoke (`smoke-midia.sh`, seção DoD 2 e 8) segue cobrindo o pedido tocado pelo playout e a rotação; só a asserção de repetição em sequência saiu dele (#143), e o DoD 2 do playout passa a contar como teste manual do usuário.
 - **Revisão**: todo PR do Épico 4 passa pelo Sentinel, por ser o épico do upload não confiável.
 
 ## O que vem a seguir
 
-- **Épico 4**: o #156 do Atlas, depois o A01b dele, e conferir a Definição de Pronto item a item.
+- **Épico 4**: o A01b do Atlas e conferir a Definição de Pronto item a item.
 - **Épico 5**: imagem de divulgação passa para o `sanitizer` (E5-F01).
 
 ## Como contribuir
