@@ -22,8 +22,10 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                 type: "datetime2(3)",
                 nullable: true);
 
-            // Linhas anteriores à coluna: o início da família (o MIN do CriadoEmUtc da FamiliaId), que é <= CriadoEmUtc de cada linha. Uma família com mais de 30 dias
-            // deixa de poder rotacionar (o teto vale também para o que já existia). EXEC porque, no script idempotente, o lote precisa enxergar a coluna recém-criada.
+            // Linhas anteriores à coluna: o MIN do CriadoEmUtc da FamiliaId, que é <= CriadoEmUtc de cada linha (o CK nasce válido). ATENÇÃO: o MIN só enxerga as linhas
+            // RETIDAS (a Manutencao apaga o que venceu há mais de 1 dia), então NÃO é a data real do login: ele subestima a idade de uma família antiga (100 dias, rotação a cada
+            // 7, resta ~1 semana de linhas). Efeito: essa família ganha no máximo 30 dias a partir do deploy (nunca é recusada antes da hora, nenhuma passa disso). Não há dado
+            // melhor. Para as famílias novas não há erro: o sucessor herda o valor do pai. EXEC porque, no script idempotente, o lote precisa enxergar a coluna recém-criada.
             migrationBuilder.Sql(
                 "EXEC(N'UPDATE t SET FamiliaCriadaEmUtc = f.Inicio FROM seg.RefreshToken AS t JOIN (SELECT FamiliaId, MIN(CriadoEmUtc) AS Inicio FROM seg.RefreshToken GROUP BY FamiliaId) AS f ON f.FamiliaId = t.FamiliaId');");
 
