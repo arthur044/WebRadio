@@ -118,10 +118,10 @@ public sealed class RegistrarEventoDoPlayoutHandler(ITocandoAgoraStore tocandoAg
         {
             await db.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException) when (nova?.PedidoId is not null)
+        catch (DbUpdateException ex) when (ex is not DbUpdateConcurrencyException && nova?.PedidoId is not null)
         {
             // #151, UX_Reproducao_PedidoId: um FaixaIniciada simultâneo do MESMO pedido passou pelo AnyAsync antes de o outro salvar e perdeu a corrida do INSERT. O outro evento já gravou a linha e marca o
-            // Tocado: este está tratado. A linha perdedora e o TocandoAgora enfileirado saem do contexto, senão o próximo SaveChanges os reinsere. Qualquer outra falha do banco (FK, deadlock) sobe.
+            // Tocado: este está tratado. A linha perdedora e o TocandoAgora enfileirado saem do contexto, senão o próximo SaveChanges os reinsere. Qualquer outra falha do banco (FK, deadlock, concorrência) sobe.
             if (!await JaHaReproducaoAsync(nova.PedidoId.Value, ct)) throw;
             db.Reproducoes.Entry(nova).State = EntityState.Detached;
             outbox.DescartarNaoSalvos();
