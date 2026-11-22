@@ -4,6 +4,8 @@
 #
 # Só muda o que é de desenvolvimento: ambiente Development (seed da grade, scanner NoOp liberado) e portas
 # de diagnóstico em 127.0.0.1 (1433, console do MinIO 9001, harbor-borda 8005). Segredos: os mesmos arquivos.
+# Variáveis do `up`: SEED_DEV_DATA=true (seed de dev), RATE_LIMIT_GLOBAL=<n> (limite global de requisições por minuto e por IP da Api;
+# padrão aqui 2000, o de produção é 100 e a Api de produção recusa subir com mais que isso).
 # =============================================================================
 x-dev-env: &dev-env
   ASPNETCORE_ENVIRONMENT: Development
@@ -41,6 +43,9 @@ services:
       # `conexao` da credencial de transmissão: o harbor-borda do dev está em 127.0.0.1:8005.
       Harbor__HostPublico: "localhost"
       Harbor__PortaPublica: "8005"
+      # #146: o smoke e o E2E saem de um IP só (o do browser/runner) e passam dos 100/min do limite global (429 intermitente).
+      # Só vale em Development: a API de produção recusa subir com esse valor acima de 100.
+      RateLimit__LimiteGlobalPorMinuto: "${RATE_LIMIT_GLOBAL:-2000}"
     secrets:
       - { source: seed_dev_senha, target: Seed__DevSenha }
 

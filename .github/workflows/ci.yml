@@ -584,6 +584,11 @@ jobs:
           # Contêiner morto por falta de memória aparece aqui (o log do mc só diz "Killed"): OOMKilled=true.
           docker compose -f docker-compose.yml -f docker-compose.dev.yml ps -aq | xargs -r docker inspect -f '{{.Name}} exit={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}}'
           docker compose -f docker-compose.yml -f docker-compose.dev.yml logs --no-color --tail 80
+          # #146: log da API por inteiro (o --tail 80 acima some com ele) e a contagem de 429 do limite global.
+          echo "::group::api (log completo)"
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml logs --no-color api || true
+          echo "::endgroup::"
+          echo "429 no log da API (todas as políticas, não só o global): $(docker compose -f docker-compose.yml -f docker-compose.dev.yml logs --no-color api 2>/dev/null | grep -c '"StatusCode":429' || true)"
 
       - name: Derrubar
         if: always()
