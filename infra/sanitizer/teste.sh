@@ -38,7 +38,8 @@ docker build -q -f infra/sanitizer/Dockerfile -t "$SANITIZER" . >/dev/null
 FFMPEG_NA_IMAGEM() { docker run --rm --network none --entrypoint /usr/local/bin/ffmpeg "$SANITIZER" -hide_banner "$@" 2>&1; }
 
 echo "== o ffmpeg tem só o que o E4-D2 prevê"
-VERSAO="$(FFMPEG_NA_IMAGEM -version | head -n 1 | sed -E 's/^ffmpeg version ([0-9]+(\.[0-9]+)*).*/\1/')"
+# sed lê tudo até o fim: com "head -n 1" o ffmpeg tomava SIGPIPE e o pipefail dava 141 (flake do Infra no #149).
+VERSAO="$(FFMPEG_NA_IMAGEM -version | sed -E -n '1s/^ffmpeg version ([0-9]+(\.[0-9]+)*).*/\1/p')"
 confere "versão $VERSAO >= $VERSAO_MINIMA" test "$(printf '%s\n%s\n' "$VERSAO_MINIMA" "$VERSAO" | sort -V | head -n 1)" = "$VERSAO_MINIMA"
 
 lista() { # $1 = demuxers|muxers|decoders|encoders|filters: os nomes, ordenados
