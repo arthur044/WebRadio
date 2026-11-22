@@ -16,6 +16,8 @@ public sealed class SanitizerFalso : IAudioSanitizer
 
     public Exception? ErroNoJob { get; set; }
 
+    public Exception? ErroNaCriacaoDoJob { get; set; }
+
     public int Execucoes { get; private set; }
 
     public int Jobs { get; private set; }
@@ -35,6 +37,7 @@ public sealed class SanitizerFalso : IAudioSanitizer
     public Task<IJobDeSanitizacao> CriarJobAsync(Guid midiaId, CancellationToken ct = default)
     {
         Jobs++;
+        if (ErroNaCriacaoDoJob is not null) return Task.FromException<IJobDeSanitizacao>(ErroNaCriacaoDoJob);
         return Task.FromResult<IJobDeSanitizacao>(new Job(this));
     }
 
@@ -399,6 +402,44 @@ public sealed class PipelineDeMidiaTests
         Assert.Equal(StatusSanitizacao.Pendente, r.StatusSanitizacao);
         Assert.Equal(0, r.TentativasSanitizacao);
         Assert.Empty(c.F.Storage.Apagados);
+    }
+
+    [Fact]
+    public async Task Sanitizer_que_nao_pega_o_job_emite_WORKER_DEGRADADO_sanitizer_a_cada_ciclo_e_recupera_quando_ele_volta()
+    {
+        var c = new Cena();
+        var m = c.Pendente();
+        c.Sanitizer.ErroNoJob = new SanitizerNaoIniciouException();
+
+        await c.Pipeline.ProcessarProximaAsync(default);
+        await c.Pipeline.ProcessarProximaAsync(default);
+
+        Assert.Equal(["sanitizer", "sanitizer"], c.Marcador.Emitidos); // a cada ciclo, não só na transição (E4-D13)
+        Assert.Equal("sanitizer", c.Marcador.Motivo);
+
+        c.Sanitizer.ErroNoJob = null;
+        c.SanitizerAprova(10m);
+        await c.Pipeline.ProcessarProximaAsync(default);
+
+        Assert.Equal(StatusSanitizacao.Aprovado, c.Recarregar(m.Id).StatusSanitizacao);
+        Assert.Null(c.Marcador.Motivo); // o sanitizer pegou o job: WORKER_RECUPERADO motivo=sanitizer
+    }
+
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public async Task Diretorio_de_jobs_inacessivel_e_motivo_sanitizer_e_o_item_volta_sem_gastar_tentativa(Type tipo)
+    {
+        var c = new Cena();
+        var m = c.Pendente();
+        c.Sanitizer.ErroNaCriacaoDoJob = (Exception)Activator.CreateInstance(tipo, "volume fora")!;
+
+        Assert.Equal(PassoDoPipeline.InfraestruturaFora, await c.Pipeline.ProcessarProximaAsync(default));
+
+        var r = c.Recarregar(m.Id);
+        Assert.Equal(StatusSanitizacao.Pendente, r.StatusSanitizacao);
+        Assert.Equal(0, r.TentativasSanitizacao);
+        Assert.Equal(["sanitizer"], c.Marcador.Emitidos);
     }
 
     [Fact]

@@ -262,7 +262,7 @@ internal static class AberturaSemBloqueio
 /// </summary>
 public sealed class MarcadorDeDegradacao(string? arquivo, ILogger<MarcadorDeDegradacao> logger) : IMarcadorDeDegradacao
 {
-    private static readonly HashSet<string> Permitidos = [MotivosDeDegradacao.Scanner, MotivosDeDegradacao.AssinaturaVelha, MotivosDeDegradacao.TravaApagao];
+    private static readonly HashSet<string> Permitidos = [MotivosDeDegradacao.Scanner, MotivosDeDegradacao.AssinaturaVelha, MotivosDeDegradacao.TravaApagao, MotivosDeDegradacao.Sanitizer];
 
     private readonly Lock _trava = new();
     private readonly SortedSet<string> _ativos = new(StringComparer.Ordinal);
