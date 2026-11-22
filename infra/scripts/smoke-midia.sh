@@ -255,6 +255,10 @@ sql() { # $1 = consulta; imprime só o valor (a senha do SA é lida DENTRO do co
   docker exec -i "$("${COMPOSE[@]}" ps -q sqlserver)" bash -c \
     'SQLCMDPASSWORD="$(cat /run/secrets/mssql_sa_password)" exec /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -d WebRadio -h -1 -W -Q "SET NOCOUNT ON; $1"' _ "$1" 2>/dev/null | tr -d '\r ' | head -n1
 }
+sql_linhas() { # como sql(), mas imprime todas as linhas (diagnóstico)
+  docker exec -i "$("${COMPOSE[@]}" ps -q sqlserver)" bash -c \
+    'SQLCMDPASSWORD="$(cat /run/secrets/mssql_sa_password)" exec /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -d WebRadio -h -1 -W -s "|" -Q "SET NOCOUNT ON; $1"' _ "$1" 2>/dev/null | tr -d '\r'
+}
 subir "$LOC1" "$FIX/musica.wav" Musica audio/wav "Música do smoke"; ID_MUSICA="$UP_ID"
 if [[ "$UP_CONCLUIR" == 202 ]] && espera_status "$LOC1" "$ID_MUSICA" Aprovado 150; then
   ok "a música de 35 s da biblioteca é aprovada"
@@ -279,19 +283,23 @@ if [[ "$UP_CONCLUIR" == 202 ]] && espera_status "$LOC1" "$ID_MUSICA" Aprovado 15
   rotacao_tocou() { [[ "$(sql "SELECT COUNT(*) FROM midia.Reproducao AS r JOIN midia.ArquivoMidia AS m ON m.Id = r.MidiaId WHERE r.PedidoId IS NULL AND m.StatusSanitizacao = 4 AND m.Ativo = 1")" -ge 2 ]]; }
   confere "a rotação da biblioteca toca (>= 2 faixas sem pedido, em até 4 min)" espera_ate 240 rotacao_tocou
   confere "nenhuma faixa repete em sequência (a faixa em voo é excluída)" test "$(sql "SELECT COUNT(*) FROM (SELECT MidiaId, LAG(MidiaId) OVER (ORDER BY IniciadoEmUtc, Id) AS Anterior FROM midia.Reproducao) AS x WHERE MidiaId = Anterior")" = 0
+  if [[ "$(sql "SELECT COUNT(*) FROM (SELECT MidiaId, LAG(MidiaId) OVER (ORDER BY IniciadoEmUtc, Id) AS Anterior FROM midia.Reproducao) AS x WHERE MidiaId = Anterior")" != 0 ]]; then
+    echo "  (diagnóstico: a sequência de midia.Reproducao, hora UTC | tipo | início do MidiaId | pedido)"
+    sql_linhas "SELECT FORMAT(r.IniciadoEmUtc, 'HH:mm:ss.fff'), m.TipoMidia, LEFT(CONVERT(varchar(36), r.MidiaId), 8), IIF(r.PedidoId IS NULL, 'rotação', 'pedido') FROM midia.Reproducao AS r JOIN midia.ArquivoMidia AS m ON m.Id = r.MidiaId ORDER BY r.IniciadoEmUtc, r.Id" | sed 's/^/  (/; s/$/)/'
+  fi
 
   # Mídia desativada some da rotação no próximo pedido de faixa.
   ETAG="$(curl --silent --max-time 10 --dump-header - --output /dev/null -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/midias/$ID_CAPA" | tr -d '\r' | grep -i -m1 '^etag:' | cut -d' ' -f2-)"
   r="$(curl --silent --max-time 10 --write-out '\n%{http_code}' -X PATCH -H 'Content-Type: application/json' -H "If-Match: $ETAG" -H "Authorization: Bearer $ADMIN" --data '{"ativo":false}' "$BASE/api/v1/midias/$ID_CAPA" || true)"
   confere "o Admin desativa a vinheta (PATCH 200)" test "${r##*$'\n'}" = 200
   # O request.dynamic do Liquidsoap pré-busca ~10 s de áudio (várias vinhetas de 3 s): o que já foi buscado antes do PATCH ainda toca. A folga cobre isso.
-  DESATIVADA_EM="$(sql "SELECT FORMAT(DATEADD(SECOND, 45, SYSUTCDATETIME()), 'yyyy-MM-dd HH:mm:ss')")"
+  DESATIVADA_EM="$(sql "SELECT FORMAT(DATEADD(SECOND, 45, SYSUTCDATETIME()), 'yyyy-MM-ddTHH:mm:ss')")"
   sleep 90
   TOCOU_DEPOIS="$(sql "SELECT COUNT(*) FROM midia.Reproducao WHERE MidiaId = '$ID_CAPA' AND IniciadoEmUtc > '$DESATIVADA_EM'")"
   confere "depois de desativada a vinheta não toca mais (nenhuma reprodução depois da folga de 45 s)" test "$TOCOU_DEPOIS" = 0
   if [[ "$TOCOU_DEPOIS" != 0 ]]; then
-    echo "  (diagnóstico: corte=$DESATIVADA_EM, agora=$(sql "SELECT FORMAT(SYSUTCDATETIME(), 'yyyy-MM-dd HH:mm:ss')"), ativo=$(sql "SELECT Ativo FROM midia.ArquivoMidia WHERE Id = '$ID_CAPA'"))"
-    sql "SELECT TOP 5 FORMAT(IniciadoEmUtc, 'HH:mm:ss') FROM midia.Reproducao WHERE MidiaId = '$ID_CAPA' ORDER BY IniciadoEmUtc DESC" | sed 's/^/  (reprodução em /; s/$/)/'
+    echo "  (diagnóstico: corte=$DESATIVADA_EM, agora=$(sql "SELECT FORMAT(SYSUTCDATETIME(), 'yyyy-MM-ddTHH:mm:ss')"), ativo=$(sql "SELECT Ativo FROM midia.ArquivoMidia WHERE Id = '$ID_CAPA'"))"
+    sql_linhas "SELECT TOP 5 FORMAT(IniciadoEmUtc, 'HH:mm:ss') FROM midia.Reproducao WHERE MidiaId = '$ID_CAPA' ORDER BY IniciadoEmUtc DESC" | sed 's/^/  (reprodução em /; s/$/)/'
   fi
 else
   falha "a música do pedido não chegou a Aprovado (policy $UP_POLICY, multipart $UP_POST, concluir $UP_CONCLUIR)"
