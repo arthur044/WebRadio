@@ -54,6 +54,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
                                                   || d.ServiceType.Name.StartsWith("IDbContextOptionsConfiguration", StringComparison.Ordinal)).ToList())
                 services.Remove(d);
             services.AddDbContext<RadioDbContext>((escopo, o) => o.UseInMemoryDatabase(_nomeDoBanco).ComEventosDeDominio(escopo));
+            // O SQL do playout (UPDLOCK, READPAST, coluna calculada) só existe no SQL Server: aqui a fila está sempre vazia (204); o SQL real tem teste próprio na Infrastructure.
+            services.AddScoped<WebRadio.Application.Abstracoes.IFilaDoPlayout, FilaDoPlayoutVazia>();
+            services.AddScoped<WebRadio.Application.Features.Relatorios.IRelatorioDeReproducoes, RelatorioFalso>();
         });
     }
 
@@ -90,4 +93,22 @@ public static class ApiFactoryExtensions
         db.SaveChangesAsync().GetAwaiter().GetResult();
         return u.Id;
     }
+}
+
+internal sealed class FilaDoPlayoutVazia : WebRadio.Application.Abstracoes.IFilaDoPlayout
+{
+    public Task<WebRadio.Application.Abstracoes.PedidoParaTocar?> CapturarPedidoAsync(Guid instancia, DateTime agora, CancellationToken ct) => Task.FromResult<WebRadio.Application.Abstracoes.PedidoParaTocar?>(null);
+
+    public Task<WebRadio.Application.Abstracoes.CandidataDaRotacao?> SortearForaDaJanelaAsync(WebRadio.Domain.Enums.TipoMidia tipo, int sorteio, DateTime corteDaJanela, Guid emVoo, CancellationToken ct) =>
+        Task.FromResult<WebRadio.Application.Abstracoes.CandidataDaRotacao?>(null);
+
+    public Task<WebRadio.Application.Abstracoes.CandidataDaRotacao?> MaisAntigaDaJanelaAsync(WebRadio.Domain.Enums.TipoMidia tipo, DateTime corteDaJanela, Guid emVoo, CancellationToken ct) =>
+        Task.FromResult<WebRadio.Application.Abstracoes.CandidataDaRotacao?>(null);
+}
+
+internal sealed class RelatorioFalso : WebRadio.Application.Features.Relatorios.IRelatorioDeReproducoes
+{
+    public Task<IReadOnlyList<WebRadio.Application.Features.Relatorios.MidiaMaisTocadaDto>> MaisTocadasAsync(DateTime deUtc, DateTime ateUtc, int top, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<WebRadio.Application.Features.Relatorios.MidiaMaisTocadaDto>>(
+            [new(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Aurora", "Banda", WebRadio.Domain.Enums.TipoMidia.Musica, top)]);
 }
