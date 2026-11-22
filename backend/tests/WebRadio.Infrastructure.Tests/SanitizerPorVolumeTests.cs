@@ -327,6 +327,20 @@ public class MarcadorDeDegradacaoTests
     }
 
     [Fact]
+    public void O_motivo_sanitizer_esta_na_lista_fechada_do_E4_D13()
+    {
+        var linhas = new List<(LogLevel Nivel, string Texto)>();
+        var m = new MarcadorDeDegradacao(null, new CapturaDeLog<MarcadorDeDegradacao>(linhas));
+
+        m.Degradado(MotivosDeDegradacao.Sanitizer);
+        m.Recuperado(MotivosDeDegradacao.Sanitizer);
+
+        Assert.Equal("sanitizer", MotivosDeDegradacao.Sanitizer);
+        Assert.Single(linhas, l => l.Nivel == LogLevel.Error && l.Texto == "WORKER_DEGRADADO motivo=sanitizer");
+        Assert.Single(linhas, l => l.Nivel == LogLevel.Information && l.Texto == "WORKER_RECUPERADO motivo=sanitizer");
+    }
+
+    [Fact]
     public void Sem_arquivo_nao_quebra()
     {
         var m = new MarcadorDeDegradacao(null, NullLogger<MarcadorDeDegradacao>.Instance);

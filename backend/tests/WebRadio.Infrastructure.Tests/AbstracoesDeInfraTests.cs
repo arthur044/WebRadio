@@ -240,6 +240,20 @@ public class MemoryRequestThrottleTests
     }
 
     [Fact]
+    public async Task IncrementarPor_negativo_tem_piso_em_0_na_chave_que_expirou_ou_com_saldo_menor()
+    {
+        var (t, _) = Novo();
+
+        Assert.Equal(0, await t.IncrementarPorAsync("bytes", -250L * 1024 * 1024, Janela)); // virada da hora: a chave já não existe
+        Assert.Equal(0, await t.LerAsync("bytes"));
+
+        Assert.Equal(10, await t.IncrementarPorAsync("bytes", 10, Janela));
+        Assert.Equal(7, await t.IncrementarPorAsync("bytes", -3, Janela));
+        Assert.Equal(0, await t.IncrementarPorAsync("bytes", -50, Janela));
+        Assert.Equal(1, await t.IncrementarPorAsync("bytes", 1, Janela)); // sem "crédito" negativo acumulado
+    }
+
+    [Fact]
     public async Task Reserva_e_SET_NX_EX_so_a_primeira_ganha_ate_expirar()
     {
         var (t, relogio) = Novo();

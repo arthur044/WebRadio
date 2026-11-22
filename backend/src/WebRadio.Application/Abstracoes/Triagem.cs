@@ -109,14 +109,20 @@ public static class MotivosDeDegradacao
     /// <summary>Base de assinaturas com mais de <c>Seguranca:IdadeMaximaAssinaturaDias</c>, ou sem data legível (E4-D7).</summary>
     public const string AssinaturaVelha = "assinatura_velha";
 
-    /// <summary>A limpeza de <c>midia/</c> abortou: a consulta falhou ou apagaria objetos demais (E4-D11, F09).</summary>
+    /// <summary>A limpeza de <c>midia/</c> ou da quarentena abortou: a consulta falhou ou apagaria objetos demais (E4-D11, F09).</summary>
     public const string TravaApagao = "trava_apagao";
+
+    /// <summary>O sanitizer não pegou o job no prazo, ou o diretório de jobs está inacessível (E4-D13, #138).</summary>
+    public const string Sanitizer = "sanitizer";
 }
 
 /// <summary>
 /// O sanitizer não pegou o job (não escreveu <c>iniciado</c> no prazo): falha de INFRAESTRUTURA (E4-D13), nunca do arquivo. O item volta a <c>Pendente</c> com a tentativa devolvida.
 /// </summary>
 public sealed class SanitizerNaoIniciouException() : Exception("O sanitizer não iniciou o job no prazo.");
+
+/// <summary>O diretório de jobs do sanitizer (volume compartilhado) está inacessível ao criar o job: falha de INFRAESTRUTURA (E4-D13, motivo <c>sanitizer</c>), nunca do arquivo.</summary>
+public sealed class DiretorioDeJobsInacessivelException(Exception inner) : Exception("O diretório de jobs do sanitizer está inacessível.", inner);
 
 /// <summary>
 /// Falha atribuível ao ARQUIVO (E4-D13): o <c>clamd</c> caiu ou deu erro no meio do <c>INSTREAM</c>, estourou o tempo do scan ou recusou o tamanho. Conta como

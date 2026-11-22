@@ -108,7 +108,16 @@ public sealed class PipelineDeMidia(
         }
         catch (SanitizerNaoIniciouException)
         {
+            // Mesma regra do antivírus: marcador a CADA ciclo enquanto durar (E4-D13, #138); sai quando um job é pego (Recuperado, depois do ExecutarAsync).
+            degradacao.Degradado(MotivosDeDegradacao.Sanitizer);
             logger.LogError("PIPELINE_MIDIA_SANITIZER_NAO_INICIOU midia {MidiaId}: o sanitizer não pegou o job; o item volta a Pendente e a tentativa é devolvida.", midia.Id);
+            await DevolverAsync(midia, ct);
+            passo = PassoDoPipeline.InfraestruturaFora;
+        }
+        catch (DiretorioDeJobsInacessivelException e)
+        {
+            degradacao.Degradado(MotivosDeDegradacao.Sanitizer);
+            logger.LogError("PIPELINE_MIDIA_DIRETORIO_DE_JOBS midia {MidiaId} ({Tipo}): o diretório de jobs do sanitizer está inacessível; o item volta a Pendente e a tentativa é devolvida.", midia.Id, e.InnerException?.GetType().Name ?? "-");
             await DevolverAsync(midia, ct);
             passo = PassoDoPipeline.InfraestruturaFora;
         }
@@ -192,7 +201,17 @@ public sealed class PipelineDeMidia(
             return;
         }
 
-        await using var job = await sanitizer.CriarJobAsync(midia.Id, ct);
+        IJobDeSanitizacao job;
+        try
+        {
+            job = await sanitizer.CriarJobAsync(midia.Id, ct);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            throw new DiretorioDeJobsInacessivelException(e);
+        }
+
+        await using var _ = job;
 
         // 2) download condicional DIRETO no tmpfs do job (nunca no /tmp do Worker, que dobraria a memória): If-Match = o ETag registrado, corte em limite + 1.
         try
@@ -259,6 +278,7 @@ public sealed class PipelineDeMidia(
         // O teto de leitura e o -fs do sanitizer são o tamanho ESPERADO da saída (CBR 192 kbps pela duração máxima + 1 s do -t), não os 250 MiB do tipo (Sentinel B1).
         var tamanhoMaxSaida = Math.Min(limite.TamanhoMaximoBytes, DetectorDeFormato.TamanhoMaximoDaSaida((long)limite.DuracaoMaxima.TotalSeconds));
         var resultado = await job.ExecutarAsync(formato, (long)limite.DuracaoMaxima.TotalSeconds, tamanhoMaxSaida, timeout, ct);
+        degradacao.Recuperado(MotivosDeDegradacao.Sanitizer); // o sanitizer pegou o job: voltou (resultado inválido ou timeout depois disso são do arquivo)
         if (!resultado.Aprovado)
         {
             var motivo = resultado.Motivo ?? MotivoDaSanitizacao.ResultadoInvalido;
