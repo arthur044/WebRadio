@@ -425,6 +425,37 @@ public sealed class PipelineDeMidiaTests
         Assert.Null(c.Marcador.Motivo); // o sanitizer pegou o job: WORKER_RECUPERADO motivo=sanitizer
     }
 
+    [Fact]
+    public async Task Sanitizer_que_pegou_o_job_recupera_o_motivo_mesmo_se_o_ExecutarAsync_lanca_depois()
+    {
+        var c = new Cena();
+        c.Pendente();
+        c.Sanitizer.ErroNoJob = new SanitizerNaoIniciouException();
+        await c.Pipeline.ProcessarProximaAsync(default);
+        Assert.Equal("sanitizer", c.Marcador.Motivo);
+
+        c.Pendente();
+        c.Sanitizer.ErroNoJob = new InvalidOperationException("o sanitizer pegou o job e a leitura do resultado quebrou"); // não é o sanitizer ausente
+        await c.Pipeline.ProcessarProximaAsync(default);
+
+        Assert.Null(c.Marcador.Motivo); // WORKER_RECUPERADO motivo=sanitizer: ele respondeu
+    }
+
+    [Fact]
+    public async Task Falha_de_disco_do_job_durante_o_ExecutarAsync_nao_recupera_o_motivo_sanitizer()
+    {
+        var c = new Cena();
+        c.Pendente();
+        c.Sanitizer.ErroNoJob = new SanitizerNaoIniciouException();
+        await c.Pipeline.ProcessarProximaAsync(default);
+
+        c.Pendente();
+        c.Sanitizer.ErroNoJob = new IOException("volume fora ao gravar o job.json"); // o sanitizer pode nem ter visto o job
+        await c.Pipeline.ProcessarProximaAsync(default);
+
+        Assert.Equal("sanitizer", c.Marcador.Motivo);
+    }
+
     [Theory]
     [InlineData(typeof(IOException))]
     [InlineData(typeof(UnauthorizedAccessException))]

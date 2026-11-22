@@ -248,7 +248,6 @@ else
   "${COMPOSE[@]}" up -d --wait --wait-timeout 300 clamd >/dev/null 2>&1 || true
 fi
 
-# --- DoD 7: limites do S-M06 -------------------------------------------------------------------------------------------------
 # --- DoD 2 e 8: o playout toca o pedido aprovado e depois a rotação da biblioteca (E4-F08) ---------------------------------------------
 echo "== DoD 2 e 8: pedido tocado pelo playout e rotação pela biblioteca"
 sql() { # $1 = consulta; imprime só o valor (a senha do SA é lida DENTRO do contêiner, nunca em argv do host)

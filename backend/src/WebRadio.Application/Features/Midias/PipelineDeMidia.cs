@@ -277,7 +277,18 @@ public sealed class PipelineDeMidia(
         var timeout = o.TimeoutDoSanitizer(midia.TipoMidia);
         // O teto de leitura e o -fs do sanitizer são o tamanho ESPERADO da saída (CBR 192 kbps pela duração máxima + 1 s do -t), não os 250 MiB do tipo (Sentinel B1).
         var tamanhoMaxSaida = Math.Min(limite.TamanhoMaximoBytes, DetectorDeFormato.TamanhoMaximoDaSaida((long)limite.DuracaoMaxima.TotalSeconds));
-        var resultado = await job.ExecutarAsync(formato, (long)limite.DuracaoMaxima.TotalSeconds, tamanhoMaxSaida, timeout, ct);
+        ResultadoSanitizacao resultado;
+        try
+        {
+            resultado = await job.ExecutarAsync(formato, (long)limite.DuracaoMaxima.TotalSeconds, tamanhoMaxSaida, timeout, ct);
+        }
+        catch (Exception e) when (e is not (SanitizerNaoIniciouException or IOException or UnauthorizedAccessException or OperationCanceledException))
+        {
+            // O sanitizer pegou o job (o que não o pega é o SanitizerNaoIniciou; falha de disco do job pode nem ter chegado a ele): o que quebrou depois é do arquivo ou de um bug, não do sanitizer ausente.
+            degradacao.Recuperado(MotivosDeDegradacao.Sanitizer);
+            throw;
+        }
+
         degradacao.Recuperado(MotivosDeDegradacao.Sanitizer); // o sanitizer pegou o job: voltou (resultado inválido ou timeout depois disso são do arquivo)
         if (!resultado.Aprovado)
         {

@@ -109,8 +109,11 @@ public static class MotivosDeDegradacao
     /// <summary>Base de assinaturas com mais de <c>Seguranca:IdadeMaximaAssinaturaDias</c>, ou sem data legível (E4-D7).</summary>
     public const string AssinaturaVelha = "assinatura_velha";
 
-    /// <summary>A limpeza de <c>midia/</c> ou da quarentena abortou: a consulta falhou ou apagaria objetos demais (E4-D11, F09).</summary>
+    /// <summary>A limpeza de <c>midia/</c> abortou: a consulta falhou ou apagaria objetos demais (E4-D11, F09). Recuperado só pela rodada diária de <c>midia/</c>.</summary>
     public const string TravaApagao = "trava_apagao";
+
+    /// <summary>A varredura de 30 min da quarentena abortou (E4-D11, v1.7, #153): consulta falhou ou passaria do limite próprio. Recuperado só por ela.</summary>
+    public const string TravaApagaoQuarentena = "trava_apagao_quarentena";
 
     /// <summary>O sanitizer não pegou o job no prazo, ou o diretório de jobs está inacessível (E4-D13, #138).</summary>
     public const string Sanitizer = "sanitizer";

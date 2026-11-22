@@ -32,10 +32,21 @@ public sealed class SanitizerPorVolumeTests : IDisposable
         responder(diretorio);
     });
 
+    /// <summary>
+    /// O sanitizer de verdade devolve por <c>rename</c>: a leitura do Worker nunca vê o arquivo pela metade. O teste faz o mesmo (escreve num temporário e <c>File.Move</c>); com <c>File.WriteAllText</c>
+    /// direto o arquivo aparece vazio por um instante e a leitura dava <c>ResultadoInvalido</c> de vez em quando (flake do CI no #152).
+    /// </summary>
+    private static void EscreverPorRename(string diretorio, string nome, string texto)
+    {
+        var temporario = Path.Combine(diretorio, ".tmp-" + nome);
+        File.WriteAllText(temporario, texto);
+        File.Move(temporario, Path.Combine(diretorio, nome), overwrite: true);
+    }
+
     private static void Ok(string d, string? outMp3 = null, string result = """{"ok":true,"duracaoSegundos":12.5,"streamsAudio":1,"codec":"flac"}""")
     {
         File.WriteAllBytes(Path.Combine(d, "out.mp3"), outMp3 is null ? Mp3 : Encoding.ASCII.GetBytes(outMp3));
-        File.WriteAllText(Path.Combine(d, "result.json"), result);
+        EscreverPorRename(d, "result.json", result);
     }
 
     private async Task<(ResultadoSanitizacao R, string Dir)> Executar(Action<string> responder, long tamanhoMax = 1000, TimeSpan? timeout = null, TimeSpan? folga = null)
@@ -109,7 +120,7 @@ public sealed class SanitizerPorVolumeTests : IDisposable
         if (OperatingSystem.IsWindows()) return;
         var tarefa = Executar(d =>
         {
-            File.WriteAllText(Path.Combine(d, "result.json"), """{"ok":true,"duracaoSegundos":12.5,"streamsAudio":1,"codec":"flac"}""");
+            EscreverPorRename(d, "result.json", """{"ok":true,"duracaoSegundos":12.5,"streamsAudio":1,"codec":"flac"}""");
             CriarFifo(Path.Combine(d, "out.mp3"));
         });
 
@@ -203,7 +214,7 @@ public sealed class SanitizerPorVolumeTests : IDisposable
     [InlineData("job_invalido", MotivoDaSanitizacao.JobInvalido)]
     public async Task Recusa_com_motivo_da_lista_fechada_vira_o_enum(string texto, MotivoDaSanitizacao esperado)
     {
-        var (r, _) = await Executar(d => File.WriteAllText(Path.Combine(d, "result.json"), $$"""{"ok":false,"motivo":"{{texto}}","streamsAudio":1,"codec":"adpcm_ms"}"""));
+        var (r, _) = await Executar(d => EscreverPorRename(d, "result.json", $$"""{"ok":false,"motivo":"{{texto}}","streamsAudio":1,"codec":"adpcm_ms"}"""));
         Assert.False(r.Aprovado);
         Assert.Equal(esperado, r.Motivo);
         Assert.Null(r.Saida);
@@ -231,7 +242,7 @@ public sealed class SanitizerPorVolumeTests : IDisposable
     public async Task Result_json_acima_de_4_KB_nunca_e_lido()
     {
         var gigante = """{"ok":false,"motivo":"timeout","streamsAudio":1,"codec":"x"}""" + new string(' ', 5000);
-        var (r, _) = await Executar(d => File.WriteAllText(Path.Combine(d, "result.json"), gigante));
+        var (r, _) = await Executar(d => EscreverPorRename(d, "result.json", gigante));
         Assert.Equal(MotivoDaSanitizacao.ResultadoInvalido, r.Motivo);
     }
 
@@ -245,7 +256,7 @@ public sealed class SanitizerPorVolumeTests : IDisposable
     [Fact]
     public async Task Ok_sem_out_mp3_e_ResultadoInvalido()
     {
-        var (r, _) = await Executar(d => File.WriteAllText(Path.Combine(d, "result.json"), """{"ok":true,"duracaoSegundos":10,"streamsAudio":1,"codec":"mp3"}"""));
+        var (r, _) = await Executar(d => EscreverPorRename(d, "result.json", """{"ok":true,"duracaoSegundos":10,"streamsAudio":1,"codec":"mp3"}"""));
         Assert.Equal(MotivoDaSanitizacao.ResultadoInvalido, r.Motivo);
     }
 
@@ -326,18 +337,27 @@ public class MarcadorDeDegradacaoTests
         Assert.Throws<ArgumentException>(() => m.Degradado("clamd fora de novo, texto livre"));
     }
 
-    [Fact]
-    public void O_motivo_sanitizer_esta_na_lista_fechada_do_E4_D13()
+    [Theory]
+    [InlineData("sanitizer")]
+    [InlineData("trava_apagao")]
+    [InlineData("trava_apagao_quarentena")]
+    public void Os_motivos_do_E4_D13_estao_na_lista_fechada(string motivo)
     {
         var linhas = new List<(LogLevel Nivel, string Texto)>();
         var m = new MarcadorDeDegradacao(null, new CapturaDeLog<MarcadorDeDegradacao>(linhas));
 
-        m.Degradado(MotivosDeDegradacao.Sanitizer);
-        m.Recuperado(MotivosDeDegradacao.Sanitizer);
+        m.Degradado(motivo);
+        m.Recuperado(motivo);
 
-        Assert.Equal("sanitizer", MotivosDeDegradacao.Sanitizer);
-        Assert.Single(linhas, l => l.Nivel == LogLevel.Error && l.Texto == "WORKER_DEGRADADO motivo=sanitizer");
-        Assert.Single(linhas, l => l.Nivel == LogLevel.Information && l.Texto == "WORKER_RECUPERADO motivo=sanitizer");
+        Assert.Single(linhas, l => l.Nivel == LogLevel.Error && l.Texto == $"WORKER_DEGRADADO motivo={motivo}");
+        Assert.Single(linhas, l => l.Nivel == LogLevel.Information && l.Texto == $"WORKER_RECUPERADO motivo={motivo}");
+    }
+
+    [Fact]
+    public void As_constantes_dos_motivos_batem_com_a_spec()
+    {
+        Assert.Equal(["scanner", "assinatura_velha", "trava_apagao", "trava_apagao_quarentena", "sanitizer"],
+            [MotivosDeDegradacao.Scanner, MotivosDeDegradacao.AssinaturaVelha, MotivosDeDegradacao.TravaApagao, MotivosDeDegradacao.TravaApagaoQuarentena, MotivosDeDegradacao.Sanitizer]);
     }
 
     [Fact]
