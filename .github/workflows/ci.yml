@@ -588,7 +588,7 @@ jobs:
           echo "::group::api (log completo)"
           docker compose -f docker-compose.yml -f docker-compose.dev.yml logs --no-color api || true
           echo "::endgroup::"
-          echo "429 no log da API: $(docker compose -f docker-compose.yml -f docker-compose.dev.yml logs --no-color api 2>/dev/null | grep -c '"StatusCode":429' || true)"
+          echo "429 no log da API (todas as políticas, não só o global): $(docker compose -f docker-compose.yml -f docker-compose.dev.yml logs --no-color api 2>/dev/null | grep -c '"StatusCode":429' || true)"
 
       - name: Derrubar
         if: always()
