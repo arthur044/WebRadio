@@ -164,6 +164,17 @@ builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 
 // Limite global de 100/min por IP (00-arquitetura.md §164). O IP só serve de chave de partição; nunca é logado.
+// RateLimit:LimiteGlobalPorMinuto (env RateLimit__LimiteGlobalPorMinuto) existe para o Compose de smoke/E2E (#146): o browser e o
+// smoke saem todos do mesmo IP e passam de 100/min. Subir acima de 100 só vale em Development; fora dele a API recusa subir.
+const int LimiteGlobalPadrao = 100;
+var limiteGlobalTexto = builder.Configuration["RateLimit:LimiteGlobalPorMinuto"];
+var limiteGlobal = LimiteGlobalPadrao;
+if (!string.IsNullOrWhiteSpace(limiteGlobalTexto)
+    && (!int.TryParse(limiteGlobalTexto, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out limiteGlobal)
+        || limiteGlobal is < 1 or > 100_000))
+    throw new InvalidOperationException("RateLimit:LimiteGlobalPorMinuto precisa ser um inteiro entre 1 e 100000.");
+if (limiteGlobal > LimiteGlobalPadrao && !builder.Environment.IsDevelopment())
+    throw new InvalidOperationException($"RateLimit:LimiteGlobalPorMinuto acima de {LimiteGlobalPadrao} só é aceito em Development (o limite global é defesa de produção).");
 // O listener interno :8081 é isento: healthcheck e polling do Liquidsoap vêm de poucos IPs fixos.
 builder.Services.AddRateLimiter(o =>
 {
@@ -199,7 +210,7 @@ builder.Services.AddRateLimiter(o =>
         ctx.Connection.LocalPort == ListenerInterno.PortaInterna
             ? RateLimitPartition.GetNoLimiter("interno")
             : RateLimitPartition.GetFixedWindowLimiter(IpChave.De(ctx.Connection.RemoteIpAddress),
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = 100, Window = TimeSpan.FromMinutes(1) }));
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = limiteGlobal, Window = TimeSpan.FromMinutes(1) }));
 });
 
 static IEnumerable<SecurityKey> ChavesDeValidacao(JwtOptions jwt)
