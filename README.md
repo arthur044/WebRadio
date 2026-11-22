@@ -121,7 +121,8 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 - **#128**: a `main` ficou vermelha por NU1903 (DoS no ASP.NET Core, GHSA-wr8v-9x5q-ggcm): pacotes Microsoft.* e imagens `dotnet/*` foram para a 10.0.15, e o Dependabot passou a ignorar o major (11.x) desses pacotes. O mesmo PR corrigiu `libxslt` r4 no `web` e no `harbor-borda`, e o `minio-init`, que quebrava quando a secret key gerada começava com `-`.
 - **#134**: o `minio-init` morria por falta de memória com `mem_limit: 128m` (o `mc` passa disso no `policy attach`); passou para 256m. O `ler` do `minio-init` recusa segredo que começa com `-` sem imprimir o valor, e o job de Infra ganhou `infra/minio/teste.sh`.
 - **#135**: o gitleaks isenta o `65532:65532` (uid do sanitizer) no `smoke-midia.sh`, falso positivo que derrubava todo PR.
-- **#150**: o `liquidsoap` do Compose passou para `mem_limit: 512m`. O boot dele pica em ~420 MiB e o contêiner era morto (`Restarting (137)`) quando o runner não deixava usar swap; era a causa do #139.
+- **#150**: o `liquidsoap` do Compose passou para `mem_limit: 512m`. O boot dele pica em ~420 MiB e o contêiner era morto (`Restarting (137)`) quando o runner não deixava usar swap; era a causa do #139. O Worker foi a 768m e o `minio-init` a 256m; o `smoke-compose.sh` afirma esses mínimos.
+- **Dependabot**: #142, #147, #148 e #149 na `main`. O #144 (`@microsoft/signalr` 11) fica segurado até o .NET 11.
 
 ### Pendente
 
@@ -155,24 +156,28 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 
 ## Status do Épico 4
 
-**Em andamento: D1 e D2 na `main`, D3 começando, D4 aguardando o D3.** O Épico 4 entrega biblioteca de mídia, upload, sanitização e playout: locutor e Admin enviam áudio direto ao storage, o Worker passa o original pelo antivírus e o `sanitizer` recodifica para MP3; só a saída recodificada entra na biblioteca. O pedido aprovado com mídia passa a tocar sozinho pelo playout, e o Admin ganha o relatório de mais tocadas. O pacote de tarefas, as decisões e a Definição de Pronto estão em [`docs/specs/08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md).
+**Em andamento: os quatro pacotes (D1 a D4) estão na `main`; falta fechar as pendências do D2 (#152) e a spec v1.7 (#154).** O Épico 4 entrega biblioteca de mídia, upload, sanitização e playout: locutor e Admin enviam áudio direto ao storage, o Worker passa o original pelo antivírus e o `sanitizer` recodifica para MP3; só a saída recodificada entra na biblioteca. O pedido aprovado com mídia passa a tocar sozinho pelo playout, e o Admin ganha o relatório de mais tocadas. O pacote de tarefas, as decisões e a Definição de Pronto estão em [`docs/specs/08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md).
 
 | Pacote | Entrega | PR | Situação |
 |---|---|---|---|
 | Spec | Pacote de tarefas do Épico 4 (v1.6: o que o D2 mostrou, com os reviews do Guardian, do Sentinel e do Atlas) | #92, #108, #141 | Na `main` |
+| Spec | v1.7: travas de apagão (`midia/` e quarentena), índice único de `Reproducao` e a regra de testes | #154 | Em review |
 | D1 | Imagens de terceiros sem CRITICAL corrigível e trivy bloqueando (E4-F01) | #95 | Na `main` |
 | D2 | Upload, sanitização, ClamAV, biblioteca e limpezas (backend): E4-F02 a F07, F09 e o `smoke-midia.sh` (F10, parte de upload) | #112 | Na `main` |
-| D3 | Playout pela biblioteca e relatório de mais tocadas (backend); abre com o A01a do Atlas (chave de sorteio e índices) | A01a: #111; #143 (rascunho) | A01a na `main`; o resto (F08, A02, A01b) começando |
-| D4 | Telas: biblioteca, envio, aprovar com mídia, mais tocadas | #110 | PR em rascunho, aguarda o D3 (aprovar com mídia e mais tocadas dependem dele) |
+| D3 | Playout pela biblioteca e relatório de mais tocadas (backend): A01a (chave de sorteio e índices), E4-F08, E4-A02 e a parte de playout do F10 | #111, #143 | Na `main` |
+| D4 | Telas: biblioteca, envio, aprovar com mídia, mais tocadas (E4-P01 a P05) | #110 | Na `main` |
+| Pendências do D2 | Piso na trava de `midia/`, trava na quarentena, motivo `sanitizer` e piso do `INCRBY` (issues #136, #137, #138 e #140) | #152 | Em review |
 
 - **Já na API**: `POST /midias/uploads` e `/midias/{id}/concluir` (envio direto ao storage por POST policy, com limites de 20 por hora e 5 abertos por usuário), `GET /midias` e `GET /midias/{id}`, preview, `PATCH`/`DELETE`, o pipeline do Worker e as limpezas da manutenção. O contrato está na §6 de [`docs/specs/02-api-rest.md`](docs/specs/02-api-rest.md).
-- **Ainda não existe**: tela de biblioteca ou de envio (D4) e playout pela biblioteca (D3): o pedido aprovado segue sem tocar sozinho e `GET /internal/playout/proxima` segue em 204.
-- **Pendências do D2** (issues #136 a #140; a #139, do Liquidsoap com `Restarting (137)`, foi corrigida pelo #150 e a issue segue aberta até o Nexus fechar): trava contra apagão em `midia/` numa biblioteca pequena (#136), a mesma trava na varredura da quarentena (#137), o marcador `WORKER_DEGRADADO motivo=sanitizer` (#138) e o piso do `INCRBY` negativo no throttle na virada da hora (#140). O smoke não testa a recusa pela quota do bucket `quarentena` (o MinIO só a aplica depois da medição dele); confere que a quota está configurada.
+- **Playout (D3)**: `GET /internal/playout/proxima` devolve o pedido aprovado com mídia (E4-D5) ou, sem pedido, uma faixa da rotação (E4-D4: pesos 8/2/1 entre `Musica`, `Vinheta` e `Comercial`, com janelas de repetição); a URL é pré-assinada interna de 30 min e o cabeçalho `X-Playout-Instancia` é obrigatório. `FaixaIniciada` grava a `Reproducao`, marca o pedido como `Tocado` e publica `PedidoTocado` e `TocandoAgora` com `tipoMidia`. `GET /relatorios/mais-tocadas` (Admin) lê a `rel.usp_MaisTocadas`.
+- **Telas (D4)**: `/biblioteca` (Locutor e Admin: lista, filtros, status ao vivo, pré-escuta), envio por policy com progresso, fila e 429 com contagem regressiva, edição com `If-Match`, "Aprovar com mídia" na moderação e `/admin/mais-tocadas`.
+- **Pendências do D2** (#152, em review): piso de 5 objetos na trava contra apagão de `midia/` (#136), a mesma trava na varredura da quarentena (#137, com motivo próprio `trava_apagao_quarentena` na spec v1.7, issue #153), o marcador `WORKER_DEGRADADO motivo=sanitizer` (#138) e o piso do `INCRBY` negativo no throttle (#140). Na spec v1.7 também entra o índice único filtrado de `Reproducao` por `PedidoId` (#151). O smoke não testa a recusa pela quota do bucket `quarentena` (o MinIO só a aplica depois da medição dele); confere que a quota está configurada.
+- **Regra de testes (2026-11-22)**: teste automatizado novo só para auth/segurança e dados/SQL; o resto é teste manual. Por isso o DoD 2 (pedido tocado pelo playout) é conferido à mão e não está mais no smoke.
 - **Revisão**: todo PR do Épico 4 passa pelo Sentinel, por ser o épico do upload não confiável.
 
 ## O que vem a seguir
 
-- **Épico 4**: D3 (playout pela biblioteca e relatório de mais tocadas), depois D4 (telas, PR #110).
+- **Épico 4**: fechar o #152 e o #154, e conferir a Definição de Pronto item a item.
 - **Épico 5**: imagem de divulgação passa para o `sanitizer` (E5-F01).
 
 ## Como contribuir
@@ -250,6 +255,6 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 
 ---
 
-**Versão**: Épico 3 fechado; Épico 4 em andamento (spec v1.6; D1, A01a e D2 na `main`)  
+**Versão**: Épico 3 fechado; Épico 4 em andamento (spec v1.6, v1.7 em review; D1 a D4 na `main`)  
 **Última atualização**: 2026-11-22  
 **Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend), Lore (Documentação)
