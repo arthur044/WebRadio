@@ -87,7 +87,7 @@ Há cinco motivos (lista fechada): `scanner`, `assinatura_velha`, `sanitizer`, `
    ```
 
 4. Espere a rodada diária seguinte e confirme que passou (`WORKER_LIMPEZA_MIDIA` com a contagem apagada e `WORKER_RECUPERADO motivo=trava_apagao`).
-5. **Volte ao padrão**: apague o override e rode `docker compose up -d worker`. Um limite esquecido enfraquece a trava (por isso o teto de 500).
+5. **Volte ao padrão**: apague o override e rode `docker compose up -d worker`. Um limite esquecido enfraquece a trava (por isso o teto de 500). Confira que voltou: `docker compose config | grep -E 'LimiteExclusao|PisoExclusao'` não deve imprimir nada.
 
 **Não faça.** Subir o limite sem ter conferido o banco: com o banco errado, a rodada apaga a biblioteca que a trava existe para proteger.
 
@@ -113,7 +113,7 @@ Há cinco motivos (lista fechada): `scanner`, `assinatura_velha`, `sanitizer`, `
          Manutencao__Quarentena__LimiteExclusao: "200"
    ```
 
-5. Espere a varredura seguinte (até 30 min), confirme `WORKER_RECUPERADO motivo=trava_apagao_quarentena` e **volte ao padrão** (apague o override e rode `docker compose up -d worker`).
+5. Espere a varredura seguinte (até 30 min), confirme `WORKER_RECUPERADO motivo=trava_apagao_quarentena` e **volte ao padrão** (apague o override, rode `docker compose up -d worker` e confira com `docker compose config | grep -E 'LimiteExclusao|PisoExclusao'`, que não deve imprimir nada).
 
 **Não faça.** Subir o limite sem ter conferido o banco: com o banco errado, a varredura apaga até os originais em `Quarentena` guardados para análise.
 
