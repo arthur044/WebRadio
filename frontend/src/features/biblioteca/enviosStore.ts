@@ -55,14 +55,14 @@ function guardar(id: string, campos: Pick<Envio, 'midiaId' | 'slotAberto'>): voi
 /**
  * Devolve o slot de `AguardandoUpload` ao servidor (só no cancelamento, na recusa do storage ou na falha do upload; uma
  * falha do `concluir` repete o `concluir`, nunca chama isto). 204 libera e 404 (já saiu) não deixa nada a devolver.
- * 409 = um `concluir` ganhou a corrida, então o envio está concluído: a tela segue como concluído. Outra falha (rede,
- * 5xx) mantém o `slotAberto` para a próxima tentativa; o servidor limpa sozinho no `UploadExpiraEmUtc`.
+ * 403 (o Locutor perde o acesso quando o slot já não está `AguardandoUpload`) conta como 404. 409 = um `concluir` ganhou
+ * a corrida, então o envio está concluído: a tela segue como concluído. Outra falha (rede, 5xx) mantém o `slotAberto` para a próxima tentativa; o servidor limpa sozinho no `UploadExpiraEmUtc`.
  */
 async function desistirDoSlot(id: string, slot: string): Promise<void> {
   try {
     await apiFetch<void>(`/midias/${encodeURIComponent(slot)}`, { method: 'DELETE' })
   } catch (err) {
-    if (!(err instanceof ApiError) || ![404, 409].includes(err.status)) return
+    if (!(err instanceof ApiError) || ![403, 404, 409].includes(err.status)) return
     if (err.status === 409) {
       guardar(id, { midiaId: slot, slotAberto: undefined })
       atualizar(id, { fase: 'enviado', midiaId: slot })
@@ -215,7 +215,10 @@ async function executar(envio: Envio): Promise<void> {
     // Sobra de uma tentativa anterior cujo `DELETE` não chegou: devolve antes de ocupar outro dos 5 abertos.
     if (midiaId === undefined && slot !== undefined) {
       await desistirDoSlot(id, slot)
-      slot = useEnvios.getState().envios.find((e) => e.id === id)?.slotAberto
+      const atual = useEnvios.getState().envios.find((e) => e.id === id)
+      // 409 no `DELETE`: um `concluir` ganhou a corrida e o envio já está `enviado`; reenviar sobrescreveria o arquivo.
+      if (atual?.estado.fase === 'enviado') return
+      slot = atual?.slotAberto
     }
     if (midiaId === undefined) {
       const recusa = recusaLocal(arquivo, tipo)
