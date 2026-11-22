@@ -82,6 +82,9 @@ public sealed class MinioObjectStorage : IObjectStorage, IDisposable
         return $"{assinada.Scheme}://{assinada.Authority}{prefixo}{assinada.AbsolutePath}{assinada.Query}";
     }
 
+    public async Task<string> UrlGetPreAssinadaInternaAsync(string bucket, string chave, TimeSpan validade, CancellationToken ct = default) =>
+        await _interno.PresignedGetObjectAsync(new PresignedGetObjectArgs().WithBucket(bucket).WithObject(chave).WithExpiry((int)validade.TotalSeconds));
+
     /// <summary>
     /// Tamanho, tipo e ETag do objeto SEM <c>HEAD</c> de bucket: o <c>StatObject</c> do SDK faz HEAD no BUCKET antes, e o MinIO o autoriza como <c>s3:ListBucket</c> SEM <c>s3:prefix</c>,
     /// que a política do <c>svc-worker</c> (ListBucket só com <c>20??/*</c>, S-A04) nega. Em vez disso, um <c>GET</c> de 1 byte (<c>Range: bytes=0-0</c>) numa URL pré-assinada INTERNA de 60 s:

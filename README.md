@@ -30,13 +30,15 @@ Arquitetura detalhada: [`docs/specs/00-arquitetura.md`](docs/specs/00-arquitetur
 | Serviço | Função | Tecnologia |
 |---------|--------|-----------|
 | **API** | REST endpoints + SignalR hub (pedidos, grade, auth) | ASP.NET Core 10 |
-| **Worker** | Eleição de líder, manutenção diária e transições de grade (`Agendado → AoVivo → Finalizado`); a sanitização entra no Épico 4 | .NET 10 background service |
+| **Worker** | Eleição de líder, manutenção diária e transições de grade (`Agendado → AoVivo → Finalizado`), pipeline de mídia enviada (confere, passa pelo antivírus, entrega ao `sanitizer`) e limpezas da biblioteca | .NET 10 background service |
 | **db-init** | Criação do schema, logins SQL | one-shot sqlcmd |
 | **migrator** | Aplicação de migrations EF | one-shot efbundle |
 | **Icecast** | Distribuição do stream HTTP | Icecast 2 |
 | **Liquidsoap** | Motor de playout, fallback, ao vivo | Liquidsoap 2.x |
 | **harbor-borda** | Proxy na frente do harbor do Liquidsoap: lista de IPs (`HARBOR_PERMITIDOS`) e limite de conexões simultâneas para o locutor ao vivo | nginx unprivileged |
 | **MinIO** | Armazenamento S3 (mídia, uploads) | MinIO |
+| **sanitizer** | Recodifica o áudio enviado para MP3, sem rede e sem segredos; só a saída entra na biblioteca | ffmpeg mínimo compilado + shell script |
+| **clamd / freshclam** | Antivírus do upload, na rede `antivirus` (só Worker e `clamd`); `freshclam` separado atualiza as assinaturas | ClamAV |
 | **Redis** | Throttle de pedidos, backplane SignalR | Redis 7 |
 | **nginx** | Gateway, reverse proxy, segurança | nginx unprivileged |
 
@@ -114,9 +116,12 @@ Jobs de CI com SQL Server real, verificação de DDL, frontend, testes de infra 
 
 O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload foi fechado: as imagens construídas (Liquidsoap e `harbor-borda`) e as de SQL Server, Redis e MinIO não têm CRITICAL corrigível, e o trivy do CI falha se aparecer uma. O alpine do `minio-init` e os HIGH seguem só informativos (risco aceito (2) do B3, no `05`, §4).
 
-### Entregue depois (hotfix de CVE, PR #128)
+### Entregue depois (hotfixes, PRs #128, #134, #135 e #150)
 
-A `main` ficou vermelha por NU1903 (DoS no ASP.NET Core, GHSA-wr8v-9x5q-ggcm): pacotes Microsoft.* e imagens `dotnet/*` foram para a 10.0.15, e o Dependabot passou a ignorar o major (11.x) desses pacotes. O mesmo PR corrigiu dois vermelhos que a `main` já tinha: `libxslt` r4 no `web` e no `harbor-borda`, e o `minio-init`, que quebrava quando a secret key gerada começava com `-`.
+- **#128**: a `main` ficou vermelha por NU1903 (DoS no ASP.NET Core, GHSA-wr8v-9x5q-ggcm): pacotes Microsoft.* e imagens `dotnet/*` foram para a 10.0.15, e o Dependabot passou a ignorar o major (11.x) desses pacotes. O mesmo PR corrigiu `libxslt` r4 no `web` e no `harbor-borda`, e o `minio-init`, que quebrava quando a secret key gerada começava com `-`.
+- **#134**: o `minio-init` morria por falta de memória com `mem_limit: 128m` (o `mc` passa disso no `policy attach`); passou para 256m. O `ler` do `minio-init` recusa segredo que começa com `-` sem imprimir o valor, e o job de Infra ganhou `infra/minio/teste.sh`.
+- **#135**: o gitleaks isenta o `65532:65532` (uid do sanitizer) no `smoke-midia.sh`, falso positivo que derrubava todo PR.
+- **#150**: o `liquidsoap` do Compose passou para `mem_limit: 512m`. O boot dele pica em ~420 MiB e o contêiner era morto (`Restarting (137)`) quando o runner não deixava usar swap; era a causa do #139.
 
 ### Pendente
 
@@ -150,22 +155,24 @@ A `main` ficou vermelha por NU1903 (DoS no ASP.NET Core, GHSA-wr8v-9x5q-ggcm): p
 
 ## Status do Épico 4
 
-**Em andamento.** O Épico 4 entrega biblioteca de mídia, upload, sanitização e playout: locutor e Admin enviam áudio direto ao storage, o Worker passa o original pelo antivírus e o `sanitizer` recodifica para MP3; só a saída recodificada entra na biblioteca. O pedido aprovado com mídia passa a tocar sozinho pelo playout, e o Admin ganha o relatório de mais tocadas. O pacote de tarefas, as decisões e a Definição de Pronto estão em [`docs/specs/08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md).
+**Em andamento: D1 e D2 na `main`, D3 começando, D4 aguardando o D3.** O Épico 4 entrega biblioteca de mídia, upload, sanitização e playout: locutor e Admin enviam áudio direto ao storage, o Worker passa o original pelo antivírus e o `sanitizer` recodifica para MP3; só a saída recodificada entra na biblioteca. O pedido aprovado com mídia passa a tocar sozinho pelo playout, e o Admin ganha o relatório de mais tocadas. O pacote de tarefas, as decisões e a Definição de Pronto estão em [`docs/specs/08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md).
 
 | Pacote | Entrega | PR | Situação |
 |---|---|---|---|
-| Spec | Pacote de tarefas do Épico 4 (v1.5, com os reviews do Guardian, do Sentinel e do Atlas) | #92, #108 | Na `main` |
+| Spec | Pacote de tarefas do Épico 4 (v1.6: o que o D2 mostrou, com os reviews do Guardian, do Sentinel e do Atlas) | #92, #108, #141 | Na `main` |
 | D1 | Imagens de terceiros sem CRITICAL corrigível e trivy bloqueando (E4-F01) | #95 | Na `main` |
-| D2 | Upload, sanitização, ClamAV e biblioteca (backend) | #112 | Em andamento (PR em rascunho) |
-| D3 | Playout pela biblioteca e relatório de mais tocadas (backend); abre com o A01a do Atlas (chave de sorteio e índices) | A01a: #111 | A01a na `main`; o resto pendente |
-| D4 | Telas: biblioteca, envio, aprovar com mídia, mais tocadas | #110 | Em andamento (PR em rascunho) |
+| D2 | Upload, sanitização, ClamAV, biblioteca e limpezas (backend): E4-F02 a F07, F09 e o `smoke-midia.sh` (F10, parte de upload) | #112 | Na `main` |
+| D3 | Playout pela biblioteca e relatório de mais tocadas (backend); abre com o A01a do Atlas (chave de sorteio e índices) | A01a: #111; #143 (rascunho) | A01a na `main`; o resto (F08, A02, A01b) começando |
+| D4 | Telas: biblioteca, envio, aprovar com mídia, mais tocadas | #110 | PR em rascunho, aguarda o D3 (aprovar com mídia e mais tocadas dependem dele) |
 
-- **Ainda não existe upload nem biblioteca**: até o D2 entrar na `main`, nada do que o Épico 4 descreve acima está disponível na API ou nas telas.
+- **Já na API**: `POST /midias/uploads` e `/midias/{id}/concluir` (envio direto ao storage por POST policy, com limites de 20 por hora e 5 abertos por usuário), `GET /midias` e `GET /midias/{id}`, preview, `PATCH`/`DELETE`, o pipeline do Worker e as limpezas da manutenção. O contrato está na §6 de [`docs/specs/02-api-rest.md`](docs/specs/02-api-rest.md).
+- **Ainda não existe**: tela de biblioteca ou de envio (D4) e playout pela biblioteca (D3): o pedido aprovado segue sem tocar sozinho e `GET /internal/playout/proxima` segue em 204.
+- **Pendências do D2** (issues #136 a #140; a #139, do Liquidsoap com `Restarting (137)`, foi corrigida pelo #150 e a issue segue aberta até o Nexus fechar): trava contra apagão em `midia/` numa biblioteca pequena (#136), a mesma trava na varredura da quarentena (#137), o marcador `WORKER_DEGRADADO motivo=sanitizer` (#138) e o piso do `INCRBY` negativo no throttle na virada da hora (#140). O smoke não testa a recusa pela quota do bucket `quarentena` (o MinIO só a aplica depois da medição dele); confere que a quota está configurada.
 - **Revisão**: todo PR do Épico 4 passa pelo Sentinel, por ser o épico do upload não confiável.
 
 ## O que vem a seguir
 
-- **Épico 4**: D2 (upload, sanitização e biblioteca), D3 (playout e relatório) e D4 (telas), nessa ordem.
+- **Épico 4**: D3 (playout pela biblioteca e relatório de mais tocadas), depois D4 (telas, PR #110).
 - **Épico 5**: imagem de divulgação passa para o `sanitizer` (E5-F01).
 
 ## Como contribuir
@@ -243,6 +250,6 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 
 ---
 
-**Versão**: Épico 3 fechado; Épico 4 em andamento (spec v1.5, D1 e A01a na `main`)  
-**Última atualização**: 2026-11-19  
+**Versão**: Épico 3 fechado; Épico 4 em andamento (spec v1.6; D1, A01a e D2 na `main`)  
+**Última atualização**: 2026-11-22  
 **Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend), Lore (Documentação)

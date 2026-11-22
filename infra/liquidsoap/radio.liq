@@ -65,6 +65,17 @@ def uuid_ou_vazio(texto) =
   if string.match(pattern="^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", texto) then texto else "" end
 end
 
+# E4-D5: um UUID gerado no BOOT, mandado em todo GET da `proxima` (cabeçalho X-Playout-Instancia). A API só reenvia um pedido já entregue para OUTRA instância,
+# que é o único caso em que a faixa pré-buscada se perde (o Liquidsoap reiniciou). Lido do kernel (o liquidsoap não tem uuid()); sem /proc, um UUID fixo
+# válido: o reenvio por reinício fica mais fraco, mas a API nunca recebe cabeçalho inválido (400).
+instancia_playout =
+  try
+    u = string.trim(file.contents("/proc/sys/kernel/random/uuid"))
+    if uuid_ou_vazio(u) != "" then u else "00000000-0000-4000-8000-000000000001" end
+  catch _ do
+    "00000000-0000-4000-8000-000000000001"
+  end
+
 # Metadados das faixas que a API mandou, guardados POR URL e aplicados por metadata.map quando a faixa começa
 # (o request.dynamic busca a próxima enquanto a atual ainda toca: um valor único trocaria os títulos).
 # Nunca viram "annotate:": título e artista são dados, não fazem parte do URI.
@@ -74,7 +85,7 @@ api_no_ar = ref(true)
 
 def proxima() =
   try
-    resp = http.get(headers=autorizacao, timeout=5., "#{api}/api/v1/internal/playout/proxima")
+    resp = http.get(headers=[("X-Playout-Instancia", instancia_playout), ...autorizacao], timeout=5., "#{api}/api/v1/internal/playout/proxima")
     # Sem rota/DNS o http.get não lança: devolve um status de erro (ex.: 523). Só 200 e 204 contam como "no ar".
     if resp.status_code == 200 or resp.status_code == 204 then
       if not api_no_ar() then log.important(label="playout", "API de volta.") end

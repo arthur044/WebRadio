@@ -25,8 +25,17 @@ public sealed class PlayoutEndpoints : IEndpointModule
             .RequireInternalListener()
             .AddEndpointFilter<TokenDoPlayout>();
 
-        // Esqueleto do Épico 1: sem fila de pedidos ainda, a rotação local do Liquidsoap assume (204 = sem faixa).
-        interno.MapGet("/playout/proxima", () => Results.NoContent());
+        // 02 §9 (E4-F08): o pedido aprovado (E4-D5) ou uma faixa da rotação da biblioteca (E4-D4); 204 = nada, e a playlist local do Liquidsoap assume. O cabeçalho
+        // X-Playout-Instancia (UUID do boot do Liquidsoap) é OBRIGATÓRIO: ausente ou que não é UUID → 400, e o valor só chega ao banco e ao log depois de validado.
+        interno.MapGet("/playout/proxima", async (HttpContext http, IMediator mediator, CancellationToken ct) =>
+        {
+            if (!Guid.TryParseExact(http.Request.Headers["X-Playout-Instancia"].ToString(), "D", out var instancia) || instancia == Guid.Empty)
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Requisição inválida.", detail: "O cabeçalho X-Playout-Instancia é obrigatório e precisa ser um UUID.",
+                    type: "/erros/requisicao-invalida");
+            var faixa = await mediator.Send(new ProximaDoPlayoutQuery(instancia), ct);
+            http.Response.Headers.CacheControl = "no-store"; // a URL é pré-assinada
+            return faixa is null ? Results.NoContent() : Results.Json(faixa);
+        });
 
         interno.MapPost("/playout/eventos", async (EventoDoPlayoutRequest req, IMediator mediator, CancellationToken ct) =>
         {
