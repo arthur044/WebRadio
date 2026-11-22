@@ -253,9 +253,9 @@ confere("worker: depende do migrator, do minio-init, do sanitizer (healthy) e do
         set(servicos["worker"].get("depends_on", {})) == {"migrator", "minio-init", "sanitizer", "clamd"}
         and servicos["worker"]["depends_on"]["clamd"].get("required") is False
         and servicos["worker"]["depends_on"]["sanitizer"].get("condition") == "service_healthy")
-# E4-D1: o tmpfs do job conta no cgroup do Worker (768m) e os dois contêineres montam o MESMO volume em /jobs; o Worker sabe onde está.
 # O boot do Liquidsoap pica em ~420 MiB: com menos que isso sem swap ele é morto (exit 137, sem log).
 confere("liquidsoap: mem_limit >= 512m (o boot pica em ~420 MiB)", int(servicos["liquidsoap"].get("mem_limit") or 0) >= 512 * 1024 * 1024, str(servicos["liquidsoap"].get("mem_limit")))
+# E4-D1: o tmpfs do job conta no cgroup do Worker (768m) e os dois contêineres montam o MESMO volume em /jobs; o Worker sabe onde está.
 confere("worker: mem_limit >= 768m", int(servicos["worker"].get("mem_limit") or 0) >= 768 * 1024 * 1024, str(servicos["worker"].get("mem_limit")))
 montagens = lambda n: {(v.get("source"), v.get("target")) for v in servicos[n].get("volumes", [])}
 confere("worker e sanitizer montam sanitizer-jobs em /jobs", ("sanitizer-jobs", "/jobs") in montagens("worker") and ("sanitizer-jobs", "/jobs") in montagens("sanitizer"),
