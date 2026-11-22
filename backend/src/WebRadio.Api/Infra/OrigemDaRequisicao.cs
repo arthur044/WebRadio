@@ -14,9 +14,11 @@ public static class OrigemDaRequisicao
         if (string.IsNullOrEmpty(origem)) return false;
 
         var fetchSite = http.Request.Headers["Sec-Fetch-Site"].ToString();
-        var propria = $"{http.Request.Scheme}://{http.Request.Host}";
+        // As duas pontas pela MESMA normalização (porta padrão omitida): com PUBLIC_AUTHORITY=radio.x:443 o Host chega com :443 e o
+        // Origin do navegador não, e a comparação de texto dava 403 em todo refresh e logout.
+        var propria = OrigensPermitidas.Normalizar($"{http.Request.Scheme}://{http.Request.Host}");
 
-        if (string.Equals(origem, propria, StringComparison.OrdinalIgnoreCase))
+        if (propria is not null && string.Equals(OrigensPermitidas.Normalizar(origem), propria, StringComparison.Ordinal))
             return fetchSite.Length == 0 || fetchSite.Equals("same-origin", StringComparison.OrdinalIgnoreCase);
 
         // Origem extra da allowlist (ex.: SPA em outro subdomínio): o navegador marca same-site, nunca cross-site.
@@ -42,7 +44,7 @@ public sealed class OrigensPermitidas
 
     public bool Contem(string? origem) => Normalizar(origem) is { } n && _origens.Contains(n);
 
-    private static string? Normalizar(string? origem)
+    internal static string? Normalizar(string? origem)
     {
         if (string.IsNullOrWhiteSpace(origem)) return null;
         if (!Uri.TryCreate(origem.Trim(), UriKind.Absolute, out var uri)) return null;
