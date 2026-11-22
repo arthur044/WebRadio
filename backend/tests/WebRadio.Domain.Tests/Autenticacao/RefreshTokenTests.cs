@@ -22,6 +22,34 @@ public class RefreshTokenTests
     }
 
     [Fact]
+    public void A_familia_nasce_no_proprio_token_e_o_teto_de_30_dias_limita_a_expiracao_do_sucessor()
+    {
+        var primeiro = Criar();
+        Assert.Equal(Agora, primeiro.FamiliaCriadaEmUtc);
+        Assert.Equal(TimeSpan.FromDays(30), RefreshToken.TetoDaFamilia);
+
+        // dia 27: 7 dias dariam o dia 34, mas a família morre no dia 30
+        var noDia27 = new RefreshToken(Guid.NewGuid(), Guid.NewGuid(), Hash32, Guid.NewGuid(), Agora.AddDays(27), TimeSpan.FromDays(7), null, familiaCriadaEmUtc: Agora);
+        Assert.Equal(Agora.AddDays(30), noDia27.ExpiraEmUtc);
+        Assert.Equal(Agora, noDia27.FamiliaCriadaEmUtc);
+
+        // longe do teto, a duração normal vale
+        var noDia10 = new RefreshToken(Guid.NewGuid(), Guid.NewGuid(), Hash32, Guid.NewGuid(), Agora.AddDays(10), TimeSpan.FromDays(7), null, familiaCriadaEmUtc: Agora);
+        Assert.Equal(Agora.AddDays(17), noDia10.ExpiraEmUtc);
+    }
+
+    [Fact]
+    public void Familia_no_teto_ou_alem_dele_nao_gera_token_e_a_data_da_familia_nao_pode_ser_futura()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new RefreshToken(Guid.NewGuid(), Guid.NewGuid(), Hash32, Guid.NewGuid(), Agora.AddDays(30), TimeSpan.FromDays(7), null, familiaCriadaEmUtc: Agora));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new RefreshToken(Guid.NewGuid(), Guid.NewGuid(), Hash32, Guid.NewGuid(), Agora.AddDays(40), TimeSpan.FromDays(7), null, familiaCriadaEmUtc: Agora));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new RefreshToken(Guid.NewGuid(), Guid.NewGuid(), Hash32, Guid.NewGuid(), Agora, TimeSpan.FromDays(7), null, familiaCriadaEmUtc: Agora.AddDays(1)));
+    }
+
+    [Fact]
     public void Construtor_rejeita_hash_de_tamanho_errado()
     {
         Assert.Throws<ArgumentException>(() =>

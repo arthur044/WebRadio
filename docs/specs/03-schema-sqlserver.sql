@@ -118,10 +118,12 @@ CREATE TABLE seg.RefreshToken (
     CriadoPorIpHash   binary(32)       NULL,
     RevogadoEmUtc     datetime2(3)     NULL,
     SubstituidoPorId  uniqueidentifier NULL,
+    FamiliaCriadaEmUtc datetime2(3)    NOT NULL,     -- início da família (o login): teto absoluto de 30 dias (#18); a rotação herda do pai
     CONSTRAINT PK_RefreshToken PRIMARY KEY CLUSTERED (Id),
     CONSTRAINT FK_RefreshToken_Usuario FOREIGN KEY (UsuarioId) REFERENCES seg.Usuario (Id) ON DELETE CASCADE,
     CONSTRAINT FK_RefreshToken_SubstituidoPor FOREIGN KEY (SubstituidoPorId) REFERENCES seg.RefreshToken (Id),
-    CONSTRAINT CK_RefreshToken_Expira CHECK (ExpiraEmUtc > CriadoEmUtc)
+    CONSTRAINT CK_RefreshToken_Expira CHECK (ExpiraEmUtc > CriadoEmUtc),
+    CONSTRAINT CK_RefreshToken_Familia CHECK (FamiliaCriadaEmUtc <= CriadoEmUtc)
 );
 CREATE UNIQUE INDEX UX_RefreshToken_TokenHash ON seg.RefreshToken (TokenHash);
 CREATE INDEX IX_RefreshToken_UsuarioId ON seg.RefreshToken (UsuarioId);

@@ -10,7 +10,10 @@ public sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refresh
     public void Configure(EntityTypeBuilder<RefreshToken> builder)
     {
         builder.ToTable("RefreshToken", "seg", tb =>
-            tb.HasCheckConstraint("CK_RefreshToken_Expira", "ExpiraEmUtc > CriadoEmUtc"));
+        {
+            tb.HasCheckConstraint("CK_RefreshToken_Expira", "ExpiraEmUtc > CriadoEmUtc");
+            tb.HasCheckConstraint("CK_RefreshToken_Familia", "FamiliaCriadaEmUtc <= CriadoEmUtc");
+        });
 
         builder.HasKey(t => t.Id).HasName("PK_RefreshToken");
 
@@ -33,6 +36,10 @@ public sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refresh
             .HasColumnType("datetime2(3)")
             .HasDefaultValueSql("SYSUTCDATETIME()")
             .HasDefaultConstraintName("DF_RefreshToken_CriadoEmUtc");
+
+        // #18: o teto absoluto de 30 dias da família. Sem default: o EF sempre informa (a rotação herda do pai).
+        builder.Property(t => t.FamiliaCriadaEmUtc)
+            .HasColumnType("datetime2(3)");
 
         builder.Property(t => t.RevogadoEmUtc)
             .HasColumnType("datetime2(3)");

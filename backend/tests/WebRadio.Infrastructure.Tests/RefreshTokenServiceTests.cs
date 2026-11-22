@@ -115,6 +115,69 @@ public class RefreshTokenServiceTests(BancoDeTeste banco) : IClassFixture<BancoD
     }
 
     [SqlFact]
+    public async Task O_login_abre_a_familia_e_cada_rotacao_herda_a_data_dela_com_a_expiracao_limitada_em_30_dias()
+    {
+        var (c, usuarioId, token) = await LogadoAsync(banco);
+        // rotaciona a cada 6 dias: o refresh desliza, mas nunca passa de FamiliaCriadaEmUtc + 30 dias
+        var atual = token;
+        for (var dia = 6; dia <= 24; dia += 6)
+        {
+            c.Relogio.Avancar(TimeSpan.FromDays(6));
+            var r = await c.NovoRefresh().RotacionarAsync(atual, Cenario.IpA, default);
+            Assert.True(r.Sucesso, $"dia {dia}");
+            atual = r.Novo!.Token;
+        }
+
+        await using var db = c.NovoDb();
+        var linhas = await db.RefreshTokens.AsNoTracking().Where(t => t.UsuarioId == usuarioId).OrderBy(t => t.CriadoEmUtc).ToListAsync();
+        Assert.Equal(5, linhas.Count);
+        Assert.All(linhas, t => Assert.Equal(linhas[0].CriadoEmUtc, t.FamiliaCriadaEmUtc));
+        Assert.All(linhas, t => Assert.True(t.ExpiraEmUtc <= linhas[0].CriadoEmUtc.AddDays(30)));
+        Assert.Equal(linhas[0].CriadoEmUtc.AddDays(30), linhas[^1].ExpiraEmUtc); // o do dia 24 (+7 = 31) foi cortado no dia 30
+    }
+
+    [SqlFact]
+    public async Task Rotacao_alem_do_teto_de_30_dias_e_invalida_e_o_cookie_roubado_nao_vive_para_sempre()
+    {
+        var (c, _, token) = await LogadoAsync(banco);
+
+        var atual = token;
+        for (var i = 0; i < 4; i++)
+        {
+            c.Relogio.Avancar(TimeSpan.FromDays(6)); // dias 6, 12, 18, 24
+            atual = (await c.NovoRefresh().RotacionarAsync(atual, Cenario.IpA, default)).Novo!.Token;
+        }
+
+        c.Relogio.Avancar(TimeSpan.FromDays(5).Add(TimeSpan.FromHours(23))); // dia 29 e 23 h: ainda dentro do teto
+        var ultimo = await c.NovoRefresh().RotacionarAsync(atual, Cenario.IpA, default);
+        Assert.True(ultimo.Sucesso);
+
+        c.Relogio.Avancar(TimeSpan.FromHours(2)); // dia 30 e 1 h: a família passou do teto
+        var alem = await c.NovoRefresh().RotacionarAsync(ultimo.Novo!.Token, Cenario.IpA, default);
+
+        Assert.False(alem.Sucesso);
+        Assert.False(alem.Concorrente); // 401 e novo login, não "tente de novo"
+    }
+
+    [SqlFact]
+    public async Task Linha_antiga_com_expiracao_alem_do_teto_da_familia_tambem_e_recusada_sem_gerar_sucessor()
+    {
+        var (c, usuarioId, token) = await LogadoAsync(banco);
+        await using (var db = c.NovoDb())
+        {
+            // como uma linha anterior à coluna: a família tem 31 dias, mas a ExpiraEmUtc do token ainda está no futuro
+            await db.RefreshTokens.Where(t => t.UsuarioId == usuarioId)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.FamiliaCriadaEmUtc, c.Relogio.UtcNow.AddDays(-31)));
+        }
+
+        var r = await c.NovoRefresh().RotacionarAsync(token, Cenario.IpA, default);
+
+        Assert.False(r.Sucesso);
+        await using var verifica = c.NovoDb();
+        Assert.Equal(1, await verifica.RefreshTokens.CountAsync(t => t.UsuarioId == usuarioId)); // nenhum sucessor
+    }
+
+    [SqlFact]
     public async Task Token_expirado_desconhecido_ou_mal_formado_e_invalido_sem_revogar_nada()
     {
         var (c, _, token) = await LogadoAsync(banco);

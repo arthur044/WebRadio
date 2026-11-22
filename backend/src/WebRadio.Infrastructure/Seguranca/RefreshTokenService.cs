@@ -36,8 +36,10 @@ public sealed class RefreshTokenService(
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             var agora = clock.UtcNow;
 
+            // A família tem teto absoluto (#18): passou de FamiliaCriadaEmUtc + 30 dias, a rotação é inválida mesmo que a ExpiraEmUtc deste token ainda esteja no futuro (linha anterior à coluna).
+            var diasDoTeto = RefreshToken.TetoDaFamilia.TotalDays;
             var reivindicado = await db.RefreshTokens
-                .Where(t => t.TokenHash == hash && t.RevogadoEmUtc == null && t.ExpiraEmUtc > agora)
+                .Where(t => t.TokenHash == hash && t.RevogadoEmUtc == null && t.ExpiraEmUtc > agora && t.FamiliaCriadaEmUtc.AddDays(diasDoTeto) > agora)
                 .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevogadoEmUtc, agora), ct);
 
             var atual = await db.RefreshTokens.AsNoTracking().FirstOrDefaultAsync(t => t.TokenHash == hash, ct);
@@ -45,7 +47,7 @@ public sealed class RefreshTokenService(
 
             ResultadoRotacao resultado;
             if (reivindicado == 1) resultado = await CriarSucessorAsync(atual, hash, ipHash, agora, ct);
-            else if (atual.RevogadoEmUtc is null) resultado = ResultadoRotacao.Invalido; // expirado, não reusado
+            else if (atual.RevogadoEmUtc is null) resultado = ResultadoRotacao.Invalido; // expirado ou família além do teto, não reusado
             else resultado = await TratarTokenRevogadoAsync(atual, hash, agora, ct);
 
             await tx.CommitAsync(ct);
@@ -87,7 +89,7 @@ public sealed class RefreshTokenService(
     private async Task<ResultadoRotacao> CriarSucessorAsync(RefreshToken pai, byte[] hashPai, byte[] ipHash, DateTime agora, CancellationToken ct)
     {
         var novo = DerivarSucessor(hashPai);
-        var sucessor = new RefreshToken(Guid.CreateVersion7(), pai.UsuarioId, novo.Hash, pai.FamiliaId, agora, tokens.DuracaoDoRefresh, ipHash);
+        var sucessor = new RefreshToken(Guid.CreateVersion7(), pai.UsuarioId, novo.Hash, pai.FamiliaId, agora, tokens.DuracaoDoRefresh, ipHash, familiaCriadaEmUtc: pai.FamiliaCriadaEmUtc);
 
         db.RefreshTokens.Add(sucessor);
         await db.SaveChangesAsync(ct);

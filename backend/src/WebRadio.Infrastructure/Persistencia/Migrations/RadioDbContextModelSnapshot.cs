@@ -40,6 +40,9 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                     b.Property<DateTime>("ExpiraEmUtc")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<DateTime>("FamiliaCriadaEmUtc")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<Guid>("FamiliaId")
                         .HasColumnType("uniqueidentifier");
 
@@ -75,6 +78,8 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                     b.ToTable("RefreshToken", "seg", t =>
                         {
                             t.HasCheckConstraint("CK_RefreshToken_Expira", "ExpiraEmUtc > CriadoEmUtc");
+
+                            t.HasCheckConstraint("CK_RefreshToken_Familia", "FamiliaCriadaEmUtc <= CriadoEmUtc");
                         });
                 });
 
