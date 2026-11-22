@@ -1,10 +1,13 @@
 using Microsoft.EntityFrameworkCore;
 using WebRadio.Application.Abstracoes;
+using WebRadio.Application.Features.Playout;
 using WebRadio.Domain.Enums;
 using WebRadio.Domain.Interacao;
 using WebRadio.Domain.Midia;
 using WebRadio.Domain.Usuarios;
+using WebRadio.Infrastructure.Pedidos;
 using WebRadio.Infrastructure.Persistencia;
+using WebRadio.Infrastructure.Persistencia.Outbox;
 using WebRadio.Infrastructure.Playout;
 using WebRadio.Infrastructure.Tests.Suporte;
 using Xunit;
@@ -133,6 +136,92 @@ public class PlayoutSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
 
         Assert.Equal(1, resultados.Count(r => r is not null)); // nunca o mesmo pedido para duas chamadas
         Assert.Equal(p.Id, resultados.Single(r => r is not null)!.PedidoId);
+    }
+
+    // ---- FaixaIniciada simultâneo do mesmo pedido (#151, UX_Reproducao_PedidoId) ----
+
+    /// <summary>
+    /// <c>DefinirAsync</c> roda entre o <c>AnyAsync</c> do "já tratado" e o <c>SaveChanges</c>: segurar os eventos aqui até todos chegarem faz os dois passarem pelo <c>AnyAsync</c> antes de qualquer um gravar,
+    /// a corrida que o índice único existe para decidir.
+    /// </summary>
+    private sealed class BarreiraNoTocandoAgora(int participantes) : ITocandoAgoraStore
+    {
+        private readonly TaskCompletionSource _todos = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _chegaram;
+
+        public async Task DefinirAsync(TocandoAgora faixa, CancellationToken ct)
+        {
+            if (Interlocked.Increment(ref _chegaram) == participantes) _todos.TrySetResult();
+            await _todos.Task.WaitAsync(TimeSpan.FromSeconds(30), ct);
+        }
+
+        public Task<TocandoAgora?> ObterAsync(CancellationToken ct) => Task.FromResult<TocandoAgora?>(null);
+    }
+
+    private async Task<int> ContarAsync(Func<RadioDbContext, Task<int>> consulta)
+    {
+        await using var db = _c.NovoDb();
+        return await consulta(db);
+    }
+
+    private async Task DoisEventosSimultaneosAsync(bool pedidoJaTocado)
+    {
+        await ZerarAsync();
+        await using (var limpeza = _c.NovoDb()) await limpeza.EventosOutbox.ExecuteDeleteAsync();
+        var dono = await DonoAsync();
+        var m = await MidiaAsync(dono);
+        var p = await PedidoAsync(m.Id, TimeSpan.FromMinutes(5));
+        if (pedidoJaTocado)
+        {
+            await using var db = _c.NovoDb();
+            var salvo = await db.PedidosMusica.SingleAsync(x => x.Id == p.Id);
+            salvo.MarcarTocado(DateTime.UtcNow); // o locutor marcou à mão: o INSERT é a única coisa entre os dois eventos
+            await db.SaveChangesAsync();
+        }
+
+        var barreira = new BarreiraNoTocandoAgora(2);
+        Task Evento()
+        {
+            var db = _c.NovoDb();
+            var handler = new RegistrarEventoDoPlayoutHandler(barreira, new OutboxEf(db), db, new ConsultasDePedidos(db), _c.Relogio);
+            return Task.Run(async () =>
+            {
+                await using (db) await handler.Handle(new RegistrarEventoDoPlayoutCommand("FaixaIniciada", m.Id, p.Id, "Aurora", "Banda", DateTime.UtcNow), default);
+            });
+        }
+
+        await Task.WhenAll(Evento(), Evento()); // nenhum dos dois pode lançar: o que perdeu o INSERT é "já tratado"
+
+        Assert.Equal(1, await ContarAsync(db => db.Reproducoes.CountAsync(r => r.PedidoId == p.Id)));
+        Assert.Equal(1, await ContarAsync(db => db.EventosOutbox.CountAsync(e => e.Tipo == EventosDoOutbox.TocandoAgora)));
+        Assert.Equal(pedidoJaTocado ? 0 : 1, await ContarAsync(db => db.EventosOutbox.CountAsync(e => e.Tipo == EventosDoOutbox.PedidoTocado)));
+        await using var leitura = _c.NovoDb();
+        Assert.Equal(StatusPedido.Tocado, (await leitura.PedidosMusica.SingleAsync(x => x.Id == p.Id)).Status);
+    }
+
+    [SqlFact]
+    public Task Dois_FaixaIniciada_simultaneos_do_mesmo_pedido_Aprovado_gravam_uma_Reproducao_um_Tocado_e_um_TocandoAgora() => DoisEventosSimultaneosAsync(pedidoJaTocado: false);
+
+    [SqlFact]
+    public Task Dois_FaixaIniciada_simultaneos_do_mesmo_pedido_ja_Tocado_gravam_uma_so_Reproducao() => DoisEventosSimultaneosAsync(pedidoJaTocado: true);
+
+    [SqlFact]
+    public async Task O_unico_filtrado_aceita_varias_Reproducao_sem_pedido_e_recusa_a_segunda_do_mesmo_pedido()
+    {
+        await ZerarAsync();
+        var dono = await DonoAsync();
+        var m = await MidiaAsync(dono);
+        var p = await PedidoAsync(m.Id, TimeSpan.FromMinutes(5));
+
+        await using var db = _c.NovoDb();
+        for (var i = 0; i < 3; i++) db.Reproducoes.Add(new Reproducao(m.Id, null, null, DateTime.UtcNow.AddMinutes(-i))); // a rotação: PedidoId nulo, quantas vezes for
+        db.Reproducoes.Add(new Reproducao(m.Id, p.Id, null, DateTime.UtcNow));
+        await db.SaveChangesAsync();
+
+        await using var outro = _c.NovoDb();
+        outro.Reproducoes.Add(new Reproducao(m.Id, p.Id, null, DateTime.UtcNow));
+        var erro = await Assert.ThrowsAsync<DbUpdateException>(() => outro.SaveChangesAsync());
+        Assert.Contains("UX_Reproducao_PedidoId", erro.InnerException!.Message);
     }
 
     // ---- rotação ----

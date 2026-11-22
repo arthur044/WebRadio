@@ -570,7 +570,10 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                     b.HasIndex("MidiaId")
                         .HasDatabaseName("IX_Reproducao_MidiaId");
 
-                    b.HasIndex("PedidoId");
+                    b.HasIndex("PedidoId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Reproducao_PedidoId")
+                        .HasFilter("PedidoId IS NOT NULL");
 
                     b.HasIndex("ProgramaId");
 
