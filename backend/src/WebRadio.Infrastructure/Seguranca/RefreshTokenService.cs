@@ -10,7 +10,7 @@ namespace WebRadio.Infrastructure.Seguranca;
 /// <summary>
 /// S-M10. A rotação é um UPDATE condicional (RevogadoEmUtc IS NULL): zero linhas afetadas = outro request já consumiu o
 /// token. Dentro da janela de 10 s o sucessor é devolvido de novo; como o banco guarda só o hash, o valor do sucessor é
-/// derivado do hash do pai com HKDF-SHA256 (chave = pepper, info = "refresh-successor"): reproduzível por quem tem o
+/// derivado do hash do pai com HKDF-SHA256 (chave = subchave <c>refresh</c> do pepper, #17; info = "refresh-successor"): reproduzível por quem tem o
 /// pepper, inalcançável sem ele. Depois da janela, o reuso revoga a família inteira (sinal de roubo).
 /// </summary>
 public sealed class RefreshTokenService(
@@ -21,6 +21,9 @@ public sealed class RefreshTokenService(
     ILogger<RefreshTokenService> logger) : IRefreshTokenService
 {
     public static readonly TimeSpan JanelaDeReuso = TimeSpan.FromSeconds(10);
+
+    // Subchave HKDF própria do refresh (#17): o pepper cru nunca entra na derivação do sucessor.
+    private readonly byte[] _chaveDoSucessor = SubchavesDoPepper.Derivar(pepper, SubchavesDoPepper.Refresh);
 
     public async Task<ResultadoRotacao> RotacionarAsync(string tokenBruto, byte[] ipHash, CancellationToken ct)
     {
@@ -131,5 +134,5 @@ public sealed class RefreshTokenService(
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevogadoEmUtc, agora), ct);
 
     private RefreshOpaco DerivarSucessor(byte[] hashPai) =>
-        RefreshOpaco.De(HKDF.DeriveKey(HashAlgorithmName.SHA256, pepper, RefreshOpaco.TamanhoEmBytes, salt: hashPai, info: "refresh-successor"u8.ToArray()));
+        RefreshOpaco.De(HKDF.DeriveKey(HashAlgorithmName.SHA256, _chaveDoSucessor, RefreshOpaco.TamanhoEmBytes, salt: hashPai, info: "refresh-successor"u8.ToArray()));
 }

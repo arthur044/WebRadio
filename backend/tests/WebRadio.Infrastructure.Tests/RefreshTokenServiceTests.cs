@@ -1,4 +1,6 @@
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
+using WebRadio.Application.Abstracoes;
 using WebRadio.Application.Features.Auth;
 using WebRadio.Domain.Erros;
 using WebRadio.Infrastructure.Seguranca;
@@ -62,6 +64,19 @@ public class RefreshTokenServiceTests(BancoDeTeste banco) : IClassFixture<BancoD
         Assert.True(outroPepper.Sucesso);
         Assert.NotEqual(a.Novo!.Token, outroPepper.Novo!.Token);
         Assert.False((await c.NovoRefresh().RotacionarAsync(outroPepper.Novo.Token, Cenario.IpA, default)).Sucesso);
+    }
+
+    [SqlFact]
+    public async Task O_sucessor_deriva_da_subchave_refresh_do_pepper_e_nao_do_pepper_cru()
+    {
+        var (c, _, token) = await LogadoAsync(banco);
+        var hashPai = RefreshOpaco.HashDe(token)!;
+
+        var r = await c.NovoRefresh().RotacionarAsync(token, Cenario.IpA, default);
+
+        string Derivar(byte[] chave) => RefreshOpaco.De(HKDF.DeriveKey(HashAlgorithmName.SHA256, chave, RefreshOpaco.TamanhoEmBytes, salt: hashPai, info: "refresh-successor"u8.ToArray())).Token;
+        Assert.Equal(Derivar(SubchavesDoPepper.Derivar(c.Pepper, SubchavesDoPepper.Refresh)), r.Novo!.Token);
+        Assert.NotEqual(Derivar(c.Pepper), r.Novo.Token);
     }
 
     [SqlFact]
