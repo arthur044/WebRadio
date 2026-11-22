@@ -156,7 +156,7 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 
 ## Status do Épico 4
 
-**Em andamento: os quatro pacotes (D1 a D4) estão na `main`; faltam as pendências do D2 (#152) e o A01b do Atlas.** O Épico 4 entrega biblioteca de mídia, upload, sanitização e playout: locutor e Admin enviam áudio direto ao storage, o Worker passa o original pelo antivírus e o `sanitizer` recodifica para MP3; só a saída recodificada entra na biblioteca. O pedido aprovado com mídia passa a tocar sozinho pelo playout, e o Admin ganha o relatório de mais tocadas. O pacote de tarefas, as decisões e a Definição de Pronto estão em [`docs/specs/08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md).
+**Em andamento: os quatro pacotes (D1 a D4) estão na `main`; faltam o índice único de `Reproducao` (#151, PR #156 do Atlas) e o A01b do Atlas.** O Épico 4 entrega biblioteca de mídia, upload, sanitização e playout: locutor e Admin enviam áudio direto ao storage, o Worker passa o original pelo antivírus e o `sanitizer` recodifica para MP3; só a saída recodificada entra na biblioteca. O pedido aprovado com mídia passa a tocar sozinho pelo playout, e o Admin ganha o relatório de mais tocadas. O pacote de tarefas, as decisões e a Definição de Pronto estão em [`docs/specs/08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md).
 
 | Pacote | Entrega | PR | Situação |
 |---|---|---|---|
@@ -167,18 +167,21 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 | D3 | Playout pela biblioteca e relatório de mais tocadas (backend): A01a (chave de sorteio e índices), E4-F08, E4-A02 e a parte de playout do F10 | #111, #143 | Na `main` |
 | D4 | Telas: biblioteca, envio, aprovar com mídia, mais tocadas (E4-P01 a P05) | #110 | Na `main` |
 | A01b | Planos de execução com dataset sintético de 50.000 mídias (Atlas), depois do #151 | Sem PR | Pendente |
-| Pendências do D2 | Piso na trava de `midia/`, trava na quarentena, motivo `sanitizer` e piso do `INCRBY` (issues #136, #137, #138 e #140) | #152 | Em review |
+| Pendências do D2 | Piso na trava de `midia/`, trava própria da quarentena, motivo `sanitizer` e piso do `INCRBY` (issues #136, #137, #138, #140 e #153), com o runbook do Worker | #152, #157 | Na `main` |
+| Índice único de `Reproducao` | `UX_Reproducao_PedidoId` filtrado, para o `FaixaIniciada` concorrente (issue #151) | #156 | Em review |
 
 - **Já na API**: `POST /midias/uploads` e `/midias/{id}/concluir` (envio direto ao storage por POST policy, com limites de 20 por hora e 5 abertos por usuário), `GET /midias` e `GET /midias/{id}`, preview, `PATCH`/`DELETE`, o pipeline do Worker e as limpezas da manutenção. O contrato está na §6 de [`docs/specs/02-api-rest.md`](docs/specs/02-api-rest.md).
 - **Playout (D3)**: `GET /internal/playout/proxima` devolve o pedido aprovado com mídia (E4-D5) ou, sem pedido, uma faixa da rotação (E4-D4: pesos 8/2/1 entre `Musica`, `Vinheta` e `Comercial`, com janelas de repetição); a URL é pré-assinada interna de 30 min e o cabeçalho `X-Playout-Instancia` é obrigatório. `FaixaIniciada` grava a `Reproducao`, marca o pedido como `Tocado` e publica `PedidoTocado` e `TocandoAgora` com `tipoMidia`. `GET /relatorios/mais-tocadas` (Admin) lê a `rel.usp_MaisTocadas`.
 - **Telas (D4)**: `/biblioteca` (Locutor e Admin: lista, filtros, status ao vivo, pré-escuta), envio por policy com progresso, fila e 429 com contagem regressiva, edição com `If-Match`, "Aprovar com mídia" na moderação e `/admin/mais-tocadas`.
-- **Pendências do D2** (#152, em review): piso de 5 objetos na trava contra apagão de `midia/` (#136), a mesma trava na varredura da quarentena (#137, com motivo próprio `trava_apagao_quarentena` na spec v1.7, issue #153), o marcador `WORKER_DEGRADADO motivo=sanitizer` (#138) e o piso do `INCRBY` negativo no throttle (#140). Na spec v1.7 também entra o índice único filtrado de `Reproducao` por `PedidoId` (#151). O smoke não testa a recusa pela quota do bucket `quarentena` (o MinIO só a aplica depois da medição dele); confere que a quota está configurada.
+- **Pendências do D2 (resolvidas)**: piso de 5 objetos na trava contra apagão de `midia/` (#136), trava própria na varredura da quarentena, de 30 min, com limite absoluto de 50 e o motivo `trava_apagao_quarentena` (#137 e #153), o marcador `WORKER_DEGRADADO motivo=sanitizer` (#138) e o piso do `INCRBY` negativo no throttle (#140). O Worker recusa `LimiteExclusao` acima de 500. O smoke não testa a recusa pela quota do bucket `quarentena` (o MinIO só a aplica depois da medição dele); confere que a quota está configurada.
+- **Operação do Worker**: o que fazer com cada `WORKER_DEGRADADO` (`scanner`, `assinatura_velha`, `sanitizer`, `trava_apagao`, `trava_apagao_quarentena`) está em [`docs/runbooks/worker-degradado.md`](docs/runbooks/worker-degradado.md), com a saída do operador nas duas travas.
+- **Índice único de `Reproducao` (#151)**: `UX_Reproducao_PedidoId` filtrado por `PedidoId`, definido na spec v1.7 e entregue pelo Atlas no #156, ainda em review.
 - **Regra de testes (2026-11-22)**: teste automatizado novo só para auth/segurança e dados/SQL; o resto é teste manual. O smoke (`smoke-midia.sh`, seção DoD 2 e 8) segue cobrindo o pedido tocado pelo playout e a rotação; só a asserção de repetição em sequência saiu dele (#143), e o DoD 2 do playout passa a contar como teste manual do usuário.
 - **Revisão**: todo PR do Épico 4 passa pelo Sentinel, por ser o épico do upload não confiável.
 
 ## O que vem a seguir
 
-- **Épico 4**: fechar o #152, o A01b do Atlas (depois do #151) e conferir a Definição de Pronto item a item.
+- **Épico 4**: o #156 do Atlas, depois o A01b dele, e conferir a Definição de Pronto item a item.
 - **Épico 5**: imagem de divulgação passa para o `sanitizer` (E5-F01).
 
 ## Como contribuir
