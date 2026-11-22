@@ -135,4 +135,55 @@ public sealed class FaixaIniciadaTests
         Assert.Single(c.F.Db.Reproducoes);
         Assert.Equal(0, c.Eventos("PedidoTocado"));
     }
+
+    /// <summary>Um IRadioDbContext que delega ao real e faz a N-ésima chamada de SaveChanges falhar por concorrência (o RowVersion do pedido perdido para um MarcarTocado manual).</summary>
+    private sealed class DbQuePerdeOTocado(WebRadio.Application.Abstracoes.IRadioDbContext real, int chamadaQueFalha) : WebRadio.Application.Abstracoes.IRadioDbContext
+    {
+        private int _chamadas;
+
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Usuarios.Usuario> Usuarios => real.Usuarios;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Autenticacao.RefreshToken> RefreshTokens => real.RefreshTokens;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Transmissao.CredencialTransmissao> CredenciaisTransmissao => real.CredenciaisTransmissao;
+        public Microsoft.EntityFrameworkCore.DbSet<WebRadio.Domain.Grade.Programa> Programas => real.Programas;
+        public Microsoft.EntityFrameworkCore.DbSet<PedidoMusica> PedidosMusica => real.PedidosMusica;
+        public Microsoft.EntityFrameworkCore.DbSet<ArquivoMidia> ArquivosMidia => real.ArquivosMidia;
+        public Microsoft.EntityFrameworkCore.DbSet<Divulgacao> Divulgacoes => real.Divulgacoes;
+        public Microsoft.EntityFrameworkCore.DbSet<Reproducao> Reproducoes => real.Reproducoes;
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
+            ++_chamadas == chamadaQueFalha ? throw new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("RowVersion") : real.SaveChangesAsync(cancellationToken);
+    }
+
+    [Fact]
+    public async Task Locutor_vence_o_RowVersion_do_pedido_a_faixa_que_tocou_ainda_fica_na_reproducao_e_no_tocando_agora_sem_um_segundo_PedidoTocado()
+    {
+        var c = new Cena();
+        var m = c.F.SemearAprovada();
+        var p = c.PedidoAprovado(m.Id);
+        var handler = new RegistrarEventoDoPlayoutHandler(c.Tocando, new OutboxEf(c.F.Db), new DbQuePerdeOTocado(c.F.Db, chamadaQueFalha: 2), c.Consultas, c.F.Relogio);
+
+        await handler.Handle(c.Comando(m.Id, p.Id), default); // não lança: a perda da corrida é esperada
+
+        Assert.Single(c.F.Db.Reproducoes);
+        Assert.Equal(1, c.Eventos("TocandoAgora"));
+        Assert.Equal(0, c.Eventos("PedidoTocado")); // o do locutor já saiu do outro lado
+        Assert.Single(c.Tocando.Definidos);
+    }
+
+    [Fact]
+    public async Task Evento_com_a_midia_diferente_da_do_pedido_e_tratado_como_rotacao_e_nao_marca_o_pedido()
+    {
+        var c = new Cena();
+        var doPedido = c.F.SemearAprovada();
+        var outra = c.F.SemearAprovada("Outra", null, TipoMidia.Musica, nome: "outra.mp3");
+        var p = c.PedidoAprovado(doPedido.Id);
+
+        await c.Handler.Handle(c.Comando(outra.Id, p.Id), default);
+
+        Assert.Equal(StatusPedido.Aprovado, c.F.Db.PedidosMusica.Single().Status);
+        Assert.Equal(0, c.Eventos("PedidoTocado"));
+        var r = c.F.Db.Reproducoes.Single();
+        Assert.Equal((outra.Id, (Guid?)null), (r.MidiaId, r.PedidoId));
+        Assert.Null(c.Tocando.Definidos.Single().PedidoId);
+    }
 }

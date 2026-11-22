@@ -29,4 +29,36 @@ public sealed class MaisTocadasTests
         Assert.False(Validador.Validate(new MaisTocadasQuery(De, De.AddDays(5), 0)).IsValid);
         Assert.False(Validador.Validate(new MaisTocadasQuery(De, De.AddDays(5), 101)).IsValid);
     }
+
+    [Fact]
+    public void Periodo_de_menos_de_um_segundo_e_400_porque_a_procedure_trabalha_em_segundos()
+    {
+        Assert.False(Validador.Validate(new MaisTocadasQuery(De.AddMilliseconds(100), De.AddMilliseconds(200))).IsValid);
+        Assert.True(Validador.Validate(new MaisTocadasQuery(De, De.AddSeconds(1))).IsValid);
+    }
+
+    private sealed class RelatorioQueGuarda : IRelatorioDeReproducoes
+    {
+        public (DateTime De, DateTime Ate)? Recebido { get; private set; }
+
+        public Task<IReadOnlyList<MidiaMaisTocadaDto>> MaisTocadasAsync(DateTime de, DateTime ate, int top, CancellationToken ct)
+        {
+            Recebido = (de, ate);
+            return Task.FromResult<IReadOnlyList<MidiaMaisTocadaDto>>([]);
+        }
+    }
+
+    [Theory]
+    [InlineData(DateTimeKind.Unspecified)] // "?de=2026-11-01" sem offset: é UTC, nunca a hora local do processo
+    [InlineData(DateTimeKind.Utc)]
+    public async Task De_e_ate_sem_offset_ou_em_UTC_chegam_ao_relatorio_como_o_mesmo_instante_UTC(DateTimeKind tipo)
+    {
+        var relatorio = new RelatorioQueGuarda();
+        var de = DateTime.SpecifyKind(new DateTime(2026, 11, 1, 10, 0, 0), tipo);
+
+        await new MaisTocadasHandler(relatorio).Handle(new MaisTocadasQuery(de, de.AddDays(1)), default);
+
+        Assert.Equal((new DateTime(2026, 11, 1, 10, 0, 0, DateTimeKind.Utc), new DateTime(2026, 11, 2, 10, 0, 0, DateTimeKind.Utc)), relatorio.Recebido);
+        Assert.Equal(DateTimeKind.Utc, relatorio.Recebido!.Value.De.Kind);
+    }
 }

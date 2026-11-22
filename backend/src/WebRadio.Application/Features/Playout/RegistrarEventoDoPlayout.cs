@@ -5,6 +5,7 @@ using WebRadio.Application.Abstracoes;
 using WebRadio.Application.Comum;
 using WebRadio.Application.Features.Pedidos;
 using WebRadio.Domain.Enums;
+using WebRadio.Domain.Interacao;
 using WebRadio.Domain.Midia;
 
 namespace WebRadio.Application.Features.Playout;
@@ -54,8 +55,10 @@ public sealed class RegistrarEventoDoPlayoutValidator : AbstractValidator<Regist
 
 /// <summary>
 /// <c>FaixaIniciada</c> (08 E4-F08): atualiza o "tocando agora" e publica <c>TocandoAgora</c> (com o <c>tipoMidia</c> da biblioteca); com <c>midiaId</c> grava a linha de <c>midia.Reproducao</c> (com o
-/// <c>PedidoId</c> e o <c>ProgramaId</c> da janela, regra do E3-D1) e, com <c>pedidoId</c> de um pedido <c>Aprovado</c>, marca <c>Tocado</c> e publica <c>PedidoTocado</c>. É idempotente por pedido: o evento
-/// repetido (o Liquidsoap reenvia) não duplica a <c>Reproducao</c>, o <c>Tocado</c> nem o evento; o <c>RowVersion</c> decide a corrida com um <c>MarcarTocado</c> manual do locutor.
+/// <c>PedidoId</c> e o <c>ProgramaId</c> da janela, regra do E3-D1) e, com <c>pedidoId</c> de um pedido <c>Aprovado</c> DESTA mídia, marca <c>Tocado</c> e publica <c>PedidoTocado</c> (par pedido/mídia que não
+/// bate é tratado como rotação). É idempotente só por pedido: o evento repetido do mesmo pedido não duplica a <c>Reproducao</c>, o <c>Tocado</c> nem o evento. Na rotação não há chave (o <c>radio.liq</c> não
+/// reenvia o evento) e <c>midia.Reproducao.PedidoId</c> não tem índice único (follow-up com o Atlas). O que tocou (<c>Reproducao</c> e <c>TocandoAgora</c>) é salvo antes do <c>Tocado</c>: o <c>RowVersion</c>
+/// decide a corrida com um <c>MarcarTocado</c> manual do locutor sem apagar a faixa do relatório.
 /// </summary>
 public sealed class RegistrarEventoDoPlayoutHandler(ITocandoAgoraStore tocandoAgora, IOutbox outbox, IRadioDbContext db, IConsultasDePedidos consultas, IClock clock)
     : IRequestHandler<RegistrarEventoDoPlayoutCommand>
@@ -66,6 +69,9 @@ public sealed class RegistrarEventoDoPlayoutHandler(ITocandoAgoraStore tocandoAg
         var artista = Limpar(cmd.Artista);
         var iniciadoEmUtc = DateTime.SpecifyKind(cmd.OcorridoEmUtc!.Value.ToUniversalTime(), DateTimeKind.Utc);
         string? tipoMidia = null;
+        Guid? pedidoId = null;
+        var pedidoNoAr = cmd.PedidoId; // o que vai ao "tocando agora" e ao hub: o do evento, menos o de um par pedido/mídia trocado
+        PedidoMusica? aMarcar = null;
         var repetido = false;
 
         if (cmd.MidiaId is { } midiaId)
@@ -74,15 +80,16 @@ public sealed class RegistrarEventoDoPlayoutHandler(ITocandoAgoraStore tocandoAg
             if (midia is not null) // mídia excluída depois de entregue: só o "tocando agora"
             {
                 tipoMidia = midia.TipoMidia.ToString();
-                Guid? pedidoId = null;
+                // O pedido só vale se for o DESTA mídia: um par pedido/mídia trocado vira rotação (nunca marca outro pedido como Tocado: defesa em profundidade, Sentinel no #143).
                 if (cmd.PedidoId is { } pid && await db.PedidosMusica.FirstOrDefaultAsync(p => p.Id == pid, ct) is { } pedido)
                 {
-                    pedidoId = pid;
-                    repetido = await db.Reproducoes.AnyAsync(r => r.PedidoId == pid, ct);
-                    if (!repetido && pedido.Status == StatusPedido.Aprovado)
+                    if (pedido.MidiaId != midiaId)
+                        pedidoNoAr = null;
+                    else
                     {
-                        pedido.MarcarTocado(clock.UtcNow);
-                        outbox.EnfileirarParaGrupos(DestinosDoPedido.Destinos(pedido), EventosDoOutbox.PedidoTocado, new { pedidoId = pedido.Id });
+                        pedidoId = pid;
+                        repetido = await db.Reproducoes.AnyAsync(r => r.PedidoId == pid, ct);
+                        if (pedido.Status == StatusPedido.Aprovado) aMarcar = pedido;
                     }
                 }
 
@@ -94,19 +101,29 @@ public sealed class RegistrarEventoDoPlayoutHandler(ITocandoAgoraStore tocandoAg
             }
         }
 
-        if (repetido) return; // o evento já foi tratado: nada de novo para o "tocando agora" nem para o outbox
+        if (repetido && aMarcar is null) return; // o evento já foi tratado: nada de novo para o "tocando agora" nem para o outbox
 
-        await tocandoAgora.DefinirAsync(new TocandoAgora(titulo, artista, cmd.MidiaId, cmd.PedidoId, iniciadoEmUtc), ct);
+        if (!repetido)
+        {
+            await tocandoAgora.DefinirAsync(new TocandoAgora(titulo, artista, cmd.MidiaId, pedidoNoAr, iniciadoEmUtc), ct);
 
-        // 02 §10: { titulo, artista, tipoMidia, pedidoId? }.
-        outbox.EnfileirarParaTodos(EventosDoOutbox.TocandoAgora, new { titulo, artista, tipoMidia, pedidoId = cmd.PedidoId });
+            // 02 §10: { titulo, artista, tipoMidia, pedidoId? }.
+            outbox.EnfileirarParaTodos(EventosDoOutbox.TocandoAgora, new { titulo, artista, tipoMidia, pedidoId = pedidoNoAr });
+        }
+
+        // 1º salvamento: o que TOCOU (Reproducao e TocandoAgora) não depende da corrida do pedido; o Tocado vai separado, para a derrota no RowVersion não apagar a faixa do relatório e da janela de repetição.
+        await db.SaveChangesAsync(ct);
+
+        if (aMarcar is null) return;
+        aMarcar.MarcarTocado(clock.UtcNow);
+        outbox.EnfileirarParaGrupos(DestinosDoPedido.Destinos(aMarcar), EventosDoOutbox.PedidoTocado, new { pedidoId = aMarcar.Id });
         try
         {
             await db.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException)
         {
-            // Um MarcarTocado manual do locutor ganhou a corrida pelo RowVersion do pedido: o resto deste evento (Reproducao e eventos) não foi salvo; o do outro lado já saiu.
+            // Um MarcarTocado manual do locutor ganhou a corrida pelo RowVersion do pedido: só o Tocado e o PedidoTocado deste evento não foram salvos (o do outro lado já saiu); a Reproducao e o TocandoAgora ficaram.
             outbox.DescartarNaoSalvos();
         }
     }
