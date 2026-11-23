@@ -280,7 +280,7 @@ log_limpo "restaurar"
 echo "-- caminho de FALHA do SQL (go-sqlcmd): pos-restore.sql com um usuário órfão SEM login homônimo (o db-init não rodou) aborta"
 sa_sql "brc-sql-b-$SUF" -d WebRadio -Q "CREATE LOGIN orfao_teste WITH PASSWORD = N'Orf$(openssl rand -hex 8)A1'; CREATE USER orfao_teste FOR LOGIN orfao_teste; DROP LOGIN orfao_teste;" >/dev/null
 sa_gosql brc-sql-b-$SUF -i /sql/pos-restore.sql
-{ [[ "$RC" != 0 ]] && grep -q 'orfao_teste' <<<"$OUT" && grep -qi 'não tem login' <<<"$OUT"; } && ok "pos-restore.sql com órfão sem login: o go-sqlcmd sai com código $RC (não 0) e nomeia o usuário" || falha "pos-restore.sql com órfão sem login (RC=$RC)" "$OUT"
+{ [[ "$RC" != 0 ]] && grep -q 'orfao_teste' <<<"$OUT" && grep -qiE 'não tem login|usuário a mais' <<<"$OUT"; } && ok "pos-restore.sql com órfão sem login: o go-sqlcmd sai com código $RC (não 0) e nomeia o usuário (a auditoria do #171 o barra como 'usuário a mais' ou o religamento como 'sem login')" || falha "pos-restore.sql com órfão sem login (RC=$RC)" "$OUT"
 sa_sql "brc-sql-b-$SUF" -d WebRadio -Q "DROP USER orfao_teste" >/dev/null
 sa_gosql brc-sql-b-$SUF -i /sql/pos-restore.sql
 { [[ "$RC" == 0 ]] && grep -q 'POS_RESTORE_OK' <<<"$OUT"; } && ok "pos-restore.sql idempotente depois (sem órfão: código 0, POS_RESTORE_OK)" || falha "pos-restore.sql depois de limpar o órfão (RC=$RC)" "$OUT"
