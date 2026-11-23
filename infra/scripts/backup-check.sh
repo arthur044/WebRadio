@@ -12,7 +12,7 @@
 # Confere: RECOVERY SIMPLE; o dono do volume sql-backup pelo mesmo `chown` do sql-backup-init (root, só CAP_CHOWN, sem rede); o que o
 # svc_backup NÃO pode (ler tabela, RESTORE VERIFYONLY, CREATE DATABASE, COMPRESSION na Express); os usuários ÓRFÃOS antes do
 # pos-restore.sql e o login da API, do migrator e do relatório abrindo o banco depois; contagem de linhas igual em TODAS as tabelas;
-# DBCC CHECKDB limpo; verificar-restauracao.sql; restore com conexão aberta (SINGLE_USER); e .bak corrompido recusado sem tocar no banco.
+# DBCC CHECKDB limpo; verificar-restauracao.sql; papel/usuário/guest plantado no .bak recusado pelo pos-restore.sql; restore com conexão aberta (SINGLE_USER); e .bak corrompido recusado sem tocar no banco.
 #
 # Entrada (opcional): MSSQL_IMAGEM (padrão: o digest do docker-compose.yml), MSSQL_PID (padrão: Express, o do compose).
 # Precisa de docker. Cria 2 contêineres e 3 volumes com o sufixo do PID deste processo e apaga tudo no fim. Senhas descartáveis.
@@ -147,6 +147,27 @@ for u in "webradio_app:$APP" "webradio_migrator:$MIG" "webradio_relatorio:$REL" 
 done
 confere "API (webradio_app) lê a tabela restaurada" bash -c "[[ \"\$(docker exec -e SQLCMDPASSWORD='$APP' '$B' $SQLCMD -C -N -S localhost -U webradio_app -b -I -d WebRadio -h -1 -W -Q 'SET NOCOUNT ON; SELECT COUNT(*) FROM seg.Usuario' | tr -d '[:space:]')\" == 151 ]]"
 confere "pos-restore.sql é idempotente (segunda execução sem órfãos)" bash -c "docker exec -i -e SQLCMDPASSWORD='$SA' '$B' $SQLCMD -C -N -S localhost -U sa -b -I -i /dev/stdin < infra/sql/pos-restore.sql | grep -q POS_RESTORE_OK"
+
+echo "== 4b. .bak com papel ou usuário plantado: o pos-restore.sql recusa (Sentinel no #167)"
+planta() { # planta "<descrição>" "<T-SQL que planta>" "<T-SQL que desfaz>" "<texto esperado na mensagem>"
+  local d="$1" plantar="$2" desfazer="$3" esperado="$4" saida
+  sa_sql "$B" -d WebRadio -Q "$plantar" >/dev/null 2>&1 || { falha "não consegui plantar: $d"; return; }
+  if saida="$(sa_sql "$B" -i /dev/stdin < infra/sql/pos-restore.sql 2>&1)"; then
+    falha "pos-restore.sql aceitou: $d" "$saida"
+  elif grep -q -- "$esperado" <<<"$saida"; then
+    ok "pos-restore.sql recusa: $d"
+  else
+    falha "pos-restore.sql falhou, mas sem a mensagem esperada ($d)" "$saida"
+  fi
+  sa_sql "$B" -d WebRadio -Q "$desfazer" >/dev/null 2>&1 || falha "não consegui desfazer: $d"
+}
+planta "webradio_app no db_owner" "ALTER ROLE db_owner ADD MEMBER webradio_app" "ALTER ROLE db_owner DROP MEMBER webradio_app" "webradio_app em db_owner"
+planta "usuário no db_securityadmin" "ALTER ROLE db_securityadmin ADD MEMBER webradio_relatorio" "ALTER ROLE db_securityadmin DROP MEMBER webradio_relatorio" "webradio_relatorio em db_securityadmin"
+planta "webradio_app com db_datareader a mais" "ALTER ROLE db_datareader ADD MEMBER webradio_app" "ALTER ROLE db_datareader DROP MEMBER webradio_app" "webradio_app:db_datareader (a mais)"
+planta "svc_backup sem o db_backupoperator" "ALTER ROLE db_backupoperator DROP MEMBER svc_backup" "ALTER ROLE db_backupoperator ADD MEMBER svc_backup" "svc_backup:db_backupoperator (faltando)"
+planta "usuário a mais no banco" "CREATE USER intruso WITHOUT LOGIN" "DROP USER intruso" "intruso"
+planta "guest com CONNECT" "GRANT CONNECT TO guest" "REVOKE CONNECT FROM guest" "o guest tem CONNECT"
+confere "depois de desfazer tudo, o pos-restore.sql volta a passar" bash -c "docker exec -i -e SQLCMDPASSWORD='$SA' '$B' $SQLCMD -C -N -S localhost -U sa -b -I -i /dev/stdin < infra/sql/pos-restore.sql | grep -q POS_RESTORE_OK"
 
 echo "== 5. o que voltou"
 contagens "$B" > "$TMP/contagem-b.txt"
