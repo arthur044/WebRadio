@@ -436,9 +436,15 @@ jobs:
           # E5-F02 (Sentinel, MÉDIO no #168): o Caddy é o ÚNICO contêiner exposto à internet, então HIGH corrigível também QUEBRA o job para ele (como o harbor-borda, que é imagem própria).
           # Exceção NOMINAL, aceita em 2026-11-23: CVE-2026-78661 (golang.org/x/net/html 0.60.0, DoS por texto quadrático no PARSER de HTML; corrigido em 0.62.0, sem imagem do Caddy que o traga:
           # a 2.11.9-alpine é a mais nova). Não é alcançável aqui: o Caddyfile só usa reverse_proxy, header, log e tls; nenhum módulo que lê HTML de terceiros (templates, file_server browse) está ligado,
-          # e o reverse_proxy não interpreta o corpo do upstream. Remover a exceção quando sair uma imagem com x/net >= 0.62.0 (o Dependabot avisa o digest).
+          # e o reverse_proxy não interpreta o corpo do upstream. A exceção TEM PRAZO (aceito_ate): passada a data, ela deixa de valer e o passo quebra (o cron semanal acusa), até alguém trocar o
+          # digest por uma imagem com x/net >= 0.62.0 ou renovar o prazo com nova justificativa (o Dependabot NÃO acompanha imagem de compose: a troca é manual; o E5-S01 a confere).
           bloqueia_alto="caddy"
           aceitos_caddy="CVE-2026-78661"
+          aceito_ate="2026-12-23"
+          if [ "$(date -u +%F)" \> "${aceito_ate}" ]; then
+            echo "::warning::A exceção ${aceitos_caddy} do caddy venceu em ${aceito_ate}: ela deixa de valer neste passo."
+            aceitos_caddy=""
+          fi
           {
             echo "### Imagens de terceiros do compose (com correção disponível)"
             echo "| Imagem | HIGH | CRITICAL | CRITICAL quebra o job |"
