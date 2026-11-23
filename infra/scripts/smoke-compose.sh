@@ -117,7 +117,17 @@ for u in /api/v1/internal/playout/proxima /api/v1/INTERNAL/playout/proxima /api/
          /api/v1/%69nternal/playout/proxima /api/v1/internal /health/ready /health/live /HEALTH/live; do
   esperar "pela 8080 $u" 404 "$(status -H "Authorization: Bearer x" "$BASE$u")"
 done
-esperar "Host: localhost:8081 na 8080" 404 "$(status -H 'Host: localhost:8081' "$BASE/api/v1/internal/playout/proxima")"
+if [[ -n "$PRODUCAO" ]]; then
+  # Atrás do Caddy um Host de outro nome nem chega ao nginx (o Caddy responde vazio; o smoke-borda confere). O nginx se confere por dentro do `web`: o server default dele
+  # (Host fora do PUBLIC_HOST) fecha a conexão sem resposta (444), e o wget sai com erro.
+  if "${COMPOSE[@]}" exec -T web wget -q -O /dev/null --header 'Host: localhost:8081' http://127.0.0.1:8080/api/v1/internal/playout/proxima >/dev/null 2>&1; then
+    falha "Host: localhost:8081 direto no nginx do web respondeu (esperado: conexão fechada, 444)"
+  else
+    ok "Host: localhost:8081 direto no nginx do web: conexão fechada (444)"
+  fi
+else
+  esperar "Host: localhost:8081 na 8080" 404 "$(status -H 'Host: localhost:8081' "$BASE/api/v1/internal/playout/proxima")"
+fi
 
 echo "== F16: isolamento de rede"
 alcanca() { "${COMPOSE[@]}" exec -T "$1" bash -c "timeout 3 bash -c 'exec 3<>/dev/tcp/$2/$3'" >/dev/null 2>&1 && echo sim || echo nao; }

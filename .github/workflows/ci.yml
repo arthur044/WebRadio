@@ -668,6 +668,8 @@ jobs:
         run: infra/scripts/smoke-compose.sh
 
       - name: Smoke da borda (IP real atrás do Caddy, HSTS, login/refresh/logout por https, log do Caddy)
+        # Roda mesmo se o smoke acima falhou (um resultado dos dois por rodada do CI); só não roda se o job foi cancelado.
+        if: ${{ !cancelled() && env.CURL_CA_BUNDLE != '' }}
         run: infra/scripts/smoke-borda.sh
 
       - name: Estado e logs em caso de falha
