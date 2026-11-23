@@ -7,7 +7,9 @@
 ```
 Internet
     ↓
- [nginx gateway :8080]  ← SPA React, /api/*, /hubs/*, /stream/*
+ [Caddy :80/:443]       ← HTTPS (Let's Encrypt); só em produção (E5). No dev não há Caddy
+    ↓
+ [nginx gateway :8080]  ← SPA React, /api/*, /hubs/*, /stream/* (no dev, publicado direto)
     ↓        ↓        ↓
 [Icecast]  [API .NET]  [Redis]
     ↑        ↓         ↓
@@ -85,7 +87,7 @@ webradio/
 │   ├── perf/                      # medição dos planos da grade (E2-A02)
 │   ├── minio/                     # init-buckets.sh, políticas S3
 │   └── redis/                     # entrypoint de configuração
-├── docker-compose.yml             # Base de produção (segredos em arquivo, só a 8080 publicada)
+├── docker-compose.yml             # Base de produção (segredos em arquivo, só o Caddy publica: 80 e 443)
 ├── docker-compose.dev.yml         # Desenvolvimento (deve ser usado explicitamente com -f)
 ├── .env.example                   # Configuração NÃO secreta; os segredos ficam em secrets/ (fora do git)
 ├── .gitattributes                 # Scripts shell com LF em Windows
@@ -134,7 +136,7 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 
 ### Pendente
 
-- Execução do `gerar-segredos.ps1` em Windows real e subida da base de produção num job.
+- Execução do `gerar-segredos.ps1` em Windows real. (A subida da base de produção num job existe desde o Épico 5: `compose-producao`, atrás do Caddy em `tls internal`.)
 - Reescrita do runbook de rotação de segredos (ver o aviso no topo dele).
 
 ## Status do Épico 2
@@ -144,7 +146,7 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 - **Grade**: o Admin cria, edita e cancela programas sem sobreposição (409 com `programaConflitanteId`). O Worker muda o status sozinho (`Agendado → AoVivo → Finalizado`), e o selo "Ao Vivo" troca na tela sem recarregar.
 - **Ao vivo com credencial de transmissão**: o locutor gera, no painel dele, uma credencial própria (identificador + segredo, mostrado uma vez e guardado só como hash) e conecta o source client (BUTT, Mixxx) no harbor do Liquidsoap. Só o locutor dono do programa na janela de horário entra; o ao vivo cai quando o programa termina ou é encerrado, sem derrubar o stream.
 - **Alerta do harbor**: tentativas de credencial inválida geram o `AlertaHarborFalhas`, exibido no painel do Admin e do locutor; ele é de melhor esforço (ver os riscos aceitos no `06`).
-- **Produção**: só a `8080` é publicada; a porta do ao vivo fica atrás do `harbor-borda`, em compose explícito, e o `HARBOR_PERMITIDOS` em produção deve ter só o IP do locutor.
+- **Produção**: só o Caddy (`edge`) publica portas, a `80` (redireciona) e a `443` (HTTPS); o `web` (nginx) não publica nada. A porta do ao vivo fica atrás do `harbor-borda`, em compose explícito, e o `HARBOR_PERMITIDOS` em produção deve ter só o IP do locutor.
 
 **Fora do Épico 2:** a fila de pedidos (`GET /internal/playout/proxima` segue respondendo 204) e a biblioteca de mídia; a rotação ainda usa a playlist local.
 
@@ -230,7 +232,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait
 infra/scripts/smoke-compose.sh
 ```
 
-- **Aplicação:** `http://localhost:8080` (SPA, `/api`, `/hubs`, `/stream/radio.mp3`). É a única porta publicada pela base.
+- **Aplicação:** `http://localhost:8080` (SPA, `/api`, `/hubs`, `/stream/radio.mp3`). É a entrada do dev, sem Caddy e sem HTTPS; a base de produção não publica a `8080` (só o Caddy, em `80` e `443`: [runbook da borda](docs/runbooks/borda-https.md)). Quem já tinha um `.env` de antes do Épico 5 precisa acrescentar `DOMINIO=localhost` e `ACME_EMAIL=dev@example.com` (o `.env.example` mostra).
 - **Admin semeado:** o e-mail está em `secrets/seed_admin_email` e a senha em `secrets/seed_admin_senha`. O primeiro login exige a troca da senha.
 - **Portas de diagnóstico, só no dev e só em `127.0.0.1`:** SQL Server `1433`, console do MinIO `9001`, harbor do Liquidsoap `8005`.
 - **Parar:** `docker compose -f docker-compose.yml -f docker-compose.dev.yml down`. Sem `-v`, os dados dos volumes são preservados.

@@ -7,6 +7,8 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ .
+# Nome da rádio no <title>, na meta description, no favicon e no player (E5-P01); sem o argumento vale o padrão "WebRadio".
+ARG VITE_NOME_RADIO
 # Build puro, sem limpeza pós-build (Guardian H2): o vite.config.ts de produção não
 # tem a entry do probe nem a fixture de áudio — elas só existem no
 # vite.config.e2e.ts, usado pelo Playwright local, nunca por este Dockerfile.
@@ -36,6 +38,11 @@ ENV PUBLIC_HOST="localhost 127.0.0.1"
 # Host:porta EXATA que o proxy repassa aos upstreams (revisão do Sentinel — nunca o
 # que o cliente mandou). Tem que bater com Storage__PublicEndpoint do backend.
 ENV PUBLIC_AUTHORITY="localhost:8080"
+# Subnet da rede `edge` (a do Caddy): o nginx só confia no X-Forwarded-For de quem vem dela (set_real_ip_from, E5-D2). O padrão FALHA FECHADO: só o loopback é confiável (a
+# imagem rodada sem o Compose não confia em X-Forwarded-For de ninguém). O docker-compose.yml de produção define a subnet real; o de dev fixa o mesmo 127.0.0.1/32.
+ENV EDGE_SUBNET="127.0.0.1/32"
+# Esquema que a API enxerga (X-Forwarded-Proto). `$scheme` (literal, o nginx o resolve) fora do Compose de produção, que fixa `https`; ver proxy-api.inc.template.
+ENV PROTO_PUBLICO="\$scheme"
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY infra/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY infra/nginx/security-headers.conf /etc/nginx/security-headers.conf

@@ -4,13 +4,36 @@
 #
 # Só muda o que é de desenvolvimento: ambiente Development (seed da grade, scanner NoOp liberado) e portas
 # de diagnóstico em 127.0.0.1 (1433, console do MinIO 9001, harbor-borda 8005). Segredos: os mesmos arquivos.
-# Variáveis do `up`: SEED_DEV_DATA=true (seed de dev), RATE_LIMIT_GLOBAL=<n> (limite global de requisições por minuto e por IP da Api;
+# O dev NÃO tem o Caddy (o `edge` fica no perfil `edge`, que ninguém liga aqui): o nginx do `web` publica a 8080 em HTTP, como sempre, e o host público vem de
+# PUBLIC_HOST / PUBLIC_AUTHORITY / PUBLIC_ORIGIN do .env (a base de produção deriva tudo do DOMINIO, E5). O DOMINIO do .env ainda precisa existir (o compose
+# interpola o arquivo inteiro); no dev vale `localhost`. Variáveis do `up`: SEED_DEV_DATA=true (seed de dev), RATE_LIMIT_GLOBAL=<n> (limite global de requisições por minuto e por IP da Api;
 # padrão aqui 2000, o de produção é 600 e a Api de produção recusa subir com mais que isso).
 # =============================================================================
 x-dev-env: &dev-env
   ASPNETCORE_ENVIRONMENT: Development
 
 services:
+  # Sem Caddy no dev (E5-F02): a 8080 do web, em HTTP, é a entrada. Ligar o `edge` aqui exigiria um domínio e as portas 80/443 do computador.
+  edge:
+    profiles: [edge]
+
+  # O host público do dev (E5): a base deriva do DOMINIO + https; aqui voltam as variáveis do .env com a porta e o http.
+  web:
+    environment:
+      PUBLIC_HOST: "${PUBLIC_HOST:-localhost}"
+      PUBLIC_AUTHORITY: "${PUBLIC_AUTHORITY:-localhost:8080}"
+      # `$$scheme` vira o literal `$scheme` (o Compose escapa o cifrão): quem o resolve é o nginx, por requisição (sem Caddy, o esquema é o do próprio hop).
+      PROTO_PUBLICO: "$$scheme"
+      # Sem Caddy, quem fala com o nginx pela 8080 publicada chega pelo gateway da rede `edge` (172.30.250.1), que está DENTRO da EDGE_SUBNET da base: com a subnet de
+      # produção aqui, um X-Forwarded-For forjado por quem acessa o dev valeria como IP do cliente. Só o loopback (o healthcheck) fica "confiável", e ele não manda o cabeçalho.
+      EDGE_SUBNET: "127.0.0.1/32"
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+
+  icecast:
+    environment:
+      ICECAST_HOSTNAME: "${PUBLIC_HOST:-localhost}"
+
   sqlserver:
     environment:
       MSSQL_PID: Developer
@@ -36,6 +59,8 @@ services:
     environment:
       <<: *dev-env
       Seguranca__PermitirScannerNoOp: "true"
+      AllowedHosts: "${PUBLIC_HOST:-localhost};api;127.0.0.1"
+      Storage__PublicEndpoint: "${PUBLIC_ORIGIN:-http://localhost:8080}/storage"
       # Seed de dev pelo DevDataSeeder, no boot da Api (E2-A03): locutores, uma semana de grade e 3 divulgações. Desligado por
       # padrão; ligue com SEED_DEV_DATA=true no `up`. A senha dos locutores vem do arquivo de segredo, nunca do YAML.
       Seed__DevData: "${SEED_DEV_DATA:-false}"
@@ -52,6 +77,7 @@ services:
   worker:
     environment:
       DOTNET_ENVIRONMENT: Development
+      Storage__PublicEndpoint: "${PUBLIC_ORIGIN:-http://localhost:8080}/storage"
       # E4-D8: o clamd (~1 GB) fica fora do `up` padrão do dev (perfil `antivirus`); sem ClamAv__Host o Worker usa o NoOp, só em Development (S-A02).
       Seguranca__PermitirScannerNoOp: "true"
       ClamAv__Host: ""

@@ -2,17 +2,18 @@
 # WebRadio — docker-compose.yml (E1-F16) · base de PRODUÇÃO
 #
 #   infra/scripts/gerar-segredos.sh prod      # cria secrets/ (um arquivo por segredo)
-#   cp .env.example .env && editar             # PUBLIC_HOST / PUBLIC_AUTHORITY / PUBLIC_ORIGIN
+#   cp .env.example .env && editar             # DOMINIO (o host público, sem porta) e ACME_EMAIL
 #   docker compose up -d --wait
 #
 # Desenvolvimento (uso EXPLÍCITO, nunca override automático — S-M12):
 #   infra/scripts/gerar-segredos.sh dev
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait
 #
-# Regras (04 §Serviços, D19, S-B08): imagem com digest fixado; usuário não root; cap_drop ALL;
+# Regras (04 §Serviços, D19, S-B08): imagem com digest fixado; usuário não root (EXCEÇÃO ACEITA: o `edge` roda como root DENTRO do contêiner, E5-D9: sem nenhuma capability além de
+# NET_BIND_SERVICE, rootfs só leitura, escrita só nos volumes edge-data e edge-config; o volume nomeado nasce de root e o Caddy precisa ser o dono do certificado); cap_drop ALL;
 # no-new-privileges; read_only + tmpfs; mem/pids limit; segredos SÓ por arquivo em /run/secrets e
-# cada serviço recebe só os seus (nada de env_file compartilhado); só a 8080 é publicada.
-# Redes: borda (web) · app (web ↔ api:8080, subnet FIXA = Rede__SubnetApp) · dados (interna) ·
+# cada serviço recebe só os seus (nada de env_file compartilhado); só o `edge` (Caddy) publica portas: 80 e 443 (E5-D1).
+# Redes: edge (Caddy ↔ web, subnet FIXA = EDGE_SUBNET) · borda (harbor-borda) · app (web ↔ api:8080, subnet FIXA = Rede__SubnetApp) · dados (interna) ·
 # playout (interna: api:8081, liquidsoap, icecast, minio, harbor-borda) · midia-borda (interna: web → icecast/minio, S-M15).
 # Ao vivo (E2-F11): docker compose -f docker-compose.yml -f docker-compose.live.yml up -d --wait  (publica a porta do harbor-borda).
 # =============================================================================
@@ -50,7 +51,7 @@ x-dotnet-env: &dotnet-env
   ConnectionStrings__RadioDb: "Server=sqlserver;Database=WebRadio;User Id=webradio_app;Encrypt=True;TrustServerCertificate=True;Max Pool Size=50;Min Pool Size=0;Connect Timeout=10"
   Redis__Host: "redis"
   Storage__Endpoint: "minio:9000"
-  Storage__PublicEndpoint: "${PUBLIC_ORIGIN:?Defina PUBLIC_ORIGIN no .env (rode infra/scripts/gerar-segredos.sh)}/storage"
+  Storage__PublicEndpoint: "https://${DOMINIO:?Defina DOMINIO no .env (o host público, sem porta)}/storage"
 
 services:
   # ------------------------------------------------------------------ dados
@@ -206,8 +207,8 @@ services:
     <<: *endurecido
     environment:
       <<: *dotnet-env
-      # Hosts aceitos (sem '*'): o nginx repassa Host = PUBLIC_AUTHORITY; o Liquidsoap usa "api"; o healthcheck, 127.0.0.1.
-      AllowedHosts: "${PUBLIC_HOST:?Defina PUBLIC_HOST no .env};api;127.0.0.1"
+      # Hosts aceitos (sem '*'): o nginx repassa Host = o DOMINIO; o Liquidsoap usa "api"; o healthcheck, 127.0.0.1.
+      AllowedHosts: "${DOMINIO:?Defina DOMINIO no .env (o host público, sem porta)};api;127.0.0.1"
       # S-A11: só a rede app (o nginx) pode dizer o IP do cliente.
       Rede__SubnetApp: "172.30.1.0/24"
       # D17/S-A06: :8080 SÓ no IP fixo da api na rede app (o nginx); :8081 SÓ no IP fixo da api na rede playout
@@ -259,7 +260,7 @@ services:
       # Limpeza das imagens órfãs de divulgação (E3-F07): o Worker fala com o MinIO interno com a credencial do svc-worker, que só lista e
       # apaga em publico/divulgacoes/ (política em infra/minio/policies/svc-worker.json). O PublicEndpoint só existe porque o cliente o exige.
       Storage__Endpoint: "minio:9000"
-      Storage__PublicEndpoint: "${PUBLIC_ORIGIN:?Defina PUBLIC_ORIGIN no .env (rode infra/scripts/gerar-segredos.sh)}/storage"
+      Storage__PublicEndpoint: "https://${DOMINIO:?Defina DOMINIO no .env (o host público, sem porta)}/storage"
       # Antivírus (E4-F06): o Worker não sobe sem scanner fora de Development; assinatura com mais de 3 dias deixa o arquivo Pendente (S-A02 item 6).
       ClamAv__Host: "clamd"
       Seguranca__IdadeMaximaAssinaturaDias: "3"
@@ -367,7 +368,7 @@ services:
     image: webradio-icecast:local
     <<: *endurecido
     environment:
-      ICECAST_HOSTNAME: "${PUBLIC_HOST:?Defina PUBLIC_HOST no .env}"
+      ICECAST_HOSTNAME: "${DOMINIO:?Defina DOMINIO no .env (o host público, sem porta)}"
     secrets: [icecast_source_password, icecast_admin_user, icecast_admin_password, icecast_relay_password]
     tmpfs: ["/tmp:uid=100,gid=101,mode=0700"]
     networks: [playout, midia-borda]
@@ -434,21 +435,63 @@ services:
       retries: 5
 
   # ------------------------------------------------------------------ borda
+  # Borda HTTPS (E5-D1, E5-D9): o ÚNICO contêiner que escuta na internet (80 e 443). Termina o TLS (Let's Encrypt, renovação sozinha, certificados no volume edge-data) e repassa tudo ao nginx do
+  # `web`. Portas em 0.0.0.0, explícito: no [::] o docker-proxy entrega o IP DELE ao Caddy e o IP real do ouvinte se perde (E5-D12: sem IPv6 na v1). Sem HTTP/3 (UDP 443 fechado).
+  # Imagem oficial por digest (caddy:2.11.9-alpine). Roda como root DENTRO do contêiner, mas sem nenhuma capability além de NET_BIND_SERVICE, com rootfs só leitura e escrita só nos
+  # dois volumes (o root do contêiner é dono deles; sem DAC_OVERRIDE não escreve em mais nada). O `tls.caddy` escolhe o modo do TLS: o de produção (só Let's Encrypt) ou, no override do CI, `internal`.
+  edge:
+    image: caddy@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0 # 2.11.9-alpine
+    <<: *endurecido
+    cap_add: [NET_BIND_SERVICE]
+    environment:
+      DOMINIO: "${DOMINIO:?Defina DOMINIO no .env (o host público, sem porta)}"
+      ACME_EMAIL: "${ACME_EMAIL:?Defina ACME_EMAIL no .env (o e-mail do Let's Encrypt para avisos de vencimento)}"
+      HSTS_MAX_AGE: "${HSTS_MAX_AGE:-86400}"
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    volumes:
+      - ./infra/edge/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/edge/tls-acme.caddy:/etc/caddy/tls.caddy:ro
+      - edge-data:/data
+      - edge-config:/config
+    tmpfs: [/tmp]
+    networks: [edge]
+    mem_limit: 128m
+    pids_limit: 100
+    depends_on:
+      web: { condition: service_healthy }
+    healthcheck:
+      # Sem a API de admin (`admin off`): a prova de vida é a porta 443 aceitando conexão (o certificado pode estar sendo emitido; isso não derruba o healthcheck).
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 443"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
   web:
-    build: { context: ., dockerfile: frontend/Dockerfile }
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_NOME_RADIO: "${NOME_RADIO:-}"
     image: webradio-web:local
     <<: *endurecido
     environment:
-      PUBLIC_HOST: "${PUBLIC_HOST:?Defina PUBLIC_HOST no .env}"
-      PUBLIC_AUTHORITY: "${PUBLIC_AUTHORITY:?Defina PUBLIC_AUTHORITY no .env}"
-    ports:
-      - "${WEB_PORT:-8080}:8080"
+      # Uma fonte só para o host público (E5): o DOMINIO. O Caddy escuta em 443 e 80, então o host:porta canônico não leva porta, nem na origem do refresh.
+      PUBLIC_HOST: "${DOMINIO:?Defina DOMINIO no .env (o host público, sem porta)}"
+      PUBLIC_AUTHORITY: "${DOMINIO}"
+      # O `web` NÃO publica porta aqui: só o `edge` o alcança (E5-D1/D2). O dev.yml volta a publicar a 8080. Atrás do Caddy o esquema é sempre https (E5-D2) e o único IP
+      # confiável para o X-Forwarded-For é o da rede `edge`.
+      PROTO_PUBLICO: "https"
+      EDGE_SUBNET: "${EDGE_SUBNET:-172.30.250.0/29}"
     # nginx-unprivileged roda como uid 101: o envsubst escreve o default.conf no conf.d (tmpfs) na subida.
     tmpfs:
       - "/tmp:uid=101,gid=101"
       - "/var/cache/nginx:uid=101,gid=101"
       - "/etc/nginx/conf.d:uid=101,gid=101"
-    networks: [borda, app, midia-borda]
+    # Fora da `borda` (que sobra só para o harbor-borda): o web é alcançável só pelo `edge`, pela `edge`.
+    networks: [edge, app, midia-borda]
     mem_limit: 128m
     pids_limit: 100
     depends_on:
@@ -464,6 +507,11 @@ services:
 
 networks:
   borda: {}
+  # E5-D2: só o `edge` (Caddy) e o `web`, com subnet fixa: o nginx só confia no X-Forwarded-For de quem vem dela (set_real_ip_from ${EDGE_SUBNET}). NÃO é internal: o Caddy publica
+  # 80/443 e precisa sair à internet para o ACME. O harbor-borda e o resto ficam fora dela.
+  edge:
+    ipam:
+      config: [{ subnet: "${EDGE_SUBNET:-172.30.250.0/29}" }]
   app:
     internal: true
     ipam:
@@ -490,6 +538,9 @@ networks:
       config: [{ subnet: 172.30.5.0/24 }]
 
 volumes:
+  # E5-D1: os certificados do Caddy (e a conta do ACME). Precisa persistir entre recriações do contêiner: sem ele cada `up --force-recreate` pediria certificado de novo e o Let's Encrypt limita a emissão.
+  edge-data: {}
+  edge-config: {}
   sqlserver-data: {}
   # E5-D3/E5-D13: o webradio.bak do BACKUP noturno, com o dono ajustado pelo sql-backup-init.
   sql-backup: {}
