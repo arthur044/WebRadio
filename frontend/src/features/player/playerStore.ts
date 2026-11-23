@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { NOME_RADIO } from '../../shared/lib/nomeRadio'
 import { readStorage, writeStorage } from '../../shared/lib/safeStorage'
 
 export const STREAM_URL = '/stream/radio.mp3'
@@ -47,8 +48,8 @@ function clearReconnectTimer() {
 function updateMediaSession(title: string | null, status: PlayerStatus) {
   if (!('mediaSession' in navigator)) return
   navigator.mediaSession.metadata = new MediaMetadata({
-    title: title ?? 'WebRadio',
-    artist: 'WebRadio',
+    title: title ?? NOME_RADIO,
+    artist: NOME_RADIO,
   })
   navigator.mediaSession.playbackState = status === 'playing' ? 'playing' : 'paused'
 }

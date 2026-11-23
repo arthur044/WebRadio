@@ -415,7 +415,11 @@ services:
 
   # ------------------------------------------------------------------ borda
   web:
-    build: { context: ., dockerfile: frontend/Dockerfile }
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_NOME_RADIO: "${NOME_RADIO:-}"
     image: webradio-web:local
     <<: *endurecido
     environment:
