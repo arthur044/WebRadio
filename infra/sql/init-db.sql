@@ -17,8 +17,8 @@
      $(Ambiente)  'Development' ou 'Production' (lista branca, checada ANTES de
                   qualquer CREATE/ALTER — qualquer outro valor, incluindo vazio,
                   aborta com RAISERROR) — mesmos valores de ASPNETCORE_ENVIRONMENT
-                  (docs/specs/05-seguranca-auditoria.md §5.1) — decide o recovery
-                  model (E1-A04). OBRIGATÓRIA, sem valor padrão: um :setvar aqui
+                  (docs/specs/05-seguranca-auditoria.md §5.1) — hoje só entra na lista
+                  branca (o recovery model é SIMPLE nos dois, E5-D3). OBRIGATÓRIA, sem valor padrão: um :setvar aqui
                   teria precedência sobre o -v do invocador e mascararia esse -v
                   silenciosamente (mesma classe de bug do E1-A06/seed-dev.sql) —
                   sem -v Ambiente, o script falha (fail-closed) em vez de assumir
@@ -39,7 +39,8 @@ SET NOCOUNT ON;
 -- (fail-fast antes de qualquer mudança, não só antes do recovery model). Só
 -- Development ou Production. Sem isso, um valor vazio ou digitado errado (ex.:
 -- "Prod") cairia no ELSE do recovery model e ligaria RECOVERY SIMPLE em silêncio —
--- em produção isso perde a recuperação point-in-time sem nenhum aviso.
+-- (histórico do E1-A04: com FULL em produção, o "Prod" digitado errado perdia a recuperação point-in-time sem aviso; a v1 usa SIMPLE
+-- nos dois ambientes, mas um Ambiente inválido continua abortando).
 IF (N'$(Ambiente)' NOT IN (N'Development', N'Production'))
 BEGIN
     RAISERROR(N'init-db.sql: Ambiente inválido ("$(Ambiente)"). Esperado Development ou Production. Abortando.', 16, 1);
@@ -86,24 +87,15 @@ BEGIN
 END
 GO
 
--- Recovery model por ambiente (E1-A04): SIMPLE em dev/CI (sem estratégia de
--- backup no Épico 1; log não precisa crescer) e FULL em produção (prepara
--- point-in-time recovery para quando a estratégia de backup entrar).
-IF (N'$(Ambiente)' = N'Production')
+-- Recovery model: SIMPLE em TODOS os ambientes (E5-D3, 09 v1.1). A estratégia de backup da v1 é o BACKUP completo diário (E5-A01,
+-- infra/sql/backup.sql) e nenhum BACKUP LOG roda: com FULL o log nunca seria truncado e cresceria até encher o disco. O custo é
+-- aceito: se o servidor morrer, perde-se até 1 dia de dados (risco E5-D3 da revisão E5-N01). Quem trocar por FULL precisa
+-- agendar BACKUP LOG junto. Idempotente: também corrige um banco criado antes como FULL (o E1-A04 punha FULL em produção).
+-- A lista branca do Ambiente lá em cima continua valendo (fail-closed), mesmo com o mesmo modelo nos dois ramos.
+IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = N'WebRadio' AND recovery_model_desc = 'SIMPLE')
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = N'WebRadio' AND recovery_model_desc = 'FULL')
-    BEGIN
-        PRINT 'Ambiente Production: ajustando recovery model de WebRadio para FULL...';
-        ALTER DATABASE WebRadio SET RECOVERY FULL;
-    END
-END
-ELSE
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = N'WebRadio' AND recovery_model_desc = 'SIMPLE')
-    BEGIN
-        PRINT 'Ambiente ' + N'$(Ambiente)' + ': ajustando recovery model de WebRadio para SIMPLE...';
-        ALTER DATABASE WebRadio SET RECOVERY SIMPLE;
-    END
+    PRINT 'Ambiente $(Ambiente): ajustando recovery model de WebRadio para SIMPLE...';
+    ALTER DATABASE WebRadio SET RECOVERY SIMPLE;
 END
 GO
 
