@@ -239,11 +239,16 @@ public class PlayoutSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         await db.SaveChangesAsync();
     }
 
-    private async Task<CandidataDaRotacao?> Sortear(TipoMidia tipo, int r, TimeSpan janela, Guid? emVoo = null)
+    /// <summary>As até K = 5 candidatas da rotação (E4-A01b), da menor chave &gt;= r para a maior e, se faltarem, as do início.</summary>
+    private async Task<IReadOnlyList<CandidataDaRotacao>> Candidatas(TipoMidia tipo, int r, TimeSpan janela, Guid? emVoo = null)
     {
         await using var db = _c.NovoDb();
-        return await new FilaDoPlayout(db).SortearForaDaJanelaAsync(tipo, r, DateTime.UtcNow - janela, emVoo ?? Guid.Empty, default);
+        return await new FilaDoPlayout(db).CandidatasForaDaJanelaAsync(tipo, r, DateTime.UtcNow - janela, emVoo ?? Guid.Empty, default);
     }
+
+    /// <summary>A primeira candidata: o que a chave fixa (K = 1) devolvia antes. Os testes antigos da rotação seguem valendo para ela.</summary>
+    private async Task<CandidataDaRotacao?> Sortear(TipoMidia tipo, int r, TimeSpan janela, Guid? emVoo = null) =>
+        (await Candidatas(tipo, r, janela, emVoo)).FirstOrDefault();
 
     [SqlFact]
     public async Task A_rotacao_busca_a_partir_da_chave_volta_ao_inicio_e_so_devolve_aprovada_ativa_do_tipo()
@@ -271,6 +276,58 @@ public class PlayoutSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         Assert.DoesNotContain(desativada.Id, ids);
         Assert.NotEqual(desativada.Id, primeira.Id);
         Assert.NotEqual(outroTipo.Id, primeira.Id);
+    }
+
+    [SqlFact]
+    public async Task A_rotacao_devolve_ate_5_candidatas_na_ordem_do_Sorteio_e_completa_com_o_inicio_do_circulo()
+    {
+        await ZerarAsync();
+        var dono = await DonoAsync();
+        var tipo = TipoMidia.Comercial;
+        var ids = new List<Guid>();
+        for (var i = 0; i < 8; i++) ids.Add((await MidiaAsync(dono, tipo, titulo: "K" + i)).Id);
+        var ordenadas = new List<(Guid Id, int Chave)>();
+        foreach (var id in ids) ordenadas.Add((id, await SorteioDe(id)));
+        ordenadas = [.. ordenadas.OrderBy(o => o.Chave)];
+
+        // do início: as 5 menores chaves, na ordem
+        var primeiras = await Candidatas(tipo, int.MinValue, TimeSpan.FromMinutes(20));
+        Assert.Equal(ordenadas.Take(5).Select(o => o.Id), primeiras.Select(c => c.Id));
+
+        // no meio: 5 a partir da chave
+        var meio = await Candidatas(tipo, ordenadas[1].Chave, TimeSpan.FromMinutes(20));
+        Assert.Equal(ordenadas.Skip(1).Take(5).Select(o => o.Id), meio.Select(c => c.Id));
+
+        // perto do fim: só 2 a partir de @r (as de índice 6 e 7); a busca 2 COMPLETA com as 3 do início, sem repetir nenhuma
+        var fim = await Candidatas(tipo, ordenadas[6].Chave, TimeSpan.FromMinutes(20));
+        Assert.Equal([ordenadas[6].Id, ordenadas[7].Id, ordenadas[0].Id, ordenadas[1].Id, ordenadas[2].Id], fim.Select(c => c.Id));
+        Assert.Equal(fim.Count, fim.Select(c => c.Id).Distinct().Count());
+
+        // @r acima de todas: nada >= @r, volta ao início
+        var envolta = await Candidatas(tipo, int.MaxValue, TimeSpan.FromMinutes(20));
+        Assert.Equal(ordenadas.Take(5).Select(o => o.Id), envolta.Select(c => c.Id));
+    }
+
+    [SqlFact]
+    public async Task Com_menos_de_5_aprovadas_a_rotacao_devolve_todas_e_a_faixa_em_voo_e_a_janela_saem_da_lista()
+    {
+        await ZerarAsync();
+        var dono = await DonoAsync();
+        var tipo = TipoMidia.Vinheta;
+        var a = await MidiaAsync(dono, tipo, titulo: "A");
+        var b = await MidiaAsync(dono, tipo, titulo: "B");
+        var c = await MidiaAsync(dono, tipo, titulo: "C");
+        await MidiaAsync(dono, tipo, ativa: false, titulo: "Desativada");
+
+        Assert.Equal(3, (await Candidatas(tipo, int.MinValue, TimeSpan.FromMinutes(20))).Count);
+        var semB = await Candidatas(tipo, int.MinValue, TimeSpan.FromMinutes(20), emVoo: b.Id);
+        Assert.DoesNotContain(b.Id, semB.Select(x => x.Id));
+        Assert.Equal(2, semB.Count);
+
+        await Tocou(c.Id, TimeSpan.FromMinutes(5)); // dentro da janela de 20 min: sai da lista
+        var semC = await Candidatas(tipo, int.MinValue, TimeSpan.FromMinutes(20));
+        Assert.DoesNotContain(c.Id, semC.Select(x => x.Id));
+        Assert.Equivalent(new[] { a.Id, b.Id }, semC.Select(x => x.Id));
     }
 
     [SqlFact]

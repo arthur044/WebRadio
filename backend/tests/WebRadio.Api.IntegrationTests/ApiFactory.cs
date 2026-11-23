@@ -99,8 +99,8 @@ internal sealed class FilaDoPlayoutVazia : WebRadio.Application.Abstracoes.IFila
 {
     public Task<WebRadio.Application.Abstracoes.PedidoParaTocar?> CapturarPedidoAsync(Guid instancia, DateTime agora, CancellationToken ct) => Task.FromResult<WebRadio.Application.Abstracoes.PedidoParaTocar?>(null);
 
-    public Task<WebRadio.Application.Abstracoes.CandidataDaRotacao?> SortearForaDaJanelaAsync(WebRadio.Domain.Enums.TipoMidia tipo, int sorteio, DateTime corteDaJanela, Guid emVoo, CancellationToken ct) =>
-        Task.FromResult<WebRadio.Application.Abstracoes.CandidataDaRotacao?>(null);
+    public Task<IReadOnlyList<WebRadio.Application.Abstracoes.CandidataDaRotacao>> CandidatasForaDaJanelaAsync(WebRadio.Domain.Enums.TipoMidia tipo, int sorteio, DateTime corteDaJanela, Guid emVoo, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<WebRadio.Application.Abstracoes.CandidataDaRotacao>>([]);
 
     public Task<WebRadio.Application.Abstracoes.CandidataDaRotacao?> MaisAntigaDaJanelaAsync(WebRadio.Domain.Enums.TipoMidia tipo, DateTime corteDaJanela, Guid emVoo, CancellationToken ct) =>
         Task.FromResult<WebRadio.Application.Abstracoes.CandidataDaRotacao?>(null);

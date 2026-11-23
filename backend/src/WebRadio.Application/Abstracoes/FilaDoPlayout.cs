@@ -20,10 +20,17 @@ public interface IFilaDoPlayout
     Task<PedidoParaTocar?> CapturarPedidoAsync(Guid instancia, DateTime agora, CancellationToken ct);
 
     /// <summary>
-    /// E4-D4, buscas 1 e 2: uma mídia <c>Aprovado</c> e <c>Ativo</c> do tipo, fora da janela de repetição e diferente da faixa em voo, a partir de <paramref name="sorteio"/> (<c>Sorteio &gt;= @r</c>)
-    /// e, sem candidata, voltando ao início (<c>Sorteio &lt; @r</c>).
+    /// Quantas candidatas a rotação pede de uma vez e entre quantas sorteia (E4-A01b, 08 v1.8: K = 5). A chave fixa (K = 1) deixava a mídia logo depois de um "buraco" de chaves até
+    /// 12,8x mais provável que a média em 50 mil faixas (3,85x em 300); com K = 5 o pior caso cai para 3,6x (50 mil) e 2,6x (até mil), a ~53 a 68 leituras por chamada (critério: 70).
     /// </summary>
-    Task<CandidataDaRotacao?> SortearForaDaJanelaAsync(TipoMidia tipo, int sorteio, DateTime corteDaJanela, Guid emVoo, CancellationToken ct);
+    const int CandidatasPorSorteio = 5;
+
+    /// <summary>
+    /// E4-D4, buscas 1 e 2: até <see cref="CandidatasPorSorteio"/> mídias <c>Aprovado</c> e <c>Ativo</c> do tipo, fora da janela de repetição e diferentes da faixa em voo, a partir de
+    /// <paramref name="sorteio"/> (<c>Sorteio &gt;= @r</c>, da menor chave para a maior) e, se vierem menos, completando com as do início (<c>Sorteio &lt; @r</c>). Lista vazia = nenhuma candidata
+    /// (cai na busca 3). A ESCOLHA entre elas é de quem chama (<see cref="IAleatorio"/>): a fila só lê, e o teste fica determinístico.
+    /// </summary>
+    Task<IReadOnlyList<CandidataDaRotacao>> CandidatasForaDaJanelaAsync(TipoMidia tipo, int sorteio, DateTime corteDaJanela, Guid emVoo, CancellationToken ct);
 
     /// <summary>E4-D4, busca 3 (fallback): nenhuma fora da janela; a que tocou há mais tempo DENTRO do conjunto recente, diferente da faixa em voo.</summary>
     Task<CandidataDaRotacao?> MaisAntigaDaJanelaAsync(TipoMidia tipo, DateTime corteDaJanela, Guid emVoo, CancellationToken ct);
