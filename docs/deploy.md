@@ -46,6 +46,7 @@ Os blocos cinza com comandos são digitados no **terminal do servidor** (uma jan
 **Decisões que são suas** (o time explica cada uma na revisão de riscos):
 
 - **Perda máxima de 1 dia.** O backup roda uma vez por dia (03:30). Se o servidor for perdido, voltam os dados até o último backup, no máximo 1 dia atrás. Dá para trocar por backup de hora em hora, com mais trabalho do time: é uma decisão de projeto, não deste guia.
+- **A cópia externa não é à prova de invasor.** Quem tomar o servidor tem a chave que o backup usa e pode apagar versões definitivamente (seção 7). A proteção forte (Object Lock) fica para a revisão de riscos.
 - **Sem alertas automáticos na v1.** Quem acompanha a saúde da rádio é uma pessoa, olhando os avisos (seção 15) e um monitor externo gratuito.
 
 ## 2. Requisitos da VPS
@@ -112,21 +113,22 @@ Ainda como `webradio`, edite a configuração do SSH (`nano` é um editor de tex
 sudo nano /etc/ssh/sshd_config
 ```
 
-Deixe estas duas linhas assim (sem `#` no começo):
+Deixe estas três linhas assim (sem `#` no começo):
 
 ```
 PasswordAuthentication no
+KbdInteractiveAuthentication no
 PermitRootLogin no
 ```
 
 Algumas VPS têm arquivos em `/etc/ssh/sshd_config.d/` que mandam o contrário. Confira o resultado final e recarregue:
 
 ```bash
-sudo sshd -T | grep -E 'passwordauthentication|permitrootlogin'
+sudo sshd -T | grep -E 'passwordauthentication|kbdinteractiveauthentication|permitrootlogin'
 sudo sshd -t && sudo systemctl reload ssh
 ```
 
-Você deve ver `passwordauthentication no` e `permitrootlogin no`. **Teste numa terceira janela** (`ssh webradio@IP-DA-VPS`) antes de fechar as outras. Se a conta "root" ou a senha ainda entram, volte e procure a linha contrária nos arquivos de `/etc/ssh/sshd_config.d/`.
+Você deve ver `passwordauthentication no`, `kbdinteractiveauthentication no` e `permitrootlogin no`. **Teste numa terceira janela** (`ssh webradio@IP-DA-VPS`) antes de fechar as outras. Se a conta "root" ou a senha ainda entram, volte e procure a linha contrária nos arquivos de `/etc/ssh/sshd_config.d/`.
 
 ### 4.3 Atualizações de segurança automáticas
 
@@ -161,14 +163,22 @@ O firewall decide quem consegue bater na porta do servidor. A rádio usa **22** 
 sudo apt install -y ufw
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
-sudo ufw allow from 0.0.0.0/0 to any port 22 proto tcp
+sudo ufw limit from 0.0.0.0/0 to any port 22 proto tcp
 sudo ufw allow from 0.0.0.0/0 to any port 80 proto tcp
 sudo ufw allow from 0.0.0.0/0 to any port 443 proto tcp
 sudo ufw enable
 sudo ufw status verbose
 ```
 
-Escrevendo `0.0.0.0/0` as regras valem só para IPv4, e o resto (inclusive todo o IPv6) fica barrado pelo `deny incoming`. A resposta de `ufw status` deve listar só 22, 80 e 443. **Não ligue o IPv6 no Docker** (já vem desligado).
+Escrevendo `0.0.0.0/0` as regras valem só para IPv4, e o resto (inclusive todo o IPv6, desde que o firewall o gerencie, veja abaixo) fica barrado pelo `deny incoming`. A resposta de `ufw status` deve listar só 22, 80 e 443 (a do 22 aparece como `LIMIT`: o firewall passa a recusar quem tenta entrar por SSH muitas vezes seguidas).
+
+**Confira que o firewall cuida também do IPv6**, senão o SSH fica aberto por IPv6:
+
+```bash
+grep '^IPV6=' /etc/default/ufw
+```
+
+Deve mostrar `IPV6=yes` (é o padrão). Se mostrar `IPV6=no`, edite o arquivo para `yes` e rode `sudo ufw disable && sudo ufw enable`. **Não ligue o IPv6 no Docker** (já vem desligado).
 
 > **Aviso.** O Docker abre as portas que publica **por conta própria**, passando por cima do `ufw`. Aqui isso é aceitável porque o projeto só publica 80 e 443 (e a porta do ao vivo, quando você a liga, que se protege pela lista `HARBOR_PERMITIDOS`, seção 11). Por isso, se o seu provedor oferece um **firewall no painel dele**, ligue-o também, com as mesmas portas: é uma segunda camada fora do servidor.
 
@@ -233,6 +243,7 @@ ACME_EMAIL=seu-email-real@exemplo.com.br
 
 - `DOMINIO`: o endereço **sem** `https://` e **sem** porta. Ele vira o certificado do cadeado e o nome do site em toda a rádio.
 - `ACME_EMAIL`: o e-mail do Let's Encrypt.
+- `NOME_RADIO` (já vem como `WebRadio`): o nome da sua rádio, que aparece no título da aba, na descrição e no player. Mude se quiser **antes da primeira subida** (muda o site montado).
 
 > **Quem já tinha um `.env` de antes do Épico 5** precisa **acrescentar** as linhas `DOMINIO` e `ACME_EMAIL` (e conferir as demais contra o `.env.example`): sem elas o certificado não sai. Não apague o `.env` antigo: edite-o.
 
@@ -274,17 +285,19 @@ Para ver a `restic_senha` e copiá-la para o gerenciador de senhas:
 cat secrets/restic_senha; echo
 ```
 
-Para copiar a pasta inteira para o **seu computador** (rode **no seu computador**, não no servidor), e depois **mova** para o cofre criptografado e apague a pasta solta:
+Para copiar a pasta inteira para o **seu computador**, **já criptografada** (assim nunca fica uma cópia em texto aberto no seu disco), rode **no seu computador** (Linux ou macOS, com o `gpg` instalado). Ele pede uma senha para o arquivo: **guarde-a no gerenciador de senhas**.
 
 ```bash
-scp -r webradio@IP-DA-VPS:/opt/webradio/secrets ./webradio-secrets
+ssh webradio@IP-DA-VPS 'tar -C /opt/webradio -cz secrets' | gpg --symmetric --cipher-algo AES256 -o webradio-secrets.tar.gz.gpg
 ```
+
+Guarde o arquivo `webradio-secrets.tar.gz.gpg` num lugar seguro (um cofre ou um pen drive guardado). Se o `gpg` for difícil para você, tudo bem: **copiar só os três itens obrigatórios** da tabela acima para o gerenciador de senhas já cobre o essencial.
 
 **Teste de que guardou direito:** abra o gerenciador de senhas e confirme que você consegue ler a `restic_senha` de lá, sem acessar o servidor. **Refaça esta cópia a cada vez que um segredo mudar.**
 
 ## 7. Criar o bucket externo (a cópia do backup fora do servidor)
 
-**O que é.** Um "bucket" é uma pasta na nuvem de uma empresa de armazenamento. O backup diário da rádio é enviado para lá, criptografado: quem guarda os arquivos não consegue ler o conteúdo. Se o servidor for perdido, roubado ou invadido, a cópia continua intacta.
+**O que é.** Um "bucket" é uma pasta na nuvem de uma empresa de armazenamento. O backup diário da rádio é enviado para lá, criptografado: quem guarda os arquivos não consegue ler o conteúdo. Se o servidor for perdido, quebrar ou for roubado, a cópia continua intacta.
 
 **Sem o bucket**, o backup funciona **só dentro do servidor**: o log avisa `BACKUP_EXTERNO_NAO_CONFIGURADO`. É um aviso, não um erro, mas significa que **perder o servidor é perder o backup junto**. Faça este passo antes de abrir a rádio ao público.
 
@@ -293,7 +306,9 @@ scp -r webradio@IP-DA-VPS:/opt/webradio/secrets ./webradio-secrets
 1. Um bucket **só para o backup** da rádio (nada mais dentro).
 2. **Versionamento ligado**: o provedor guarda as versões antigas de cada arquivo.
 3. **Retenção de 30 dias das versões antigas**: um arquivo apagado ou sobrescrito continua recuperável por 30 dias.
-4. Uma **chave de acesso só para esse bucket**, com leitura e escrita, e que **não** possa alterar as configurações do bucket (versionamento, ciclo de vida, bloqueio de objetos). Assim, quem invadir o servidor e apagar tudo com essa chave deixa as versões antigas recuperáveis pela **sua conta** no provedor.
+4. Uma **chave de acesso só para esse bucket**, com leitura e escrita, e que **não** possa alterar as configurações do bucket (versionamento, ciclo de vida, bloqueio de objetos).
+
+**O que esta proteção cobre e o que ela NÃO cobre.** O versionamento e a retenção de 30 dias protegem contra erro e contra um apagamento comum: se o backup do servidor (ou uma pessoa) "apaga" ou sobrescreve um arquivo, a versão antiga continua guardada por 30 dias e dá para recuperá-la pela **sua conta** no provedor. **Mas a chave de backup precisa poder apagar arquivos** (o backup remove as cópias velhas todo dia). Quem tomar o servidor e usar essa chave **pode apagar uma versão específica de forma definitiva**, e o ciclo de vida não impede isso. Ou seja, **hoje o bucket não garante** que a cópia externa sobreviva a um invasor com a chave. É um **risco conhecido**, levado à revisão de riscos com você (E5-N01). A proteção forte seria o **bloqueio de objetos (Object Lock)** com retenção de 30 dias; ela ainda precisa ser testada com o restic e decidida pelo time, por isso este guia manda deixá-lo desligado.
 
 O passo a passo abaixo usa o **Backblaze B2**. Os nomes de botões vêm da documentação do provedor e podem mudar um pouco; se algo estiver diferente, guie-se pelos quatro requisitos acima e peça ajuda ao time.
 
@@ -308,7 +323,7 @@ O passo a passo abaixo usa o **Backblaze B2**. Os nomes de botões vêm da docum
 2. Botão **Create a Bucket**.
 3. **Bucket Unique Name**: um nome só seu, em letras minúsculas e hífens, por exemplo `webradio-backup-seunome`. O nome é único no mundo; se já existir, o painel avisa.
 4. **Files in Bucket are**: **Private** (privado).
-5. **Object Lock**: deixe **desligado**.
+5. **Object Lock**: deixe **desligado, a menos que a revisão de riscos (E5-N01) decida o contrário** (veja o "limite conhecido" no começo desta seção).
 6. Clique em **Create a Bucket**.
 7. Na lista de buckets, **copie o valor do campo "Endpoint"** do seu bucket (algo como `s3.us-west-004.backblazeb2.com`) e anote o **nome do bucket**.
 
@@ -327,13 +342,15 @@ A regra vale para todo o bucket e é aplicada uma vez por dia. Ela mantém os ar
 1. Menu **Application Keys** (em "Account", ou "Access Control", conforme a versão do painel) → **Add a New Application Key**.
 2. **Name of Key**: `webradio-backup`.
 3. **Allow access to Bucket(s)**: escolha **o bucket do backup** (nunca "All").
-4. **Type of Access**: **Read and Write**. Não marque nenhuma opção extra de administração do bucket.
+4. **Type of Access**: **Read and Write**. Não marque nenhuma opção extra de administração do bucket. Se o painel oferecer **Allow List All Bucket Names**, ela só deixa o programa ver os *nomes* dos buckets (não o conteúdo) e pode ser necessária: se o primeiro backup externo (seção 10.2) falhar com `credencial_ou_permissao_recusada`, é a primeira coisa a ativar.
 5. Crie a chave.
 6. O painel mostra **duas informações** (a segunda **aparece uma única vez**; copie para o gerenciador de senhas agora):
    - **keyID** (é a chave de acesso, a "access key");
    - **applicationKey** (é a chave secreta, a "secret key").
 
-**Confira antes de seguir:** com essa chave, o painel do provedor **não** deve deixar você mudar o ciclo de vida nem o bloqueio de objetos do bucket (a chave só lê e grava arquivos). Se deixar, a chave tem poderes demais: apague-a e crie de novo com acesso só de leitura e escrita a este bucket.
+**Nunca use a "Master Application Key" (a chave mestra da conta) no servidor.** Ela tem poder sobre a conta inteira: use só a chave que você criou acima, restrita ao bucket.
+
+**Confira antes de seguir** (o painel é usado com o login da sua *conta*, não com a chave, então a conferência é olhar a própria chave): na lista de **Application Keys**, abra a chave nova e veja as **permissões (capabilities)** que o painel mostra. Ela deve poder listar, ler, gravar e apagar arquivos, e **não** deve ter permissão de **alterar o bucket** (algo como `writeBuckets`) nem de **retenção ou Object Lock** (algo como `writeBucketRetentions` ou `bypassGovernance`; os nomes exatos podem variar). Se tiver, apague a chave e crie de novo, só com leitura e escrita neste bucket.
 
 Se você preferir outro provedor (Wasabi, AWS S3, ou um MinIO em outro servidor), os quatro requisitos do começo desta seção são os mesmos.
 
@@ -392,10 +409,10 @@ Só pode haver linhas com `0.0.0.0`. Se aparecer `[::]` ou `*`, **pare** e fale 
 Este é o ponto mais traiçoeiro: se a rádio enxergasse todos os ouvintes como um só, o limite de 25 ouvintes por IP derrubaria a audiência no 26º. Conferência:
 
 ```bash
-docker compose logs --no-color web | tail -5
+docker compose logs --no-color web | grep -v '127.0.0' | tail -5
 ```
 
-Na coluna do IP deve aparecer **o seu IP** com o último número zerado (por exemplo `203.0.113.0`: a rádio anonimiza por privacidade), **não** `172.30.250.x`. Depois, peça a **duas pessoas em redes diferentes** (ou você no Wi-Fi e no 4G do celular) para abrir a rádio e tocar ao mesmo tempo: as duas devem ouvir, sem erro.
+(O `grep -v` tira as linhas do teste de saúde do próprio servidor, que mostram `127.0.0.0`.) Na coluna do IP deve aparecer **o seu IP** com o último número zerado (por exemplo `203.0.113.0`: a rádio anonimiza por privacidade), **não** `172.30.250.x`. Depois, peça a **duas pessoas em redes diferentes** (ou você no Wi-Fi e no 4G do celular) para abrir a rádio e tocar ao mesmo tempo: as duas devem ouvir, sem erro.
 
 **4. Login do Administrador.**
 Abra a página de entrada. Entre com o e-mail que você informou na seção 5.3 e a senha de `secrets/seed_admin_senha`. O sistema pede para **trocar a senha**: troque e guarde a nova no gerenciador.
@@ -488,6 +505,8 @@ Só faça esta seção se vai ter locutor transmitindo ao vivo com um programa c
    HARBOR_HOST_PUBLICO=radio.exemplo.com.br
    ```
 
+   Sem VPN, o `HARBOR_BIND_IP` é o **IPv4 público da própria VPS**: a porta do ao vivo fica exposta à internet e só os endereços de `HARBOR_PERMITIDOS` conseguem entrar (mais o firewall do provedor). Isso só funciona se o estúdio ou o locutor tiver **IP fixo**. A conexão do locutor com o harbor **não é criptografada** na v1 (risco aceito pelo dono do produto em 2026-10-15, registrado na spec do Épico 2).
+
    `HARBOR_PERMITIDOS` é **obrigatório**: vazio, ninguém entra. O `HARBOR_BIND_IP` com `0.0.0.0` é **recusado** pelo sistema, de propósito.
 
 2. Suba com o arquivo do ao vivo (uso **explícito**, os dois `-f`):
@@ -509,13 +528,13 @@ Atualizar derruba a rádio **por cerca de 1 minuto** (a API e o site); o som con
 ```bash
 cd /opt/webradio
 git fetch --tags
-git checkout <nova-versão>
+git checkout <nova-versão>     # se o time assina as versões: antes, git verify-tag <nova-versão>
 docker compose --profile backup run --rm backup     # backup ANTES (obrigatório se a versão mexe no banco; na dúvida, faça sempre)
-docker compose build
+docker compose --profile backup build   # o perfil 'backup' inclui a imagem do backup, que o build comum não reconstrói
 docker compose up -d --wait
 ```
 
-(Se o ao vivo está ligado, use os dois `-f` no `build` e no `up`.) O sistema aplica sozinho as mudanças do banco antes de a API subir. Depois, refaça os itens 1, 4 e 5 da conferência da seção 9. Se algo der errado, **não** faça `down -v`: chame o time.
+(Se o ao vivo está ligado, use os dois `-f` no `build` e no `up`. A imagem do backup é a mesma da restauração.) O sistema aplica sozinho as mudanças do banco antes de a API subir. Depois, refaça os itens 1, 4 e 5 da conferência da seção 9. Se algo der errado, **não** faça `down -v`: chame o time.
 
 **HSTS depois de uma semana.** No primeiro deploy o navegador é "preso" ao HTTPS só por 1 dia. Depois de **uma semana** sem problema de certificado, o time sobe esse prazo para 1 ano; o passo está em [`runbooks/borda-https.md`](runbooks/borda-https.md#hsts-de-1-dia-para-1-ano).
 
@@ -537,7 +556,7 @@ E **não reaproveite os segredos** do servidor invadido: quem tomou o servidor p
 
 1. Gere de novo as senhas do banco, as chaves do MinIO e a chave do login (JWT): veja [`runbooks/rotacao-jwt-signing-key.md`](runbooks/rotacao-jwt-signing-key.md) (a seção "Vazamento da chave", que também diz o que auditar).
 2. A `restic_senha` e as chaves do bucket (`backup_s3_*`) entram numa avaliação do Sentinel (segurança): peça ao time antes de decidir trocá-las.
-3. A cópia externa **versionada** (seção 7) é o que garante que ainda existe um ponto de backup anterior à invasão, mesmo que o invasor tenha apagado o repositório no servidor: as versões antigas continuam por 30 dias na **sua conta** no provedor.
+3. A cópia externa (seção 7) é o que costuma deixar um ponto de backup anterior à invasão, e as versões antigas ficam por 30 dias na **sua conta** no provedor. **Mas isso não é garantia:** a chave do backup (`backup_s3_*`) pode apagar versões de forma definitiva, e quem tomou o servidor leu essa chave. **Se houver suspeita de invasão, entre agora na sua conta do provedor e confira se os pontos de backup anteriores ainda existem; se a chave foi lida, revogue-a ali mesmo**, e peça ao time para criar uma nova.
 4. Copie o log do que aconteceu para fora do servidor **antes** de recriar qualquer contêiner (recriar apaga o log): o runbook do JWT explica.
 
 ## 15. Acompanhar no dia a dia
