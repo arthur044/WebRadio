@@ -36,6 +36,10 @@ ENV PUBLIC_HOST="localhost 127.0.0.1"
 # Host:porta EXATA que o proxy repassa aos upstreams (revisão do Sentinel — nunca o
 # que o cliente mandou). Tem que bater com Storage__PublicEndpoint do backend.
 ENV PUBLIC_AUTHORITY="localhost:8080"
+# Subnet da rede `edge` (a do Caddy): o nginx só confia no X-Forwarded-For de quem vem dela (set_real_ip_from, E5-D2). O padrão é o do docker-compose.yml.
+ENV EDGE_SUBNET="172.30.250.0/29"
+# Esquema que a API enxerga (X-Forwarded-Proto). `$scheme` (literal, o nginx o resolve) fora do Compose de produção, que fixa `https`; ver proxy-api.inc.template.
+ENV PROTO_PUBLICO="$scheme"
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY infra/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY infra/nginx/security-headers.conf /etc/nginx/security-headers.conf

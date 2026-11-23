@@ -9,6 +9,10 @@
 # O stack no ar é o do DEV (docker-compose.dev.yml); por isso as seções "base de produção" conferem a topologia do
 # docker-compose.yml SOZINHO pelo `docker compose config --format json` (redes, portas, capabilities), sem subir nada.
 #
+# SMOKE_PRODUCAO=1 (E5-F05, job `compose-producao`): o stack no ar é a base de PRODUÇÃO (docker-compose.yml + o override do CI), atrás do Caddy em `tls internal`,
+# e o smoke fala com ele por https://$DOMINIO. Precisa de DOMINIO e ACME_EMAIL no ambiente, do domínio no /etc/hosts e de CURL_CA_BUNDLE apontando para a CA do Caddy.
+# O que é do dev (seed, Development, portas de diagnóstico) não se confere; o que é só da produção (80/443, HSTS, sem IPv6, Production) passa a valer.
+#
 # O ao vivo (DoD 1, 3, 4 e 7 do Épico 2) é conferido por infra/scripts/smoke-ao-vivo.sh, que roda DEPOIS deste (o primeiro login do
 # Admin semeado, com a troca de senha pendente, só existe antes dele) e antes do E2E; a porta do harbor só existir no live.yml e a
 # base de produção publicar só a 8080 ficam aqui, na seção "base de PRODUÇÃO".
@@ -20,8 +24,15 @@ export LC_ALL=C
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$RAIZ"
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.dev.yml)
-BASE="${SMOKE_BASE:-http://localhost:8080}"
+PRODUCAO="${SMOKE_PRODUCAO:-}"
+if [[ -n "$PRODUCAO" ]]; then
+  : "${DOMINIO:?SMOKE_PRODUCAO=1 precisa do DOMINIO no ambiente (o do job: webradio.test)}"
+  COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml)
+  BASE="${SMOKE_BASE:-https://$DOMINIO}"
+else
+  COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.dev.yml)
+  BASE="${SMOKE_BASE:-http://localhost:8080}"
+fi
 ORIGEM="${SMOKE_ORIGEM:-$BASE}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -61,7 +72,7 @@ for rota in / /api/v1/auth/me /api/v1/stream/qualquer /hubs/x /stream/radio.mp3 
 esperar "/storage/midia/x sem assinatura" 404 "$(status "$BASE/storage/midia/x")"
 esperar "/storage/midia/ (listagem do bucket)" 404 "$(status "$BASE/storage/midia/")"
 cabecalhos="$(curl -s -I --max-time 10 "$BASE/stream/radio.mp3" | tr -d '\r')"
-esperar "HEAD /stream/radio.mp3" "HTTP/1.1 200 OK" "$(head -1 <<<"$cabecalhos")"
+esperar "HEAD /stream/radio.mp3" 200 "$(head -1 <<<"$cabecalhos" | cut -d' ' -f2)" # HTTP/1.1 no dev, HTTP/2 atrás do Caddy
 grep -qi '^content-type: audio/mpeg' <<<"$cabecalhos" && ok "content-type audio/mpeg" || falha "content-type do stream"
 curl -s --max-time 4 "$BASE/stream/radio.mp3" -o "$TMP/amostra.mp3" || true
 [[ "$(stat -c %s "$TMP/amostra.mp3")" -gt 16000 ]] && ok "stream entrega áudio" || falha "stream sem dados"
@@ -124,8 +135,16 @@ mapeamentos="$(docker ps --filter label=com.docker.compose.project=webradio --fo
 # IPv4 exato; IPv6 só pode ser o [::]:8080 que o Docker acrescenta à porta pública (ele pode ou não aparecer, conforme o host).
 publicadas_v4="$(grep -oE '^(0\.0\.0\.0|127\.0\.0\.1):[0-9]+' <<<"$mapeamentos" | sort -u | tr '\n' ' ')"
 publicadas_v6="$(grep -oE '^\[::\]:[0-9]+' <<<"$mapeamentos" | sort -u | tr '\n' ' ' || true)"
-esperar "só 8080 pública em 0.0.0.0 (+ 127.0.0.1 no dev)" "0.0.0.0:8080 127.0.0.1:1433 127.0.0.1:8005 127.0.0.1:9001 " "$publicadas_v4"
-[[ -z "$publicadas_v6" || "$publicadas_v6" == "[::]:8080 " ]] && ok "IPv6 publicado: só o [::]:8080 (ou nenhum)" || falha "IPv6 publicado inesperado: $publicadas_v6"
+if [[ -n "$PRODUCAO" ]]; then
+  # E5-D1/D12: só o Caddy publica, em 0.0.0.0:80 e 0.0.0.0:443, e NADA escuta em IPv6 (o docker-proxy do [::] entregaria o IP dele ao Caddy e o IP real do ouvinte se perderia).
+  esperar "só 80 e 443 públicas, em 0.0.0.0 (base de produção)" "0.0.0.0:443 0.0.0.0:80 " "$publicadas_v4"
+  [[ -z "$publicadas_v6" ]] && ok "nenhuma porta publicada em IPv6" || falha "porta publicada em IPv6: $publicadas_v6"
+  escutando_v6="$(ss -H -ltn '( sport = :80 or sport = :443 )' 2>/dev/null | awk '{print $4}' | grep -E '^(\[|\*|::)' || true)"
+  [[ -z "$escutando_v6" ]] && ok "nada escuta em IPv6 nas portas 80 e 443 do host" || falha "escuta em IPv6: $escutando_v6"
+else
+  esperar "só 8080 pública em 0.0.0.0 (+ 127.0.0.1 no dev)" "0.0.0.0:8080 127.0.0.1:1433 127.0.0.1:8005 127.0.0.1:9001 " "$publicadas_v4"
+  [[ -z "$publicadas_v6" || "$publicadas_v6" == "[::]:8080 " ]] && ok "IPv6 publicado: só o [::]:8080 (ou nenhum)" || falha "IPv6 publicado inesperado: $publicadas_v6"
+fi
 # Qualquer mapeamento que não comece por um desses endereços (ex.: um IP de LAN) seria ignorado pelos greps acima.
 estranhos="$(grep -vE '^(0\.0\.0\.0|127\.0\.0\.1|\[::\]):[0-9]+->' <<<"$mapeamentos" || true)"
 [[ -z "$estranhos" ]] && ok "nenhuma porta publicada em outro endereço" || falha "porta publicada em endereço inesperado: $estranhos"
@@ -162,18 +181,46 @@ def redes(nome):
     return set((servicos[nome].get("networks") or {}).keys())
 
 # --- redes e portas (04 §Redes, S-M15)
-confere("redes da base: exatamente borda, app, dados, playout, midia-borda, antivirus e saida-freshclam (nenhuma diag-*)",
-        set(prod["networks"]) == {"borda", "app", "dados", "playout", "midia-borda", "antivirus", "saida-freshclam"}, str(sorted(prod["networks"])))
-publicadas = {n: [(p.get("published"), p.get("target"), p.get("host_ip")) for p in s.get("ports", [])] for n, s in servicos.items() if s.get("ports")}
-confere("só o web publica porta, e só a 8080", publicadas == {"web": [("8080", 8080, None)]}, str(publicadas))
-confere("web nas redes borda, app e midia-borda, e NÃO na playout", redes("web") == {"borda", "app", "midia-borda"}, str(sorted(redes("web"))))
+confere("redes da base: exatamente edge, borda, app, dados, playout, midia-borda, antivirus e saida-freshclam (nenhuma diag-*)",
+        set(prod["networks"]) == {"edge", "borda", "app", "dados", "playout", "midia-borda", "antivirus", "saida-freshclam"}, str(sorted(prod["networks"])))
+publicadas = {n: sorted((p.get("published"), p.get("target"), p.get("host_ip")) for p in s.get("ports", [])) for n, s in servicos.items() if s.get("ports")}
+# E5-D1: só o edge (Caddy) publica porta na base, e explicitamente em 0.0.0.0 (no [::] o docker-proxy entrega o IP dele e o real_ip se perde). O web NÃO publica nada.
+confere("só o edge publica porta, só a 80 e a 443, e em 0.0.0.0", publicadas == {"edge": [("443", 443, "0.0.0.0"), ("80", 80, "0.0.0.0")]}, str(publicadas))
+confere("web nas redes edge, app e midia-borda, e NÃO na borda nem na playout", redes("web") == {"edge", "app", "midia-borda"}, str(sorted(redes("web"))))
+# --- E5-F02: a borda HTTPS. Rede edge só com o edge e o web, com subnet fixa e não interna (o Caddy publica e sai à internet para o ACME); o Caddy endurecido; só o Let's Encrypt na base.
+confere("rede edge: só o edge e o web", sorted(n for n in servicos if "edge" in redes(n)) == ["edge", "web"], str(sorted(n for n in servicos if "edge" in redes(n))))
+confere("rede edge: subnet fixa e NÃO internal", bool(prod["networks"]["edge"].get("ipam", {}).get("config")) and not prod["networks"]["edge"].get("internal"))
+e = servicos["edge"]
+confere("edge: só na rede edge", redes("edge") == {"edge"}, str(sorted(redes("edge"))))
+confere("edge: cap_drop ALL e só NET_BIND_SERVICE de volta, read_only, no-new-privileges, mem e pids limitados",
+        e.get("cap_drop") == ["ALL"] and e.get("cap_add") == ["NET_BIND_SERVICE"] and e.get("read_only") and "no-new-privileges:true" in (e.get("security_opt") or [])
+        and e.get("mem_limit") and e.get("pids_limit") and not e.get("privileged") and e.get("network_mode") != "host")
+confere("edge: imagem fixada por digest", "@sha256:" in e.get("image", ""), e.get("image", ""))
+confere("edge: só o Caddyfile e o tls-acme.caddy do repositório, em leitura (o `tls internal` é só do override do CI)",
+        sorted((v["source"].rsplit("/", 1)[-1], v["target"], bool(v.get("read_only"))) for v in e["volumes"] if v["type"] == "bind")
+        == [("Caddyfile", "/etc/caddy/Caddyfile", True), ("tls-acme.caddy", "/etc/caddy/tls.caddy", True)], str(e["volumes"]))
+confere("edge: certificados em volume nomeado (sobrevivem à recriação do contêiner)", {v["source"] for v in e["volumes"] if v["type"] == "volume"} == {"edge-data", "edge-config"})
+# --- E5: o host público sai de UM valor, o DOMINIO (Storage__PublicEndpoint, AllowedHosts, hostname do Icecast, server_name e Host canônico do nginx)
+dominio = e["environment"]["DOMINIO"]
+confere("host público derivado do DOMINIO (api, worker, web, icecast), com https e sem porta",
+        servicos["api"]["environment"]["Storage__PublicEndpoint"] == f"https://{dominio}/storage"
+        and servicos["worker"]["environment"]["Storage__PublicEndpoint"] == f"https://{dominio}/storage"
+        and servicos["api"]["environment"]["AllowedHosts"].split(";")[0] == dominio
+        and servicos["web"]["environment"]["PUBLIC_HOST"] == servicos["web"]["environment"]["PUBLIC_AUTHORITY"] == dominio
+        and servicos["icecast"]["environment"]["ICECAST_HOSTNAME"] == dominio)
+# O esquema que a API enxerga é https fixo na base (senão todo refresh e logout dá 403 na checagem de origem); o dev volta a $scheme e à porta 8080.
+confere("web: PROTO_PUBLICO=https fixo na base e o nginx só confia na EDGE_SUBNET", servicos["web"]["environment"].get("PROTO_PUBLICO") == "https" and servicos["web"]["environment"].get("EDGE_SUBNET"))
+confere("dev: web volta a publicar a 8080, a usar $$scheme e a não confiar em nenhum X-Forwarded-For; o edge fica no perfil `edge` (sem Caddy no dev)",
+        [(p.get("published"), p.get("target")) for p in dev["services"]["web"].get("ports", [])] == [("8080", 8080)]
+        and dev["services"]["web"]["environment"].get("PROTO_PUBLICO") == "$$scheme" and dev["services"]["edge"].get("profiles") == ["edge"]
+        and dev["services"]["web"]["environment"].get("EDGE_SUBNET") == "127.0.0.1/32")
 confere("liquidsoap só na playout", redes("liquidsoap") == {"playout"}, str(sorted(redes("liquidsoap"))))
 confere("harbor-borda nas redes borda e playout", redes("harbor-borda") == {"borda", "playout"}, str(sorted(redes("harbor-borda"))))
 # --- E2-F11: a porta do ao vivo só existe com o live.yml, só ela a mais e só no IP configurado; a API passa a "atrás do proxy"
 publicadas_live = {n: [(p.get("published"), p.get("target"), p.get("host_ip")) for p in s.get("ports", [])]
                    for n, s in live["services"].items() if s.get("ports")}
-confere("live.yml: só web 8080 e harbor-borda 8005 em HARBOR_BIND_IP",
-        publicadas_live == {"web": [("8080", 8080, None)], "harbor-borda": [("8005", 8005, "203.0.113.10")]}, str(publicadas_live))
+confere("live.yml: só o edge 80 e 443 e o harbor-borda 8005 em HARBOR_BIND_IP",
+        {n: sorted(v) for n, v in publicadas_live.items()} == {"edge": [("443", 443, "0.0.0.0"), ("80", 80, "0.0.0.0")], "harbor-borda": [("8005", 8005, "203.0.113.10")]}, str(publicadas_live))
 confere("live.yml: api com Harbor__AtrasDoProxy=true", live["services"]["api"]["environment"].get("Harbor__AtrasDoProxy") == "true")
 confere("live.yml: harbor-borda recebe HARBOR_BIND_IP (o entrypoint recusa 0.0.0.0 e ::)",
         live["services"]["harbor-borda"]["environment"].get("HARBOR_BIND_IP") == "203.0.113.10")
@@ -278,7 +325,8 @@ grep -qx 'WebRadio.Api' <<<"$sessoes" && ok "sessão WebRadio.Api" || falha "nen
 grep -qx 'WebRadio.Worker.Lideranca' <<<"$sessoes" && ok "sessão WebRadio.Worker.Lideranca (conexão do líder)" || falha "nenhuma sessão WebRadio.Worker.Lideranca"
 if grep -q '^webradio' <<<"$sessoes"; then falha "sessão com o Application Name antigo (webradio…): $(grep '^webradio' <<<"$sessoes" | tr '\n' ' ')"; else ok "nenhum Application Name antigo (webradio, webradio-worker-leader)"; fi
 logs_worker="$("${COMPOSE[@]}" logs worker 2>&1 || true)" # em variável: `logs | grep -q` com pipefail daria SIGPIPE
-grep -q 'Hosting environment: Development' <<<"$logs_worker" && ok "Worker sobe como Development com o dev.yml" || falha "o log do Worker não mostra 'Hosting environment: Development'"
+ambiente_esperado="Development"; [[ -n "$PRODUCAO" ]] && ambiente_esperado="Production"
+grep -q "Hosting environment: $ambiente_esperado" <<<"$logs_worker" && ok "Worker sobe como $ambiente_esperado" || falha "o log do Worker não mostra 'Hosting environment: $ambiente_esperado'"
 
 echo
 if [[ $falhas -gt 0 ]]; then echo "smoke: $falhas falha(s)."; exit 1; fi

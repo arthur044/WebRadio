@@ -593,3 +593,98 @@ jobs:
       - name: Derrubar
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
+
+  # E5-F05: a base de PRODUÇÃO (docker-compose.yml, sem o dev.yml) de pé atrás do Caddy, com o certificado de uma CA interna (`tls internal`, nunca o Let's Encrypt).
+  # Confere por https:// o que o job `compose-smoke` (que é do dev, em http://localhost:8080) não alcança: só 80/443 publicadas e nada em IPv6, o IP real do
+  # cliente atrás do Caddy (DoD 3 do Épico 5, com um X-Forwarded-For forjado), HSTS, e login, refresh e logout por https (a checagem de Origin).
+  compose-producao:
+    name: Compose de produção (Caddy com tls internal, E5-F05)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    needs: seguranca
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      # O host público do job: não resolve fora do runner (o /etc/hosts abaixo o aponta para 127.0.0.1). Não é segredo.
+      DOMINIO: webradio.test
+      ACME_EMAIL: ci@webradio.test
+      # /28 (e não o /29 padrão) para sobrar endereço aos dois clientes do smoke da borda (.10 e .11); o nginx confia nesta mesma subnet.
+      EDGE_SUBNET: 172.30.250.0/28
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Modo prod: nenhum .env é criado (o DOMINIO e o ACME_EMAIL vêm do ambiente do job) e o e-mail do Admin é o do job.
+      - name: Segredos gerados NO runner (modo prod; nenhum segredo cadastrado no GitHub)
+        run: infra/scripts/gerar-segredos.sh prod admin@webradio.test
+
+      - name: O domínio do job aponta para o runner
+        run: echo "127.0.0.1 ${DOMINIO}" | sudo tee -a /etc/hosts
+
+      - name: As portas 80 e 443 do runner estão livres
+        run: |
+          if ss -H -ltn '( sport = :80 or sport = :443 )' | grep -q .; then
+            echo "::error::Algo já escuta nas portas 80/443 do runner:"
+            ss -ltnp '( sport = :80 or sport = :443 )' || true
+            exit 1
+          fi
+
+      - name: docker compose config (a base sozinha e com os overrides do CI)
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml config --quiet
+
+      - name: Build das imagens
+        run: docker compose -f docker-compose.yml build
+
+      - name: Subir a base de produção e esperar healthy (< 5 min)
+        run: docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml up -d --wait --wait-timeout 300
+
+      # A CA interna nasce quando o Caddy emite o certificado do domínio (logo depois de ele aceitar conexão): espera o root.crt existir e o https responder com ele.
+      - name: CA interna do Caddy
+        run: |
+          set -euo pipefail
+          ca="${RUNNER_TEMP}/edge-ca.crt"
+          for _ in $(seq 1 60); do
+            if docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml cp edge:/data/caddy/pki/authorities/local/root.crt "${ca}" 2>/dev/null \
+               && curl -s -o /dev/null --max-time 5 --cacert "${ca}" "https://${DOMINIO}/"; then
+              # Legível pelos clientes do smoke (uid 101, em contêiner) e pelo curl do host.
+              chmod 644 "${ca}"
+              echo "CURL_CA_BUNDLE=${ca}" >> "$GITHUB_ENV"
+              echo "https://${DOMINIO}/ responde com a CA interna do Caddy."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::O Caddy não respondeu por https com a CA interna em 2 min."
+          exit 1
+
+      - name: Smoke da base de produção (portas, topologia, isolamento, login por https)
+        env:
+          SMOKE_PRODUCAO: "1"
+        run: infra/scripts/smoke-compose.sh
+
+      - name: Smoke da borda (IP real atrás do Caddy, HSTS, login/refresh/logout por https, log do Caddy)
+        run: infra/scripts/smoke-borda.sh
+
+      - name: Estado e logs em caso de falha
+        if: failure()
+        run: |
+          f=(-f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml)
+          docker compose "${f[@]}" ps -a
+          docker compose "${f[@]}" ps -aq | xargs -r docker inspect -f '{{.Name}} exit={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}}'
+          docker compose "${f[@]}" logs --no-color --tail 80
+          echo "::group::edge (log completo)"
+          docker compose "${f[@]}" logs --no-color edge || true
+          echo "::endgroup::"
+          echo "::group::api (log completo)"
+          docker compose "${f[@]}" logs --no-color api || true
+          echo "::endgroup::"
+          ss -ltnp '( sport = :80 or sport = :443 )' || true
+
+      - name: Derrubar
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml down -v

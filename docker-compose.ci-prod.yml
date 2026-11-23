@@ -1,0 +1,16 @@
+# =============================================================================
+# WebRadio — docker-compose.ci-prod.yml (E5-F05): SÓ o job `compose-producao` do CI. Nunca no deploy.
+#   docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml up -d --wait
+#
+# A base de PRODUÇÃO (docker-compose.yml, sem o dev.yml) com duas trocas que o CI exige:
+#   1. o Caddy em `tls internal` (uma CA local dele; nunca o Let's Encrypt: o CI não tem domínio nem pode gastar o limite de emissão). O resto do Caddyfile é o mesmo;
+#   2. o antivírus com a base só de assinatura de teste, que vem do docker-compose.smoke.yml (listado antes deste): o Worker de produção não sobe sem scanner, e o CI não baixa a base do freshclam.
+# O DOMINIO (webradio.test, resolvido para 127.0.0.1 pelo /etc/hosts do runner) e o ACME_EMAIL entram pelo ambiente do job, não por .env.
+# =============================================================================
+services:
+  edge:
+    volumes: !override
+      - ./infra/edge/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/edge/tls-interno.caddy:/etc/caddy/tls.caddy:ro
+      - edge-data:/data
+      - edge-config:/config
