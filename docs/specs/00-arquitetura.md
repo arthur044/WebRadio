@@ -34,8 +34,12 @@
 
 ```
                      Internet
-                        │
-                 ┌──────▼──────┐   (única porta pública em dev: 8080)
+                        │ 80/443 (só produção, E5-D1)
+                 ┌──────▼──────┐   Caddy: TLS (Let's Encrypt) e IP real; sem Caddy em dev
+                 │ edge (Caddy)│   (rede `edge`, subnet fixa, só com o web)
+                 └──────┬──────┘
+                        │ http :8080 (única porta pública em dev: 8080)
+                 ┌──────▼──────┐
                  │  web (nginx)│── SPA React estática
                  │  gateway    │── /api/*   ─┐
                  └──┬───────┬──┘── /hubs/*  ─┤
@@ -170,6 +174,7 @@ A regra de dependência é garantida por **teste de arquitetura** (NetArchTest),
 - `sv` exige coluna nova `seg.Usuario.VersaoSeguranca INT NOT NULL DEFAULT 0` (migration + revisão do Atlas), entregue junto com os `/usuarios`. O CI de backend precisa de SQL Server (`WEBRADIO_TEST_SQL`); sem ele os testes `SqlFact` ficam skipped e não valem como gate (F17).
 - Refresh só no cookie `__Secure-wr_refresh` (`HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`), conferindo também `Origin`/`Sec-Fetch-Site`. O access token fica **só em memória** no frontend.
 - `FallbackPolicy` = usuário autenticado: um endpoint anônimo precisa de `AllowAnonymous` explícito.
+- Borda HTTPS (E5-D1/D2, 2026-11-23): o Caddy (`edge`) termina o TLS e é o único contêiner publicado (80/443, só IPv4); o nginx segue sendo o gateway (D9). O Caddy não confia em `X-Forwarded-For` de fora e manda o IP do socket; o nginx usa `set_real_ip_from ${EDGE_SUBNET}` (a rede `edge`, só Caddy e web) com `real_ip_recursive off`, então os limites por IP continuam por cliente. O nginx manda à API `X-Forwarded-Proto https` fixo na base de produção (sem isso, todo refresh e logout dá 403 na checagem de origem). HSTS só pelo Caddy. Detalhes e operação: `docs/runbooks/borda-https.md`.
 - Borda nginx: `limit_req`/`limit_conn`, timeouts contra slowloris, CSP e headers de segurança em **todo** `location` (S-M13, S-M14), `X-Forwarded-For` sobrescrito, e `KnownNetworks` com a subnet fixa da rede `app` (S-A11). `/stream/` só aceita GET em `radio.mp3` (S-A07).
 - Harbor `:8005`: senha ≥ 24 caracteres, publicado só com lista de IPs permitidos ou VPN; em dev, `127.0.0.1`. Autenticação por locutor no Épico 2 (S-A08).
 - Limite de requisições (ASP.NET RateLimiter): global de **600/min por IP** (configurável por `RateLimit__LimiteGlobalPorMinuto`, 1 a 100000; acima de 600 só em Development, fora dele a Api recusa subir; o `docker-compose.dev.yml` usa 2000 para o smoke/E2E, `RATE_LIMIT_GLOBAL`); `/auth/login` com **30/min por IP**. **Por que não 100 e 5 (NAT, 2026-11-22):** ouvintes de uma escola, empresa ou CGNAT de operadora dividem um IP; com os limites antigos a audiência inteira de uma rede tomava 429 (e, no login, 401 genérico). O abuso fino continua fora do IP: bloqueio por conta (D21), semáforo de PBKDF2 (503) e throttle de pedidos. No nginx, pelo mesmo motivo: `limit_conn` por IP de **25 em `/stream/`** (era 5; o Icecast aceita 200 ao todo, então 8 IPs o enchem; a capacidade do Icecast se mede no deploy) e de 50 em `/hubs/` (era 10) e `limit_req` de `/api/v1/auth/` de 10 r/s com burst 30 (era 5 r/s, burst 10) e `worker_connections` de 4096 (era 1024: cada ouvinte e cada hub ocupam 2 conexões); `/pedidos` tem o throttle de domínio além disso.

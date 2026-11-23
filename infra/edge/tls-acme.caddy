@@ -1,0 +1,4 @@
+# Produção: só o Let's Encrypt (ACME), com o e-mail global (ACME_EMAIL). Sem esta linha o Caddy ainda tentaria o ZeroSSL como segunda autoridade (outra conta, outra política).
+tls {
+	issuer acme
+}

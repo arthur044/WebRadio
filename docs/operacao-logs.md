@@ -14,6 +14,7 @@ nenhum serviço ficou sem esse bloco.
 | `web` (nginx) | access log em stdout (`access_anon`) | **anonimizado** na origem: último octeto IPv4 zerado, /64 em IPv6 (`infra/nginx/nginx.conf`) |
 | `web` (nginx) | `error_log` em `warn` (`nginx.conf:2`), no stderr | **IP completo** (`client: 203.0.113.5`) a cada 429 de `limit_req`/`limit_conn`, justamente na hora de um ataque |
 | `icecast` | só o error log (stderr); o access log vai para `/dev/null` | nenhum IP de ouvinte em claro |
+| `edge` (Caddy, E5-D9) | access log e log de erro em stdout (JSON), um só logger | **sem query string** (as URLs pré-assinadas e o `listenerId` vão nela), **IP mascarado** (/24 no IPv4, /64 no IPv6), sem cabeçalhos; o `http.stdlib` fica de fora (as mensagens de "TLS handshake error" levam o IP inteiro dentro do texto). Mesma rotação dos demais (10 MB × 3). O `limpar-logs.sh` não o inclui: o log já não tem IP completo |
 | `harbor-borda` (nginx stream, E2-F11) | access log de sessão em stdout (`sessao_anon`); `error_log` em `crit` | **anonimizado** (/24, /64). É o único serviço que vê o IP real do locutor; as recusas (allow/deny, `limit_conn`) aparecem no access log como 403/503, e o `error_log` fica em `crit` justamente porque essas recusas, em `error`, levariam o IP completo |
 | `api`, `worker` | JSON de aplicação | sem IP; ouvinte aparece só como hash |
 

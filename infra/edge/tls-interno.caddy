@@ -1,0 +1,2 @@
+# SÓ o override do CI (docker-compose.ci-prod.yml): certificado de uma CA local do próprio Caddy. Nunca contra o Let's Encrypt (limite de emissão, E5 riscos).
+tls internal
