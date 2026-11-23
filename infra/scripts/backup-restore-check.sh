@@ -107,6 +107,13 @@ contagens() { # contagem EXATA de linhas de todas as tabelas, uma por linha: "sc
                                 FROM sys.tables AS t JOIN sys.schemas AS s ON s.schema_id = t.schema_id);
     EXEC (N'SELECT t, n FROM (' + @q + N') AS x ORDER BY t');" | grep -v '^$' | sort
 }
+# O go-sqlcmd da imagem do backup, como sa (o MESMO binário do restaurar.sh), contra o SQL Server $1: devolve o código de saída e guarda a saída em OUT.
+sa_gosql() { local host="$1"; shift
+  set +e
+  OUT="$(docker run --rm --network "$NET" --user 10001:0 -e SQLCMDPASSWORD="$SA" -v "$RAIZ/infra/sql:/sql:ro" --entrypoint sqlcmd "$IMG_BKP" -b -C -N -I -S "$host" -U sa -l 30 "$@" 2>&1)"
+  RC=$?
+  set -e
+}
 # O backup.sh / restaurar.sh de verdade, na imagem de verdade e com as restrições do compose (uid 10001, sem capability, rootfs só leitura, sem segredo em argv).
 OUT=""; RC=0
 rodar_na_imagem() { # $1 entrypoint (backup.sh | restaurar.sh), $2 diretório de segredos, $3 volume do .bak, $4 modo do .bak (ro|rw), $5 volume local, $6 SQL host, $7 MinIO host, resto = -e do docker
@@ -240,10 +247,26 @@ rodar_na_imagem restaurar.sh "$ext" "$BAK_B" rw "$LOC_B" brc-sql-b brc-minio-b "
 { [[ "$RC" == 2 ]] && grep -q 'sem_terminal_e_sem_RESTAURAR_CONFIRMA' <<<"$OUT"; } && ok "sem terminal e sem RESTAURAR_CONFIRMA: aborta (nunca restaura sem a pergunta)" || falha "sem terminal (RC=$RC)" "$OUT"
 sa_sql "brc-sql-b-$SUF" -h -1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM WebRadio.sys.tables" | tr -d '[:space:]' | grep -qx 0 && ok "o banco B segue vazio depois dos abortos" || falha "o banco B foi tocado por uma restauração abortada"
 
+echo "-- caminho de FALHA do SQL (go-sqlcmd): .bak corrompido no restore.sql (VERIFYONLY) deixa o banco intacto e MULTI_USER"
+docker run --rm --user 10001:0 -v "$BAK_B:/bak" --entrypoint sh "$IMG_BKP" -c 'head -c 4096 /dev/urandom > /bak/webradio.bak'
+sa_gosql brc-sql-b-$SUF -i /sql/restore.sql
+{ [[ "$RC" != 0 ]] && grep -qE 'Msg 3(189|241|013|203)|VERIFYONLY|not a valid|damaged|incorrectly formatted' <<<"$OUT"; } && ok "restore.sql com .bak corrompido: o go-sqlcmd sai com código $RC (não 0) e o VERIFYONLY recusa" || falha "restore.sql com .bak corrompido (RC=$RC)" "$OUT"
+sa_sql "brc-sql-b-$SUF" -h -1 -W -Q "SET NOCOUNT ON; SELECT state_desc + N' ' + user_access_desc FROM sys.databases WHERE name = N'WebRadio'" | tr -d '\r' | grep -qx 'ONLINE MULTI_USER' && ok "o WebRadio do B segue ONLINE e MULTI_USER depois da recusa" || falha "o WebRadio do B ficou em estado errado depois do .bak corrompido"
+sa_sql "brc-sql-b-$SUF" -h -1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM WebRadio.sys.tables" | tr -d '[:space:]' | grep -qx 0 && ok "o banco B segue intacto (vazio, como o db-init o deixou)" || falha "o banco B foi alterado pelo .bak corrompido"
+docker run --rm --user 10001:0 -v "$BAK_B:/bak" --entrypoint sh "$IMG_BKP" -c 'rm -f /bak/webradio.bak'
+
 echo "-- restaurar.sh a partir SÓ do storage externo (o volume local do B é novo, sem repositório)"
 rodar_na_imagem restaurar.sh "$ext" "$BAK_B" rw "$LOC_B" brc-sql-b brc-minio-b "${ext_cfg[@]}" -e RESTAURAR_CONFIRMA=WebRadio
 { [[ "$RC" == 0 ]] && grep -q 'RESTAURACAO_FONTE fonte=externo' <<<"$OUT" && grep -q 'RESTAURACAO_SQL_OK' <<<"$OUT" && grep -q 'RESTAURACAO_POS_RESTORE_OK' <<<"$OUT" && grep -q 'RESTAURACAO_OK' <<<"$OUT"; } && ok "RESTAURACAO_OK a partir do repositório EXTERNO (db-init → restore.sql → pos-restore.sql → mc mirror)" || falha "restaurar.sh (RC=$RC)" "$OUT"
 log_limpo "restaurar"
+
+echo "-- caminho de FALHA do SQL (go-sqlcmd): pos-restore.sql com um usuário órfão SEM login homônimo (o db-init não rodou) aborta"
+sa_sql "brc-sql-b-$SUF" -d WebRadio -Q "CREATE LOGIN orfao_teste WITH PASSWORD = N'Orf$(openssl rand -hex 8)A1'; CREATE USER orfao_teste FOR LOGIN orfao_teste; DROP LOGIN orfao_teste;" >/dev/null
+sa_gosql brc-sql-b-$SUF -i /sql/pos-restore.sql
+{ [[ "$RC" != 0 ]] && grep -q 'orfao_teste' <<<"$OUT" && grep -qi 'não tem login' <<<"$OUT"; } && ok "pos-restore.sql com órfão sem login: o go-sqlcmd sai com código $RC (não 0) e nomeia o usuário" || falha "pos-restore.sql com órfão sem login (RC=$RC)" "$OUT"
+sa_sql "brc-sql-b-$SUF" -d WebRadio -Q "DROP USER orfao_teste" >/dev/null
+sa_gosql brc-sql-b-$SUF -i /sql/pos-restore.sql
+{ [[ "$RC" == 0 ]] && grep -q 'POS_RESTORE_OK' <<<"$OUT"; } && ok "pos-restore.sql idempotente depois (sem órfão: código 0, POS_RESTORE_OK)" || falha "pos-restore.sql depois de limpar o órfão (RC=$RC)" "$OUT"
 
 echo "== 7. conferência do que voltou"
 for u in "webradio_app:db_app_password" "webradio_migrator:db_migrator_password" "webradio_relatorio:db_relatorio_password" "svc_backup:sql_backup_senha"; do
