@@ -38,9 +38,13 @@ public sealed class EventoOutboxConfiguration : IEntityTypeConfiguration<EventoO
         builder.Property(e => e.UltimoErro)
             .HasColumnType("nvarchar(1000)");
 
+        builder.Property(e => e.ProximaTentativaEmUtc)
+            .HasColumnType("datetime2(3)");
+
+        // #25: os eventos parados (10 tentativas) saem do índice: o filtro tem que ser o MESMO texto literal da consulta do OutboxProcessor (um parâmetro no lugar do 10 impede o uso do índice filtrado).
         builder.HasIndex(e => e.Id)
-            .IncludeProperties(e => e.Tentativas)
-            .HasFilter("ProcessadoEmUtc IS NULL")
+            .IncludeProperties(e => new { e.Tentativas, e.ProximaTentativaEmUtc })
+            .HasFilter("ProcessadoEmUtc IS NULL AND Tentativas < 10")
             .HasDatabaseName("IX_EventoOutbox_Pendentes");
     }
 }

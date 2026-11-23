@@ -33,7 +33,7 @@ public class AlertaDoHarborJobTests
     /// <summary>Registra o instante em que cada evento é gravado, sem mudar o que o OutboxEf faz.</summary>
     private sealed class OutboxRegistrador(RadioDbContext db, ConcurrentQueue<(string, TimeSpan)> gravados, Stopwatch relogio) : IOutbox
     {
-        private readonly OutboxEf _real = new(db);
+        private readonly OutboxEf _real = new(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio());
         public void EnfileirarParaTodos(string tipo, object carga) => _real.EnfileirarParaTodos(tipo, carga);
         public void EnfileirarSessoesRevogadas(Guid usuarioId) => _real.EnfileirarSessoesRevogadas(usuarioId);
         public void EnfileirarParaGrupos(IReadOnlyCollection<string> grupos, string tipo, object carga)

@@ -101,7 +101,7 @@ public class CredencialTransmissaoSqlTests(BancoDeTeste banco) : IClassFixture<B
         s.AddScoped<AlteracaoDeUsuario>(x =>
         {
             var db = x.GetRequiredService<RadioDbContext>();
-            return new AlteracaoDeUsuario(new AlterarUsuarioHandler(db, new TransacaoComTrava(db), _c.NovoRefresh(db), new OutboxEf(db),
+            return new AlteracaoDeUsuario(new AlterarUsuarioHandler(db, new TransacaoComTrava(db), _c.NovoRefresh(db), new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()),
                 _c.NovaVersaoDeSeguranca(db), _c.Relogio));
         });
         return s.BuildServiceProvider();

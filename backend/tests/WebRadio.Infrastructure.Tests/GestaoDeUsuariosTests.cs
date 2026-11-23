@@ -204,7 +204,7 @@ public class GestaoDeUsuariosTests(BancoDeTeste banco) : IClassFixture<BancoDeTe
 
         // Outra sessão altera a linha depois de o handler tê-la lido: o SaveChanges perde no RowVersion.
         var handler = new TrocarSenhaHandler(db, new SenhaHasherQueAlteraALinha(c, usuario.Id), c.NovoRefresh(db), c.ThrottleReal(),
-            c.NovaVersaoDeSeguranca(db), new OutboxEf(db), c.Relogio);
+            c.NovaVersaoDeSeguranca(db), new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), c.Relogio);
         await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() =>
             handler.Handle(new TrocarSenhaCommand(usuario.Id, Cenario.Senha, "outra-senha-bem-longa-456", null, Cenario.IpA), default));
 

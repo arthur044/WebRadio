@@ -56,7 +56,7 @@ public class KindUtcTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
             var programa = new Programa(Guid.CreateVersion7(), "Cancelado", null, locutor.Id, inicio, inicio.AddHours(1), agora);
             programa.Cancelar(agora); // CanceladoEmUtc: datetime2(3) anulável
             db.Programas.Add(programa);
-            db.EventosOutbox.Add(new EventoOutbox("Teste", "{\"grupos\":null,\"dados\":{}}"));
+            db.EventosOutbox.Add(new EventoOutbox("Teste", "{\"grupos\":null,\"dados\":{}}", DateTime.UtcNow));
             db.RefreshTokens.Add(new RefreshToken(Guid.CreateVersion7(), locutor.Id, new byte[32], Guid.NewGuid(), agora, TimeSpan.FromDays(7), null));
             await db.SaveChangesAsync();
         }

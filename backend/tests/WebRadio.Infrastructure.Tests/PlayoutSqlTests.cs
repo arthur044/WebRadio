@@ -183,7 +183,7 @@ public class PlayoutSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         Task Evento()
         {
             var db = _c.NovoDb();
-            var handler = new RegistrarEventoDoPlayoutHandler(barreira, new OutboxEf(db), db, new ConsultasDePedidos(db), _c.Relogio);
+            var handler = new RegistrarEventoDoPlayoutHandler(barreira, new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), db, new ConsultasDePedidos(db), _c.Relogio);
             return Task.Run(async () =>
             {
                 await using (db) await handler.Handle(new RegistrarEventoDoPlayoutCommand("FaixaIniciada", m.Id, p.Id, "Aurora", "Banda", DateTime.UtcNow), default);

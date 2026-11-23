@@ -732,6 +732,9 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                     b.Property<DateTime?>("ProcessadoEmUtc")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<DateTime?>("ProximaTentativaEmUtc")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<short>("Tentativas")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("smallint")
@@ -749,9 +752,9 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
 
                     b.HasIndex("Id")
                         .HasDatabaseName("IX_EventoOutbox_Pendentes")
-                        .HasFilter("ProcessadoEmUtc IS NULL");
+                        .HasFilter("ProcessadoEmUtc IS NULL AND Tentativas < 10");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("Id"), new[] { "Tentativas" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("Id"), new[] { "Tentativas", "ProximaTentativaEmUtc" });
 
                     b.ToTable("EventoOutbox", "infra", t =>
                         {

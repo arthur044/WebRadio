@@ -8,7 +8,7 @@ namespace WebRadio.Infrastructure.Persistencia.Outbox;
 /// Só adiciona a linha ao DbContext do escopo: quem grava é o <c>SaveChanges</c> do handler, na mesma transação da mudança
 /// de estado (D22). Sem SaveChanges, o evento não existe.
 /// </summary>
-public sealed class OutboxEf(RadioDbContext db) : IOutbox
+public sealed class OutboxEf(RadioDbContext db, IClock clock) : IOutbox
 {
     /// <summary>O mesmo formato da API (camelCase, enum como string): o payload vai como está para os clientes do hub.</summary>
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
@@ -48,5 +48,5 @@ public sealed class OutboxEf(RadioDbContext db) : IOutbox
     // O destino viaja junto com os dados: o OutboxProcessor não precisa conhecer cada tipo de evento.
     // "grupos": null = todos; lista preenchida = só esses grupos. Lista vazia nunca é gravada (e, se aparecer, é erro).
     private void Gravar(string tipo, object carga, string[]? grupos) =>
-        db.EventosOutbox.Add(new EventoOutbox(tipo, JsonSerializer.Serialize(new { grupos, dados = carga }, Json)));
+        db.EventosOutbox.Add(new EventoOutbox(tipo, JsonSerializer.Serialize(new { grupos, dados = carga }, Json), clock.UtcNow));
 }

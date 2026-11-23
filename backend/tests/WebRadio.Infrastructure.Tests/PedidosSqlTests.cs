@@ -206,7 +206,7 @@ public class PedidosSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
     {
         var db = _c.NovoDb();
         estado = new EstadoDoThrottle { UsarFallbackSql = true };
-        return new CriarPedidoHandler(db, new TransacaoComTrava(db), new ConsultasDePedidos(db), Identidade(), new IpHasher(_c.Pepper), new OutboxEf(db), _c.Relogio, estado,
+        return new CriarPedidoHandler(db, new TransacaoComTrava(db), new ConsultasDePedidos(db), Identidade(), new IpHasher(_c.Pepper), new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), _c.Relogio, estado,
             Options.Create(new PedidosOptions { LimitePorIp = limitePorIp }));
     }
 
@@ -309,7 +309,7 @@ public class PedidosSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
             var db = _c.NovoDb();
             try
             {
-                await new AprovarPedidoHandler(db, new OutboxEf(db), _c.Relogio).Handle(new AprovarPedidoCommand(pedido.Id, m, null), default);
+                await new AprovarPedidoHandler(db, new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), _c.Relogio).Handle(new AprovarPedidoCommand(pedido.Id, m, null), default);
                 return true;
             }
             catch (PedidoJaModeradoException)
@@ -348,8 +348,8 @@ public class PedidosSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         }
 
         var r = await Task.WhenAll(
-            Tentar(db => new AprovarPedidoHandler(db, new OutboxEf(db), _c.Relogio).Handle(new AprovarPedidoCommand(pedido.Id, m1, null), default)),
-            Tentar(db => new RejeitarPedidoHandler(db, new OutboxEf(db), _c.Relogio).Handle(new RejeitarPedidoCommand(pedido.Id, m2, "Fora do estilo"), default)));
+            Tentar(db => new AprovarPedidoHandler(db, new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), _c.Relogio).Handle(new AprovarPedidoCommand(pedido.Id, m1, null), default)),
+            Tentar(db => new RejeitarPedidoHandler(db, new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), _c.Relogio).Handle(new RejeitarPedidoCommand(pedido.Id, m2, "Fora do estilo"), default)));
 
         Assert.Equal(1, r.Count(x => x));
     }

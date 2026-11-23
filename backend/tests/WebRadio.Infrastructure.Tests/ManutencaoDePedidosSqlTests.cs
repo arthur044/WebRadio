@@ -191,11 +191,11 @@ public class ManutencaoDePedidosSqlTests(BancoDeTeste banco) : IClassFixture<Ban
         await LimparAsync();
         await using (var db = banco.CriarContexto())
         {
-            var antigoEntregue = new EventoOutbox("PedidoCriado", "{}");
-            var antigoParado = new EventoOutbox("PedidoModerado", "{}");
-            var antigoTocado = new EventoOutbox("PedidoTocado", "{}");
-            var recente = new EventoOutbox("PedidoCriado", "{}");
-            var outroTipoAntigoParado = new EventoOutbox("TocandoAgora", "{}");
+            var antigoEntregue = new EventoOutbox("PedidoCriado", "{}", DateTime.UtcNow);
+            var antigoParado = new EventoOutbox("PedidoModerado", "{}", DateTime.UtcNow);
+            var antigoTocado = new EventoOutbox("PedidoTocado", "{}", DateTime.UtcNow);
+            var recente = new EventoOutbox("PedidoCriado", "{}", DateTime.UtcNow);
+            var outroTipoAntigoParado = new EventoOutbox("TocandoAgora", "{}", DateTime.UtcNow);
             db.EventosOutbox.AddRange(antigoEntregue, antigoParado, antigoTocado, recente, outroTipoAntigoParado);
             await db.SaveChangesAsync();
             await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE infra.EventoOutbox SET CriadoEmUtc = DATEADD(DAY, -31, SYSUTCDATETIME()), ProcessadoEmUtc = DATEADD(DAY, -30, SYSUTCDATETIME()) WHERE Id = {antigoEntregue.Id}");

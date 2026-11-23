@@ -32,7 +32,7 @@ public sealed class FaixaIniciadaTests
         public TocandoAgoraFalso Tocando { get; } = new();
         public ConsultasDePedidosFalsas Consultas { get; } = new() { Programa = Guid.NewGuid() };
 
-        public RegistrarEventoDoPlayoutHandler Handler => new(Tocando, new OutboxEf(F.Db), F.Db, Consultas, F.Relogio);
+        public RegistrarEventoDoPlayoutHandler Handler => new(Tocando, new OutboxEf(F.Db, F.Relogio), F.Db, Consultas, F.Relogio);
 
         public RegistrarEventoDoPlayoutCommand Comando(Guid? midiaId, Guid? pedidoId = null, string? titulo = "Aurora") =>
             new("FaixaIniciada", midiaId, pedidoId, titulo, "Banda", F.Relogio.UtcNow);
@@ -160,7 +160,7 @@ public sealed class FaixaIniciadaTests
         var c = new Cena();
         var m = c.F.SemearAprovada();
         var p = c.PedidoAprovado(m.Id);
-        var handler = new RegistrarEventoDoPlayoutHandler(c.Tocando, new OutboxEf(c.F.Db), new DbQuePerdeOTocado(c.F.Db, chamadaQueFalha: 2), c.Consultas, c.F.Relogio);
+        var handler = new RegistrarEventoDoPlayoutHandler(c.Tocando, new OutboxEf(c.F.Db, c.F.Relogio), new DbQuePerdeOTocado(c.F.Db, chamadaQueFalha: 2), c.Consultas, c.F.Relogio);
 
         await handler.Handle(c.Comando(m.Id, p.Id), default); // não lança: a perda da corrida é esperada
 

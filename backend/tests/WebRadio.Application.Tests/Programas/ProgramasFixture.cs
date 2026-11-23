@@ -39,9 +39,9 @@ public sealed class ProgramasFixture
 
     public EditarProgramaHandler Editar => new(Db, new TransacaoComTrava(Db), Relogio);
 
-    public CancelarProgramaHandler Cancelar => new(Db, new TransacaoComTrava(Db), new OutboxEf(Db), Relogio);
+    public CancelarProgramaHandler Cancelar => new(Db, new TransacaoComTrava(Db), new OutboxEf(Db, Relogio), Relogio);
 
-    public EncerrarProgramaHandler Encerrar => new(Db, new TransacaoComTrava(Db), new OutboxEf(Db), Relogio);
+    public EncerrarProgramaHandler Encerrar => new(Db, new TransacaoComTrava(Db), new OutboxEf(Db, Relogio), Relogio);
 
     public ListarProgramasHandler Listar => new(Db);
 
