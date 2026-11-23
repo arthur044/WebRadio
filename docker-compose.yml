@@ -9,7 +9,8 @@
 #   infra/scripts/gerar-segredos.sh dev
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait
 #
-# Regras (04 §Serviços, D19, S-B08): imagem com digest fixado; usuário não root; cap_drop ALL;
+# Regras (04 §Serviços, D19, S-B08): imagem com digest fixado; usuário não root (EXCEÇÃO ACEITA: o `edge` roda como root DENTRO do contêiner, E5-D9: sem nenhuma capability além de
+# NET_BIND_SERVICE, rootfs só leitura, escrita só nos volumes edge-data e edge-config; o volume nomeado nasce de root e o Caddy precisa ser o dono do certificado); cap_drop ALL;
 # no-new-privileges; read_only + tmpfs; mem/pids limit; segredos SÓ por arquivo em /run/secrets e
 # cada serviço recebe só os seus (nada de env_file compartilhado); só o `edge` (Caddy) publica portas: 80 e 443 (E5-D1).
 # Redes: edge (Caddy ↔ web, subnet FIXA = EDGE_SUBNET) · borda (harbor-borda) · app (web ↔ api:8080, subnet FIXA = Rede__SubnetApp) · dados (interna) ·

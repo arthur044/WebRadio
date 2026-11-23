@@ -112,6 +112,23 @@ grep -q 'http.log.access' <<<"$log_edge" && ok "o Caddy registra o acesso" || fa
 grep -qF "$SEGREDO" <<<"$log_edge" && falha "a query string aparece no log do Caddy" || ok "sem query string no log do Caddy"
 if grep -qE "\"(remote_ip|client_ip)\":\"($IP_A|$IP_B)\"" <<<"$log_edge" || grep -qF "$IP_A" <<<"$log_edge"; then falha "o IP inteiro do cliente aparece no log do Caddy"; else ok "IP mascarado (/24) no log do Caddy"; fi
 grep -q '"request":{[^}]*"headers"' <<<"$log_edge" && falha "cabeçalhos da requisição no log do Caddy" || ok "sem cabeçalhos da requisição no log do Caddy"
+# O log de ERRO não se provoca de fora (nenhum erro de upstream sem derrubar o web): prova-se pela configuração que o Caddy realmente carregou. Um único logger, o `default`, atende o acesso E o erro
+# (o servidor aponta para ele), e é ele que leva o filtro: query fora da URI, IP mascarado, sem cabeçalhos, e o http.stdlib (IP inteiro no texto) excluído.
+if "${COMPOSE[@]}" exec -T edge caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null | python3 -I -c '
+import json, sys
+d = json.load(sys.stdin)
+logs = d["logging"]["logs"]
+default = logs["default"]
+campos = default["encoder"]["fields"]
+servidor = next(iter(d["apps"]["http"]["servers"].values()))
+assert list(logs) == ["default"], "há outro logger além do default"
+assert default["encoder"]["format"] == "filter"
+assert campos["request>uri"]["filter"] == "regexp" and campos["request>uri"]["regexp"] == "\\?.*"
+assert campos["request>remote_ip"]["filter"] == "ip_mask" and campos["request>client_ip"]["filter"] == "ip_mask"
+assert campos["request>headers"]["filter"] == "delete"
+assert default["exclude"] == ["http.stdlib"]
+assert all(v == [""] for v in servidor["logs"]["logger_names"].values()), "o servidor não usa o logger default"
+'; then ok "o logger default (acesso e erro) carrega o filtro: sem query, IP mascarado, sem cabeçalhos, sem http.stdlib"; else falha "a configuração de log carregada pelo Caddy não tem o filtro esperado"; fi
 
 echo
 if [[ $falhas -gt 0 ]]; then echo "smoke-borda: $falhas falha(s)."; exit 1; fi

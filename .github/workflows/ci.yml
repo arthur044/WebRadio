@@ -433,6 +433,12 @@ jobs:
           # (nginx, a única imagem publicada para fora) também é imagem própria agora e está no passo estrito acima.
           # E4-F06: o passo bloqueia POR PADRÃO (hoje sqlserver, redis, minio e clamav/clamav); só as imagens listadas aqui são informativas (o alpine do minio-init, 0 CRITICAL).
           informativas="alpine"
+          # E5-F02 (Sentinel, MÉDIO no #168): o Caddy é o ÚNICO contêiner exposto à internet, então HIGH corrigível também QUEBRA o job para ele (como o harbor-borda, que é imagem própria).
+          # Exceção NOMINAL, aceita em 2026-11-23: CVE-2026-78661 (golang.org/x/net/html 0.60.0, DoS por texto quadrático no PARSER de HTML; corrigido em 0.62.0, sem imagem do Caddy que o traga:
+          # a 2.11.9-alpine é a mais nova). Não é alcançável aqui: o Caddyfile só usa reverse_proxy, header, log e tls; nenhum módulo que lê HTML de terceiros (templates, file_server browse) está ligado,
+          # e o reverse_proxy não interpreta o corpo do upstream. Remover a exceção quando sair uma imagem com x/net >= 0.62.0 (o Dependabot avisa o digest).
+          bloqueia_alto="caddy"
+          aceitos_caddy="CVE-2026-78661"
           {
             echo "### Imagens de terceiros do compose (com correção disponível)"
             echo "| Imagem | HIGH | CRITICAL | CRITICAL quebra o job |"
@@ -443,8 +449,9 @@ jobs:
           for imagem in $(grep -hoE 'image: [^ ]+@sha256:[0-9a-f]+' docker-compose.yml | awk '{print $2}' | sort -u); do
             nome="${imagem%%@*}"
             nome="${nome%%:*}"
+            ignorar=""; [ "${nome}" = "caddy" ] && ignorar="${aceitos_caddy}"
             contagem="$(trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --format json "${imagem}" 2>/dev/null \
-              | python3 -c "import json,sys; d=json.load(sys.stdin); v=[x for r in d.get('Results',[]) for x in (r.get('Vulnerabilities') or [])]; print(sum(x['Severity']=='HIGH' for x in v), sum(x['Severity']=='CRITICAL' for x in v))" || echo "? ?")"
+              | IGNORAR="${ignorar}" python3 -c "import json,os,sys; d=json.load(sys.stdin); ign=set(filter(None, os.environ.get('IGNORAR','').split(','))); v=[x for r in d.get('Results',[]) for x in (r.get('Vulnerabilities') or []) if x['VulnerabilityID'] not in ign]; print(sum(x['Severity']=='HIGH' for x in v), sum(x['Severity']=='CRITICAL' for x in v))" || echo "? ?")"
             read -r altas criticas <<<"${contagem}"
             case " ${informativas} " in *" ${nome} "*) bloqueia="não" ;; *) bloqueia="sim" ;; esac
             echo "| \`${nome}\` | ${altas} | ${criticas} | ${bloqueia} |" >> "$GITHUB_STEP_SUMMARY"
@@ -457,6 +464,12 @@ jobs:
             if [ "${altas}" != "0" ] || [ "${criticas}" != "0" ]; then
               echo "::warning::${nome}: ${altas} HIGH, ${criticas} CRITICAL com correção disponível (imagem de terceiros, sem build aqui)."
             fi
+            case " ${bloqueia_alto} " in *" ${nome} "*)
+              if [ "${altas}" != "0" ]; then
+                echo "::error::${nome}: ${altas} HIGH com correção disponível (imagem exposta à internet: HIGH também quebra; exceção só para ${ignorar:-nenhuma}). Troque o digest no docker-compose.yml."
+                quebradas=$((quebradas + 1))
+              fi ;;
+            esac
             if [ "${bloqueia}" = "sim" ] && [ "${criticas}" != "0" ]; then
               echo "::error::${nome}: ${criticas} CRITICAL com correção disponível. Troque o digest no docker-compose.yml."
               quebradas=$((quebradas + 1))

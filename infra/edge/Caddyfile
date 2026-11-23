@@ -46,6 +46,8 @@
 
 	# HSTS só aqui (o nginx não o emite, E5-D1): 86400 no primeiro deploy, 31536000 depois de uma semana sem problema (runbook). Sem includeSubDomains nem preload na v1.
 	header Strict-Transport-Security "max-age={$HSTS_MAX_AGE:86400}"
+	# Sem o `Server: nginx` do upstream na resposta (não revela o gateway nem a versão da linha).
+	header -Server
 
 	# flush_interval -1: o stream (/stream/radio.mp3) e o SignalR (/hubs/) não podem ficar em buffer. O Caddy NÃO confia em X-Forwarded-For de fora (sem
 	# trusted_proxies): ele o sobrescreve com o IP do socket, e é isso que o nginx lê (E5-D2). O Host é fixo no domínio: um `Host: dominio:443` não pode cair no
