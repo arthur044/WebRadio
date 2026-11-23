@@ -398,6 +398,12 @@ services:
   # Restauração manual (E5-D13): `docker compose stop api worker` e depois `docker compose --profile restore run --rm restaurar`. É o ÚNICO serviço, além do db-init e do minio-init, com o `sa` e a
   # credencial ROOT do MinIO (exceção aceita no 05 S-A04: o svc-backup é só leitura e a volta da mídia precisa gravar em midia e publico). Mesmo endurecimento e redes do `backup`.
   restaurar:
+    # Mesmo build e mesma imagem do `backup`: num servidor NOVO a imagem ainda não existe, e sem `build:` o `run restaurar` falharia (pull de webradio-backup:local, que só existe aqui).
+    build:
+      context: .
+      dockerfile: infra/backup/Dockerfile
+      additional_contexts:
+        mc-img: "service:minio-init"
     image: webradio-backup:local
     <<: *one-shot
     profiles: [restore]

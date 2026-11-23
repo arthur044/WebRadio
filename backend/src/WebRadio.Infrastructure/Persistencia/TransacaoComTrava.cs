@@ -13,16 +13,16 @@ public sealed class TransacaoComTrava(RadioDbContext db) : ITransacaoComTrava
 {
     public const int TimeoutDaTravaMs = 15_000;
 
+    /// <summary>Espera da trava quando quem chama não define uma (a sobrecarga sem <c>espera</c>). Configurável para o teste não esperar 15 s.</summary>
+    public TimeSpan EsperaPadrao { get; init; } = TimeSpan.FromMilliseconds(TimeoutDaTravaMs);
+
     public Task<T> ExecutarAsync<T>(string recurso, Func<CancellationToken, Task<T>> acao, CancellationToken ct) =>
-        ExecutarAsync([recurso], TimeSpan.FromMilliseconds(TimeoutDaTravaMs), acao, ct, lancarSeOcupada: false);
+        ExecutarAsync([recurso], EsperaPadrao, acao, ct);
 
     public Task<T> ExecutarAsync<T>(string recurso, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct) =>
-        ExecutarAsync([recurso], espera, acao, ct, lancarSeOcupada: true);
+        ExecutarAsync([recurso], espera, acao, ct);
 
-    public Task<T> ExecutarAsync<T>(IReadOnlyList<string> recursos, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct) =>
-        ExecutarAsync(recursos, espera, acao, ct, lancarSeOcupada: true);
-
-    private async Task<T> ExecutarAsync<T>(IReadOnlyList<string> recursos, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct, bool lancarSeOcupada)
+    public async Task<T> ExecutarAsync<T>(IReadOnlyList<string> recursos, TimeSpan espera, Func<CancellationToken, Task<T>> acao, CancellationToken ct)
     {
         // Ordem ordinal fixa: sem ela, A pede (x, y) e B pede (y, x) e as duas esperariam uma à outra.
         var ordenados = recursos.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
@@ -36,7 +36,7 @@ public sealed class TransacaoComTrava(RadioDbContext db) : ITransacaoComTrava
                 db.ChangeTracker.Clear();
                 await using var tx = await db.Database.BeginTransactionAsync(ct2);
                 foreach (var recurso in ordenados)
-                    await AdquirirAsync(db, recurso, (int)espera.TotalMilliseconds, lancarSeOcupada, ct2);
+                    await AdquirirAsync(db, recurso, (int)espera.TotalMilliseconds, ct2);
                 var resultado = await acao(ct2);
                 await tx.CommitAsync(ct2);
                 return resultado;
@@ -52,20 +52,22 @@ public sealed class TransacaoComTrava(RadioDbContext db) : ITransacaoComTrava
 
     /// <summary>Exige uma transação aberta em <paramref name="db"/>. O recurso vai como parâmetro, nunca concatenado.</summary>
     internal static Task AdquirirAsync(RadioDbContext db, string recurso, CancellationToken ct) =>
-        AdquirirAsync(db, recurso, TimeoutDaTravaMs, lancarSeOcupada: false, ct);
+        AdquirirAsync(db, recurso, TimeoutDaTravaMs, ct);
 
     /// <summary>
-    /// <c>sp_getapplock</c> devolve -1 no estouro da espera, -2 se cancelado e -3 se vítima de deadlock. Com <paramref name="lancarSeOcupada"/>,
-    /// o -1 vira <see cref="TravaOcupadaException"/> (a espera curta é decisão de quem chama); os demais continuam erro de SQL.
+    /// <c>sp_getapplock</c> devolve -1 no estouro da espera, -2 se cancelado e -3 se vítima de deadlock. O -1 vira SEMPRE <see cref="TravaOcupadaException"/> (quem pediu uma espera curta a trata;
+    /// quem não trata deixa subir e a Api responde 503 + Retry-After, nunca 500, #25); o -2 é o cancelamento de quem chamou; o -3 (e qualquer outro código negativo) vira
+    /// <see cref="ServidorOcupadoException"/>, também 503: tentar de novo resolve.
     /// </summary>
-    private static async Task AdquirirAsync(RadioDbContext db, string recurso, int esperaMs, bool lancarSeOcupada, CancellationToken ct)
+    private static async Task AdquirirAsync(RadioDbContext db, string recurso, int esperaMs, CancellationToken ct)
     {
         var resultado = (await db.Database.SqlQuery<int>(
             $"DECLARE @r int; EXEC @r = sp_getapplock @Resource = {recurso}, @LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = {esperaMs}; SELECT @r AS [Value];")
             .ToListAsync(ct)).Single();
         if (resultado >= 0) return;
-        if (lancarSeOcupada && resultado == -1) throw new TravaOcupadaException();
-        throw new InvalidOperationException("applock indisponível");
+        if (resultado == -1) throw new TravaOcupadaException();
+        ct.ThrowIfCancellationRequested();
+        throw new ServidorOcupadoException();
     }
 }
 
