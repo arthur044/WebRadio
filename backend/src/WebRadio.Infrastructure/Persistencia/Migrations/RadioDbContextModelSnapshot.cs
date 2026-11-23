@@ -17,7 +17,7 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.14")
+                .HasAnnotation("ProductVersion", "10.0.15")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -487,9 +487,6 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                     b.HasKey("Id")
                         .HasName("PK_ArquivoMidia");
 
-                    b.HasIndex("EnviadoPorUsuarioId")
-                        .HasDatabaseName("IX_ArquivoMidia_EnviadoPor");
-
                     b.HasIndex("HashOriginalSHA256")
                         .HasDatabaseName("IX_ArquivoMidia_HashOriginal")
                         .HasFilter("HashOriginalSHA256 IS NOT NULL");
@@ -502,6 +499,11 @@ namespace WebRadio.Infrastructure.Persistencia.Migrations
                     b.HasIndex("Bucket", "ChaveStorage")
                         .IsUnique()
                         .HasDatabaseName("UX_ArquivoMidia_Objeto");
+
+                    b.HasIndex("EnviadoPorUsuarioId", "DataUploadUtc")
+                        .HasDatabaseName("IX_ArquivoMidia_EnviadoPor");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("EnviadoPorUsuarioId", "DataUploadUtc"), new[] { "StatusSanitizacao", "TamanhoBytes", "UploadExpiraEmUtc" });
 
                     b.HasIndex("StatusSanitizacao", "DataUploadUtc")
                         .HasDatabaseName("IX_ArquivoMidia_FilaSanitizacao")
