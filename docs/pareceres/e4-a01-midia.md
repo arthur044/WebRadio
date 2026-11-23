@@ -7,12 +7,12 @@
 
 **Pronto, com uma decisão para o Forge e uma para o Nexus.**
 
-1. **Sorteio da rotação (E4-D4): trocar para "uma entre as K = 5 primeiras candidatas a partir de `@r`".** A chave fixa, medida no código real e com a janela de repetição ativa, passa de 3× a média a partir de 300 faixas e chega a 12,8× em 50 mil (seção 5). Com K = 5 o pior caso fica em 2,1× (300), 2,6× (1.000) e 3,6× (50 mil), e a chamada completa da `proxima` custa 53 leituras lógicas numa janela realista (63 na janela do dataset do `08`): poucas leituras acima do critério de 50 (~1 ms; o `ORDER BY NEWID()` lia 786). K = 10 daria 2,7× em 50 mil, mas 93 a 113 leituras. O texto das consultas está na seção 5; a mudança é do Forge, no `FilaDoPlayout.cs`.
+1. **Sorteio da rotação (E4-D4): trocar para "uma entre as K = 5 primeiras candidatas a partir de `@r`".** A chave fixa, medida no código real e com a janela de repetição ativa, passa de 3× a média a partir de 300 faixas e chega a 12,8× em 50 mil (seção 5). Com K = 5 o pior caso fica em 2,1× (300), 2,6× (1.000) e 3,6× (50 mil), e a chamada completa da `proxima` custa 53 a 58 leituras lógicas numa janela realista (63 a 68 na do dataset do `08`): poucas leituras acima do critério de 50 (~1 ms; o `ORDER BY NEWID()` lia 786). K = 10 daria 2,7× em 50 mil, mas 93 a 123 leituras. O texto das consultas está na seção 5; a mudança é do Forge, no `FilaDoPlayout.cs`.
 2. **Limites do S-M06 pelo SQL: um índice novo** (`IX_ArquivoMidia_EnviadoPor` passa a `(EnviadoPorUsuarioId, DataUploadUtc) INCLUDE (StatusSanitizacao, TamanhoBytes, UploadExpiraEmUtc)`). Sem ele, cada `POST /midias/uploads` lia a tabela inteira (1.116 a 2.375 leituras, de qualquer usuário); com ele, 3 a 13. Migration e `03` neste PR; o `ddl-check` passa (228 itens).
 3. **Biblioteca (`GET /midias`), captura da sanitização e `proxima`: nada a mudar.** A biblioteca custa ~2.400 leituras por página com 50 mil mídias (45 a 96 ms de CPU), e a busca por texto ~2.400 leituras (80 a 190 ms): aceito, com o gatilho de revisão da seção 3. Um índice para a listagem foi testado e **rejeitado** (seção 3).
 4. **DoD 9 (`rel.usp_MaisTocadas`)** repetido com o dataset final: igual ao parecer do A02 (seção 6).
 
-Critério do `08` ("rotação abaixo de 50 leituras lógicas por chamada no código real"): **cumprido com a chave fixa (K = 1): 21 a 23 leituras.** Com K = 5, que recomendo, fica em **53 (janela realista) a 63 (janela do dataset)**: passa do 50 por poucas leituras, porque o custo é ~8 a 10 leituras por candidata. Peço ao Nexus que aceite (a intenção do critério, não varrer a biblioteca, está atendida) ou fixe K = 3 (37 a 43 leituras por chamada, mas 5,2× de viés em 50 mil; K = 4: 45 a 53 leituras e 4,4×).
+Critério do `08` ("rotação abaixo de 50 leituras lógicas por chamada no código real"): **cumprido com a chave fixa (K = 1): 21 a 23 leituras.** Com K = 5, que recomendo, fica em **53 a 58 (janela realista) e 63 a 68 (janela do dataset)**: passa do 50 por poucas leituras, porque o custo é ~8 a 10 leituras por candidata. Peço ao Nexus que aceite (a intenção do critério, não varrer a biblioteca, está atendida) ou fixe K = 3 (37 a 43 leituras por chamada, mas 5,2× de viés em 50 mil; K = 4: 45 a 53 leituras e 4,4×).
 
 ## 1. Como medi
 
@@ -111,13 +111,13 @@ Critério de 50: ok. Pior caso artificial (300 comerciais ativos, todos tocados 
 
   | K | janela realista (28 linhas) | janela do dataset (326 linhas) |
   |---|---|---|
-  | 1 | 15 | 17 |
+  | 1 | 15 a 16 | 17 a 18 |
   | 3 | 31 | 37 |
   | 4 | 39 | 47 |
-  | 5 | **47** | **57** |
-  | 10 | 87 | 107 |
+  | 5 | **47 a 52** | **57 a 62** |
+  | 10 | 87 a 97 | 107 a 117 |
 
-  Chamada completa (pedido 3 + busca + carga 3): K = 1: 21 a 23; K = 3: 37 a 43; K = 4: 45 a 53; **K = 5: 53 a 63**; K = 10: 93 a 113. Tentei uma variante com `OPTION (HASH JOIN)` para o custo não crescer com K: pior (352 leituras, varre o índice da rotação). O *nested loops* do hint `INDEX(...)` é o plano certo. K = 5 leva o viés a 3,6× em 50 mil e a ≤ 2,6× até mil faixas; K = 3 e 4 cabem no critério de 50 leituras, mas deixam 5,2× e 4,4× em 50 mil. A escolha é do Nexus (seção 7); recomendo K = 5.
+  Chamada completa (pedido 3 + busca + carga 3): K = 1: 21 a 24; K = 3: 37 a 43; K = 4: 45 a 53; **K = 5: 53 a 68**; K = 10: 93 a 123. (Os intervalos são de duas cargas do dataset, a de trabalho e a do `rodar-e4-a01b.sh` do zero: o layout físico muda ~10% de uma carga para outra.) Tentei uma variante com `OPTION (HASH JOIN)` para o custo não crescer com K: pior (352 leituras, varre o índice da rotação). O *nested loops* do hint `INDEX(...)` é o plano certo. K = 5 leva o viés a 3,6× em 50 mil e a ≤ 2,6× até mil faixas; K = 3 e 4 cabem no critério de 50 leituras, mas deixam 5,2× e 4,4× em 50 mil. A escolha é do Nexus (seção 7); recomendo K = 5.
 
 ### 5.3 O que o Forge muda (`FilaDoPlayout.cs`, `SortearForaDaJanelaAsync`)
 
@@ -153,5 +153,5 @@ Sem mudança: o *seek* em `IX_Reproducao_Periodo` nos três períodos, e o custo
 
 - **Não medi** as consultas da limpeza (`LimpezaDeMidia`) e do lease vencido do Worker: não estão na lista do A01b, rodam em lote e com `StatusSanitizacao` constante, na mesma família da captura.
 - **Do Forge:** o K = 5 (seção 5.3). Não proponho teste de plano; os números deste parecer são a referência (se alguém parametrizar `StatusSanitizacao` na rotação ou na captura, a leitura salta de 13 para ~900, e o `rodar-e4-a01b.sh` com o texto novo mostra isso).
-- **Para o Nexus decidir:** (1) K = 5 na v1 (53 a 63 leituras por chamada, viés máximo 3,6× em 50 mil), K = 3 ou aceitar o viés da chave fixa e documentar (12,8× em 50 mil); recomendo K = 5 e aceitar as leituras acima de 50. (2) O gatilho da biblioteca (seção 3) no `05` ou no `09` como risco aceito com número.
+- **Para o Nexus decidir:** (1) K = 5 na v1 (53 a 68 leituras por chamada, viés máximo 3,6× em 50 mil), K = 3 ou aceitar o viés da chave fixa e documentar (12,8× em 50 mil); recomendo K = 5 e aceitar as leituras acima de 50. (2) O gatilho da biblioteca (seção 3) no `05` ou no `09` como risco aceito com número.
 - **Reproduzir:** `infra/perf/rodar-e4-a01b.sh [pasta]` (contêiner descartável; `MANTER=1` para inspecionar; `PULAR_SIM=1` pula a simulação, a parte longa: ~13 min). Carga + medição "antes" + índice + medição "depois": ~4 min.
