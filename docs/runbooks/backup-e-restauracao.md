@@ -58,6 +58,17 @@ O `restaurar` faz, nesta ordem (E5-D13): **trava** (aborta se a api ou o worker 
 
 Depois, confira: login de um Admin, a grade, a biblioteca com pré-escuta e uma música da rotação tocando (DoD 5).
 
+## Depois de um incidente (invasão suspeita): restaure o snapshot ANTERIOR à suspeita
+
+Se a restauração é por causa de uma invasão ou de uma suspeita dela, **não** use o `latest`. Um `.bak` feito **depois** da invasão pode trazer papel, permissão ou usuário plantados dentro do banco, e o `pos-restore.sql` só barra o que ele conhece (usuário órfão sem login; ele não audita papéis nem permissões). Escolha o último snapshot **de antes** da data em que a suspeita começa:
+
+```bash
+docker compose --profile restore run --rm --no-deps --entrypoint restic restaurar -r /backup/repo --password-file /run/secrets/restic_senha snapshots    # ou o repositório externo
+docker compose --profile restore run --rm -e RESTAURAR_SNAPSHOT=<id-do-snapshot-anterior> restaurar
+```
+
+E, no servidor que foi invadido, **não reaproveite os segredos**: gere de novo as senhas dos logins do SQL, as chaves do MinIO e a chave do JWT ([`rotacao-jwt-signing-key.md`](rotacao-jwt-signing-key.md)); a `restic_senha` e as chaves `backup_s3_*` entram na avaliação do Sentinel (quem tomou o servidor leu os arquivos de `secrets/`). A cópia externa com versionamento (E5-D11) é o que garante que ainda existe um snapshot anterior. Este aviso também vale para o guia de deploy (E5-L01).
+
 ## Teste de restauração mensal
 
 Uma vez por mês, no servidor em produção, **sem** parar nada: restaura o último `.bak` num banco temporário `WebRadio_verif`, roda `DBCC CHECKDB`, conta as linhas e apaga o temporário:
