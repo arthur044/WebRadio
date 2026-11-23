@@ -134,7 +134,7 @@ public sealed class ArquivoMidiaConfiguration : IEntityTypeConfiguration<Arquivo
             .HasDatabaseName("IX_ArquivoMidia_FilaSanitizacao");
 
         // E4-A01b: os limites do S-M06 pelo SQL (abertos, 20/h, bytes/h e a espera, UploadDeMidia.cs) filtram por usuário e pela hora. Com o índice só por
-        // usuário, cada POST lia a tabela inteira (2.375 páginas com 50 mil mídias); com a data na chave e as colunas na folha, 3 a 13 páginas.
+        // usuário, cada POST lia a tabela inteira (2.375 páginas com 50 mil mídias); com a data na chave e as colunas na folha, 3 a 12 páginas (155 para o Admin com 10.000 envios no S1, que lê o histórico do usuário).
         builder.HasIndex(m => new { m.EnviadoPorUsuarioId, m.DataUploadUtc })
             .IncludeProperties(m => new { m.StatusSanitizacao, m.TamanhoBytes, m.UploadExpiraEmUtc })
             .HasDatabaseName("IX_ArquivoMidia_EnviadoPor");

@@ -8,7 +8,7 @@
 **Pronto, com uma decisão para o Forge e uma para o Nexus.**
 
 1. **Sorteio da rotação (E4-D4): trocar para "uma entre as K = 5 primeiras candidatas a partir de `@r`".** A chave fixa, medida no código real e com a janela de repetição ativa, passa de 3× a média a partir de 300 faixas e chega a 12,8× em 50 mil (seção 5). Com K = 5 o pior caso fica em 2,1× (300), 2,6× (1.000) e 3,6× (50 mil), e a chamada completa da `proxima` custa 53 a 58 leituras lógicas numa janela realista (63 a 68 na do dataset do `08`): poucas leituras acima do critério de 50 (~1 ms; o `ORDER BY NEWID()` lia 786). K = 10 daria 2,7× em 50 mil, mas 93 a 123 leituras. O texto das consultas está na seção 5; a mudança é do Forge, no `FilaDoPlayout.cs`.
-2. **Limites do S-M06 pelo SQL: um índice novo** (`IX_ArquivoMidia_EnviadoPor` passa a `(EnviadoPorUsuarioId, DataUploadUtc) INCLUDE (StatusSanitizacao, TamanhoBytes, UploadExpiraEmUtc)`). Sem ele, cada `POST /midias/uploads` lia a tabela inteira (1.116 a 2.375 leituras, de qualquer usuário); com ele, 3 a 13. Migration e `03` neste PR; o `ddl-check` passa (228 itens).
+2. **Limites do S-M06 pelo SQL: um índice novo** (`IX_ArquivoMidia_EnviadoPor` passa a `(EnviadoPorUsuarioId, DataUploadUtc) INCLUDE (StatusSanitizacao, TamanhoBytes, UploadExpiraEmUtc)`). Sem ele, cada `POST /midias/uploads` lia a tabela inteira (1.116 a 2.375 leituras, de qualquer usuário); com ele, 3 a 12 leituras para um usuário comum e **155 para o Admin com 10.000 envios** (o S1 lê todas as linhas do usuário; seção 4 tem o gatilho). Migration e `03` neste PR; o `ddl-check` passa (228 itens).
 3. **Biblioteca (`GET /midias`), captura da sanitização e `proxima`: nada a mudar.** A biblioteca custa ~2.400 leituras por página com 50 mil mídias (45 a 96 ms de CPU), e a busca por texto ~2.400 leituras (80 a 190 ms): aceito, com o gatilho de revisão da seção 3. Um índice para a listagem foi testado e **rejeitado** (seção 3).
 4. **DoD 9 (`rel.usp_MaisTocadas`)** repetido com o dataset final: igual ao parecer do A02 (seção 6).
 
@@ -59,14 +59,18 @@ A página lê a tabela inteira (varredura do clustered com *sort* parcial) porqu
 
 | Consulta | Usuário | Antes | Depois |
 |---|---|---|---|
-| S1 abertos (`CountAsync`) | A1, B1 e C1 | 1.116 a 1.135 | **13** |
+| S1 abertos (`CountAsync`) | B1 (6 envios) | 1.155 | **4** |
+| S1 abertos (`CountAsync`) | C1 (958 envios) | 1.155 | **12** |
+| S1 abertos (`CountAsync`) | A1, o Admin (10.000 envios) | 1.164 | **155** |
 | S2 20/h (datas da hora) | qualquer | 2.375 | **3** |
 | S3 bytes/h (data e tamanho) | qualquer | 2.375 | **3** |
 | S4 espera dos abertos | qualquer | 11 | 11 |
 
-Antes, o `IX_ArquivoMidia_EnviadoPor` só tinha `EnviadoPorUsuarioId` e o plano preferia varrer (S2 e S3 liam a tabela inteira mesmo para um usuário com poucos envios). O índice novo, `(EnviadoPorUsuarioId, DataUploadUtc) INCLUDE (StatusSanitizacao, TamanhoBytes, UploadExpiraEmUtc)`, serve as quatro consultas: *seek* no usuário e na hora. Mesmo nome do anterior, então a FK continua com índice que começa por `EnviadoPorUsuarioId`. Custo: o índice passa de ~240 para 384 páginas (+1,1 MB com 50 mil mídias); o `COUNT(*)` sem filtro da biblioteca passa a usar outro índice (239 para 414 leituras), irrelevante.
+Antes, o `IX_ArquivoMidia_EnviadoPor` só tinha `EnviadoPorUsuarioId` e o plano preferia varrer (S2 e S3 liam a tabela inteira mesmo para um usuário com poucos envios). O índice novo, `(EnviadoPorUsuarioId, DataUploadUtc) INCLUDE (StatusSanitizacao, TamanhoBytes, UploadExpiraEmUtc)`, serve as quatro consultas: *seek* no usuário e na hora para S2, S3 e S4. O S1 é diferente: `StatusSanitizacao` está no `INCLUDE`, não na chave, então ele faz *seek* no usuário e lê **todas as linhas dele** no índice (cobertas, sem *lookup*): custo proporcional ao histórico do usuário (4 leituras com 6 envios, 12 com ~1.000, 155 com 10.000). Mesmo nome do anterior, então a FK continua com índice que começa por `EnviadoPorUsuarioId`. Custo: o índice passa de ~240 para 384 páginas (+1,1 MB com 50 mil mídias); o `COUNT(*)` sem filtro da biblioteca passa a usar outro índice (239 para 414 leituras), irrelevante.
 
-**Decisão do `08` ("o A01b mede e decide se ainda vale um índice filtrado `(EnviadoPorUsuarioId) WHERE StatusSanitizacao IN (1, 2, 3)`"):** não vale. (1) O EF parametriza o `IN` (`IN (@abertos1, @abertos2, @abertos3)`), e o filtro de um índice filtrado não casa com parâmetro (seção 2). (2) O S1 do Admin com 10.000 envios já custa 13 leituras com o índice novo; o `sp_getapplock` por usuário do F02 serializa as chamadas, então nenhum POST lê mais que isso.
+**Decisão do `08` ("o A01b mede e decide se ainda vale um índice filtrado `(EnviadoPorUsuarioId) WHERE StatusSanitizacao IN (1, 2, 3)`"):** não vale. (1) O EF parametriza o `IN` (`IN (@abertos1, @abertos2, @abertos3)`), e o filtro de um índice filtrado não casa com parâmetro (seção 2). (2) O S1 do Admin com 10.000 envios custa 155 leituras com o índice novo (de 1.164), e o `sp_getapplock` por usuário do F02 serializa as chamadas desse usuário: é uma leitura de ~1 ms por POST de quem já está no limite de 20 por hora.
+
+**Gatilho para revisar o S1:** um usuário passar de ~100 mil envios (S1 ≈ 1.500 leituras) ou o S1 passar de 500 leituras. Aí entra um segundo índice **não filtrado**, `(EnviadoPorUsuarioId, StatusSanitizacao) INCLUDE (UploadExpiraEmUtc)`, que o `IN (@abertos1, @abertos2, @abertos3)` parametrizado usa com *seek* por status (3 *seeks*, ~10 leituras, independente do histórico). Não o crio agora: 155 leituras no pior usuário da v1 não justificam o segundo índice na tabela mais escrita do Épico 4.
 
 Migration `20261123100833_IndiceLimitesDeUploadPorUsuario` (`DropIndex` + `CreateIndex`, `Down` volta ao índice simples); `03` e `ArquivoMidiaConfiguration.cs` no mesmo commit. `ddl-check`: o `03` e as migrations geram o mesmo schema (228 itens).
 
