@@ -44,10 +44,13 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
             db.ChangeTracker.Clear();
             await using var tx = await db.Database.BeginTransactionAsync(ct2);
             // As travas de linha valem até o commit. ROWLOCK evita que a trava suba para a página e esconda vizinhos do
-            // READPAST da outra réplica. O filtro é o do índice IX_EventoOutbox_Pendentes (ProcessadoEmUtc IS NULL AND Tentativas < 10): o 10 vai LITERAL no texto (é uma constante do código,
-            // nunca entrada de fora), porque com um parâmetro o SQL Server não prova que a consulta cabe no índice filtrado. Só o instante da espera por evento é parâmetro.
+            // READPAST da outra réplica. O filtro é o do índice IX_EventoOutbox_Pendentes (ProcessadoEmUtc IS NULL AND Tentativas < 10) e a consulta precisa de DUAS coisas para usá-lo:
+            //  1. o 10 LITERAL no texto (é uma constante do código, nunca entrada de fora): com um parâmetro o SQL Server não prova que a consulta cabe no índice filtrado;
+            //  2. o hint INDEX(IX_EventoOutbox_Pendentes): o literal só torna o índice ELEGÍVEL. Sem o hint o plano é um scan da PK (as pendentes ficam no fim da ordem do Id; medido pelo Atlas
+            //     com 200 mil processados + 3 mil pendentes: 1.623 leituras, crescendo com os 7 dias de histórico); com o hint são 164, independente do histórico.
+            // Só o instante da espera por evento é parâmetro.
             var lote = await db.EventosOutbox
-                .FromSqlRaw($"SELECT TOP ({TamanhoDoLote}) * FROM infra.EventoOutbox WITH (UPDLOCK, READPAST, ROWLOCK) WHERE ProcessadoEmUtc IS NULL AND Tentativas < {EventoOutbox.MaximoDeTentativas} AND (ProximaTentativaEmUtc IS NULL OR ProximaTentativaEmUtc <= @agora) ORDER BY Id",
+                .FromSqlRaw($"SELECT TOP ({TamanhoDoLote}) * FROM infra.EventoOutbox WITH (UPDLOCK, READPAST, ROWLOCK, INDEX(IX_EventoOutbox_Pendentes)) WHERE ProcessadoEmUtc IS NULL AND Tentativas < {EventoOutbox.MaximoDeTentativas} AND (ProximaTentativaEmUtc IS NULL OR ProximaTentativaEmUtc <= @agora) ORDER BY Id",
                     new SqlParameter("@agora", System.Data.SqlDbType.DateTime2) { Value = clock.UtcNow })
                 .ToListAsync(ct2);
             var resultado = await EntregarAsync(lote, ct2);
