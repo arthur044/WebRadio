@@ -18,7 +18,7 @@
        db_datawriter; svc_backup: db_backupoperator; webradio_app e webradio_relatorio: nenhum papel fixo, só GRANT por schema);
      - existe usuário do banco além dos 4 (dbo, guest, INFORMATION_SCHEMA e sys à parte);
      - o guest tem CONNECT;
-     - os 4 usuários têm permissão direta perigosa (CONTROL, TAKE OWNERSHIP, IMPERSONATE, ALTER, CREATE ou WITH GRANT OPTION);
+     - os 4 usuários, o public ou o guest têm permissão direta perigosa (CONTROL, TAKE OWNERSHIP, IMPERSONATE, ALTER, CREATE ou WITH GRANT OPTION);
      - um schema do WebRadio tem dono diferente do dbo;
      - há application role no banco (entra no "usuário a mais").
    As conferências rodam ANTES de religar qualquer usuário: num .bak plantado o script aborta com todos os logins ainda órfãos (nenhum
@@ -81,12 +81,12 @@ BEGIN
     RETURN;
 END
 
--- Permissão direta perigosa nos 4 usuários (os GRANT legítimos são SELECT/INSERT/UPDATE/DELETE/EXECUTE em schema e CONNECT; os papéis
+-- Permissão direta perigosa nos 4 usuários, no public e no guest (o que vai para o public vale para todos) (os GRANT legítimos são SELECT/INSERT/UPDATE/DELETE/EXECUTE em schema e CONNECT; os papéis
 -- acima cobrem o resto): CONTROL, TAKE OWNERSHIP, IMPERSONATE, ALTER (qualquer), CREATE (qualquer) ou qualquer GRANT ... WITH GRANT OPTION.
 SELECT @achado = STRING_AGG(CONVERT(nvarchar(max), u.name + N':' + p.permission_name COLLATE DATABASE_DEFAULT), N', ')
 FROM sys.database_permissions AS p
 JOIN sys.database_principals AS u ON u.principal_id = p.grantee_principal_id
-WHERE u.name IN (SELECT usuario FROM @nossos) AND p.state IN ('G', 'W')
+WHERE (u.name IN (SELECT usuario FROM @nossos) OR u.name IN (N'public', N'guest')) AND p.state IN ('G', 'W')
   AND (p.state = 'W' OR p.permission_name IN (N'CONTROL', N'TAKE OWNERSHIP', N'IMPERSONATE', N'ALTER') OR p.permission_name LIKE N'ALTER %' OR p.permission_name LIKE N'CREATE %');
 IF @achado IS NOT NULL
 BEGIN

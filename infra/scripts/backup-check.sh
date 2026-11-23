@@ -171,6 +171,7 @@ planta "IMPERSONATE direto no webradio_relatorio" "GRANT IMPERSONATE ON USER::we
 planta "GRANT ... WITH GRANT OPTION no webradio_app" "GRANT SELECT ON SCHEMA::rel TO webradio_app WITH GRANT OPTION" "REVOKE SELECT ON SCHEMA::rel FROM webradio_app CASCADE" "webradio_app:SELECT"
 planta "schema midia com dono webradio_app" "ALTER AUTHORIZATION ON SCHEMA::midia TO webradio_app" "ALTER AUTHORIZATION ON SCHEMA::midia TO dbo" "midia (dono webradio_app)"
 planta "application role no banco" "CREATE APPLICATION ROLE intruso_app WITH PASSWORD = N'Intruso-Plantado-9x!'" "DROP APPLICATION ROLE intruso_app" "intruso_app"
+planta "CONTROL para o public (vale para todos)" "GRANT CONTROL TO public" "REVOKE CONTROL FROM public" "public:CONTROL"
 planta "guest com CONNECT" "GRANT CONNECT TO guest" "REVOKE CONNECT FROM guest" "o guest tem CONNECT"
 confere "depois de desfazer tudo, o pos-restore.sql volta a passar" bash -c "docker exec -i -e SQLCMDPASSWORD='$SA' '$B' $SQLCMD -C -N -S localhost -U sa -b -I -i /dev/stdin < infra/sql/pos-restore.sql | grep -q POS_RESTORE_OK"
 
