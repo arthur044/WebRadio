@@ -28,7 +28,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now webradio-backup.time
 systemctl list-timers webradio-backup.timer                            # próximo disparo: 03:30, no horário do servidor
 ```
 
-Rode uma vez à mão antes de confiar no timer: `docker compose --profile backup run --rm backup`. Sem a cópia externa, o fim do log traz `BACKUP_EXTERNO_NAO_CONFIGURADO` (**aviso, não erro**; código 0): só há cópia local, e a perda do servidor perde o backup junto.
+Rode uma vez à mão antes de confiar no timer: `docker compose --profile backup run --rm backup`, e **depois pela unidade**: `sudo systemctl start webradio-backup.service` e confira `journalctl -u webradio-backup -n 30` com `BACKUP_OK`. O endurecimento da unidade (`ProtectHome`, `PrivateTmp`, `ProtectSystem`) só vale quando o backup roda por ela: um erro de permissão aparece ali e não na execução à mão. Sem a cópia externa, o fim do log traz `BACKUP_EXTERNO_NAO_CONFIGURADO` (**aviso, não erro**; código 0): só há cópia local, e a perda do servidor perde o backup junto.
 
 ## Ligar a cópia externa (depois, sem mudar código)
 

@@ -29,7 +29,7 @@ TRABALHO="$LOCAL/restauracao"
 SNAPSHOT="${RESTAURAR_SNAPSHOT:-latest}"
 export RESTIC_CACHE_DIR="$LOCAL/cache-restic" HOME="${HOME:-/tmp}" MC_CONFIG_DIR="${MC_CONFIG_DIR:-/tmp/.mc}"
 SAIDA="$(mktemp)"
-trap 'rm -f "$SAIDA"; rm -rf "$TRABALHO"' EXIT
+trap 'rm -f "$SAIDA"' EXIT
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
 RC_ULTIMO=0
@@ -71,6 +71,8 @@ fi
 mkdir -p "$LOCAL" 2>/dev/null
 exec 9>"$LOCAL/.backup.lock"
 flock -n 9 || abortar "backup_em_andamento (espere o backup terminar: o timer roda às 03:30)" 23
+# Só AGORA (com o lock em mãos) a pasta de trabalho é nossa: um restaurar que abortou por 23 não pode apagar a do que está rodando.
+trap 'rm -f "$SAIDA"; rm -rf "$TRABALHO"' EXIT
 
 # ------------------------------------------------------------- 1. baixar do restic
 externo_configurado() { [[ -n "${BACKUP_S3_ENDPOINT:-}" && -n "${BACKUP_S3_BUCKET:-}" && -s "$S/backup_s3_access_key" && -s "$S/backup_s3_secret_key" ]]; }
