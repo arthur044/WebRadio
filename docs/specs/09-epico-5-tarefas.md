@@ -139,7 +139,7 @@ Consolidação dos riscos aceitos nos `05`, `07` e `08` e nos PRs do Épico 4, p
 | #162 | Cadastro 3/h e sessão 30/min por IP penalizam ouvintes atrás de NAT; `conn_stream` 25 por IP deixa 8 IPs encherem os 200 lugares do Icecast | Aceito; capacidade do Icecast a medir no deploy |
 | E5-D3 | Modelo de recuperação `SIMPLE`: perda de até 1 dia de dados se o servidor morrer (alternativa: `FULL` com `BACKUP LOG` de hora em hora) | Novo, a decidir |
 | E5-D3 | Sem o bucket externo configurado, o backup fica só no servidor: perder a VPS (disco, conta, invasão) perde também o backup | Novo, a decidir (dono do produto cria o bucket depois do deploy; passo a passo no `docs/deploy.md`) |
-| E5-D11 | Quem tomar o servidor pode apagar também a cópia externa, versões incluídas (a chave do backup tem `deleteFiles`); só Object Lock de 30 dias impede | Novo, a decidir (aceitar, ou ligar Object Lock depois de o Forge provar o restic com ele) |
+| E5-D11 | **Cópia externa e invasor com a chave.** Quem tomar o servidor lê a `backup_s3_*` e a `restic_senha` e pode apagar as versões de forma definitiva (`DeleteObject` com `versionId`; a chave precisa de `deleteFiles` pelo `forget --prune`). Versionamento + 30 dias protegem contra erro, bug e apagada sem querer, não contra invasor deliberado. Mitigação já no `docs/deploy.md` (14.3): conferir a conta do provedor e revogar a chave depois de suspeita | Novo, a decidir: (a) aceitar; (b) Object Lock com retenção de 30 dias, só depois de o Forge provar `backup`, `forget --prune`, `check` e restauração contra um B2 com Object Lock. Recomendação do Sentinel e do Nexus: (b) se o Forge provar, senão (a) |
 
 ## Riscos
 
