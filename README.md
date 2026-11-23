@@ -166,7 +166,7 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 
 ## Status do Épico 4
 
-**Em andamento: os quatro pacotes (D1 a D4) estão na `main`; falta o A01b do Atlas.** O Épico 4 entrega biblioteca de mídia, upload, sanitização e playout: locutor e Admin enviam áudio direto ao storage, o Worker passa o original pelo antivírus e o `sanitizer` recodifica para MP3; só a saída recodificada entra na biblioteca. O pedido aprovado com mídia passa a tocar sozinho pelo playout, e o Admin ganha o relatório de mais tocadas. O pacote de tarefas, as decisões e a Definição de Pronto estão em [`docs/specs/08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md).
+**Em andamento: os quatro pacotes (D1 a D4) e o A01b do Atlas estão na `main`; falta conferir a Definição de Pronto item a item.** O Épico 4 entrega biblioteca de mídia, upload, sanitização e playout: locutor e Admin enviam áudio direto ao storage, o Worker passa o original pelo antivírus e o `sanitizer` recodifica para MP3; só a saída recodificada entra na biblioteca. O pedido aprovado com mídia passa a tocar sozinho pelo playout, e o Admin ganha o relatório de mais tocadas. O pacote de tarefas, as decisões e a Definição de Pronto estão em [`docs/specs/08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md).
 
 | Pacote | Entrega | PR | Situação |
 |---|---|---|---|
@@ -176,12 +176,12 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 | D2 | Upload, sanitização, ClamAV, biblioteca e limpezas (backend): E4-F02 a F07, F09 e o `smoke-midia.sh` (F10, parte de upload) | #112 | Na `main` |
 | D3 | Playout pela biblioteca e relatório de mais tocadas (backend): A01a (chave de sorteio e índices), E4-F08, E4-A02 e a parte de playout do F10 | #111, #143 | Na `main` |
 | D4 | Telas: biblioteca, envio, aprovar com mídia, mais tocadas (E4-P01 a P05) | #110 | Na `main` |
-| A01b | Planos de execução com dataset sintético de 50.000 mídias (Atlas), depois do #151 | Sem PR | Pendente, com o Atlas |
+| A01b | Planos de execução com 50.000 mídias e 2 milhões de `Reproducao` (Atlas, parecer em [`docs/pareceres/e4-a01-midia.md`](docs/pareceres/e4-a01-midia.md)): o índice `IX_ArquivoMidia_EnviadoPor` passa a cobrir os limites de upload (de 1.116 a 2.375 leituras por envio para 3 a 12) e a rotação passa a sortear uma entre as 5 primeiras candidatas (a chave fixa favorecia umas faixas em bibliotecas grandes) | #174 | Na `main` |
 | Pendências do D2 | Piso na trava de `midia/`, trava própria da quarentena, motivo `sanitizer` e piso do `INCRBY` (issues #136, #137, #138, #140 e #153), com o runbook do Worker | #152, #157 | Na `main` |
 | Índice único de `Reproducao` | `UX_Reproducao_PedidoId` filtrado, para o `FaixaIniciada` concorrente (issue #151) | #156 | Na `main` |
 
 - **Já na API**: `POST /midias/uploads` e `/midias/{id}/concluir` (envio direto ao storage por POST policy, com limites de 20 por hora e 5 abertos por usuário), `GET /midias` e `GET /midias/{id}`, preview, `PATCH`/`DELETE`, o pipeline do Worker e as limpezas da manutenção. O contrato está na §6 de [`docs/specs/02-api-rest.md`](docs/specs/02-api-rest.md).
-- **Playout (D3)**: `GET /internal/playout/proxima` devolve o pedido aprovado com mídia (E4-D5) ou, sem pedido, uma faixa da rotação (E4-D4: pesos 8/2/1 entre `Musica`, `Vinheta` e `Comercial`, com janelas de repetição); a URL é pré-assinada interna de 30 min e o cabeçalho `X-Playout-Instancia` é obrigatório. `FaixaIniciada` grava a `Reproducao`, marca o pedido como `Tocado` e publica `PedidoTocado` e `TocandoAgora` com `tipoMidia`. `GET /relatorios/mais-tocadas` (Admin) lê a `rel.usp_MaisTocadas`.
+- **Playout (D3)**: `GET /internal/playout/proxima` devolve o pedido aprovado com mídia (E4-D5) ou, sem pedido, uma faixa da rotação (E4-D4: pesos 8/2/1 entre `Musica`, `Vinheta` e `Comercial`, com janelas de repetição; o sorteio escolhe uma entre as 5 primeiras candidatas, #174); a URL é pré-assinada interna de 30 min e o cabeçalho `X-Playout-Instancia` é obrigatório. `FaixaIniciada` grava a `Reproducao`, marca o pedido como `Tocado` e publica `PedidoTocado` e `TocandoAgora` com `tipoMidia`. `GET /relatorios/mais-tocadas` (Admin) lê a `rel.usp_MaisTocadas`.
 - **Telas (D4)**: `/biblioteca` (Locutor e Admin: lista, filtros, status ao vivo, pré-escuta), envio por policy com progresso, fila e 429 com contagem regressiva, edição com `If-Match`, "Aprovar com mídia" na moderação e `/admin/mais-tocadas`.
 - **Pendências do D2 (resolvidas)**: piso de 5 objetos na trava contra apagão de `midia/` (#136), trava própria na varredura da quarentena, de 30 min, com limite absoluto de 50 e o motivo `trava_apagao_quarentena` (#137 e #153), o marcador `WORKER_DEGRADADO motivo=sanitizer` (#138) e o piso do `INCRBY` negativo no throttle (#140). O Worker recusa `LimiteExclusao` acima de 500. O smoke não testa a recusa pela quota do bucket `quarentena` (o MinIO só a aplica depois da medição dele); confere que a quota está configurada.
 - **Operação do Worker**: o que fazer com cada `WORKER_DEGRADADO` (`scanner`, `assinatura_velha`, `sanitizer`, `trava_apagao`, `trava_apagao_quarentena`) está em [`docs/runbooks/worker-degradado.md`](docs/runbooks/worker-degradado.md), com a saída do operador nas duas travas.
@@ -200,15 +200,20 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 | Borda HTTPS (E5-F02) e job de CI da base de produção (E5-F05): serviço `edge` (Caddy), `web` sem porta publicada, IP real do ouvinte até o nginx e a API | #168 | Na `main` |
 | Backup com restic (E5-F03): local e criptografado, cópia externa em S3 **opcional**, `restaurar` manual, timer `systemd` às 03:30 | #170 | Na `main` |
 | `pos-restore.sql` confere papéis, usuários e `guest` do banco restaurado (E5-A01b) | #171 | Na `main` |
+| Spec 09 v1.2: backup externo opcional, disco de 3× a biblioteca e o limite da cópia externa corrigido (E5-D11) | #172 | Na `main` |
+| Guia de deploy para o dono do produto, [`docs/deploy.md`](docs/deploy.md) (E5-L01) | #173 | Na `main` |
+| Robustez antes do deploy (E5-F04, fecha a issue #25): outbox com backoff por evento, banco fora e applock estourado em 503, índice do outbox sem eventos parados | #175 | Na `main` |
 
 - **Produção**: só o Caddy publica portas (`80` e `443`). Certificado automático, HSTS de 1 dia no primeiro deploy (sobe para 1 ano depois de uma semana). Sem IPv6 na v1 (sem registro AAAA). Operação em [`docs/runbooks/borda-https.md`](docs/runbooks/borda-https.md).
 - **Backup**: o serviço `backup` (perfil `backup`) grava o `.bak` do banco e o espelho de `midia/` e `publico/` num repositório restic local; **com a cópia externa ligada**, copia também para um bucket S3 versionado (`BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET` e `secrets/backup_s3_*`). Sem ela, o log traz o aviso `BACKUP_EXTERNO_NAO_CONFIGURADO` e só há cópia local. A perda máxima é de 1 dia. A `restic_senha` precisa ser guardada **fora do servidor**: sem ela nenhum backup abre. Operação, restauração e o caso de invasão suspeita (restaurar o ponto **anterior** à suspeita) estão em [`docs/runbooks/backup-e-restauracao.md`](docs/runbooks/backup-e-restauracao.md).
+- **Robustez (#175)**: o outbox espera por evento (5 s, 10 s, 20 s, até 5 min; um evento ruim não atrasa os outros) e o índice `IX_EventoOutbox_Pendentes` ignora eventos esgotados (10 tentativas). Com o **banco fora**, ou com o applock estourado, a API responde **503 `/erros/servidor-ocupado` com `Retry-After: 5`** em vez de 500. O banco fica em `READ COMMITTED` (não ligue `ALLOW_SNAPSHOT_ISOLATION`; ver [`docs/conexao-sql-server.md`](docs/conexao-sql-server.md)). O serviço `restaurar` passou a ter `build:`, então a restauração funciona num servidor novo sem rodar o `backup` antes.
+- **A cópia externa não é à prova de invasor**: a chave do backup precisa apagar, e quem a tiver apaga versões de forma definitiva; só o Object Lock protegeria, e ele fica desligado até a revisão de riscos (E5-N01).
 - **Adiado para a v2**: a imagem de divulgação no `sanitizer` (E5-F01, decisão E5-D6).
 
 ## O que vem a seguir
 
-- **Épico 4**: o A01b do Atlas e conferir a Definição de Pronto item a item.
-- **Épico 5**: a revisão dos riscos aceitos com o dono do produto (E5-N01) e o deploy, depois do checklist de segurança do `05` na base de produção (E5-S01). A robustez antes do deploy (E5-F04, issue #25) segue na spec 09.
+- **Épico 4**: conferir a Definição de Pronto item a item.
+- **Épico 5**: a revisão dos riscos aceitos com o dono do produto (E5-N01) e o deploy, depois do checklist de segurança do `05` na base de produção (E5-S01).
 - **v2**: imagem de divulgação no `sanitizer` (E5-F01), grade recorrente, métricas de audiência e busca de texto.
 
 ## Como contribuir
@@ -299,6 +304,6 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 
 ---
 
-**Versão**: Épico 4 entregue (A01b do Atlas pendente); Épico 5 em andamento (spec 09; borda HTTPS e backup na `main`)  
+**Versão**: Épico 4 entregue; Épico 5 em andamento (spec 09 v1.2; borda HTTPS, backup, guia de deploy e robustez na `main`)  
 **Última atualização**: 2026-11-23  
 **Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend), Lore (Documentação)
