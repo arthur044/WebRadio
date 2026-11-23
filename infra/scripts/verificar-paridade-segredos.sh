@@ -37,7 +37,7 @@ for linha in open(sh_arquivo, encoding="utf-8"):
 # --- .ps1: 'nome' = { New-StrongSecret -Bytes N } | { New-HexSecret -Bytes N } | { "locutor-$(New-HexSecret -Bytes N)" }
 ps = {}
 for linha in open(ps_arquivo, encoding="utf-8-sig"):
-    m = re.match(r"""\s*'([a-z_]+)'\s*=\s*\{\s*(.+?)\s*\}\s*$""", linha)
+    m = re.match(r"""\s*'([a-z0-9_]+)'\s*=\s*\{\s*(.+?)\s*\}\s*$""", linha)
     if not m:
         continue
     nome, corpo = m.groups()
@@ -47,6 +47,8 @@ for linha in open(ps_arquivo, encoding="utf-8-sig"):
         ps[nome] = f"HEX:{r.group(1)}"
     elif (r := re.fullmatch(r'"locutor-\$\(New-HexSecret -Bytes (\d+)\)"', corpo)):
         ps[nome] = f"HEXUSER:{r.group(1)}"
+    elif corpo == "''":
+        ps[nome] = "VAZIO:0"
     else:
         erros.append(f".ps1: receita não reconhecida para {nome}: {corpo}")
 
@@ -73,7 +75,7 @@ for linha in open(compose_arquivo, encoding="utf-8"):
     if dentro:
         if linha and not linha.startswith((" ", "#", "\n")):
             break
-        m = re.match(r"\s{2}([a-z_]+):\s*\{\s*file:\s*\./secrets/([a-z_]+)\s*\}", linha)
+        m = re.match(r"\s{2}([a-z0-9_]+):\s*\{\s*file:\s*./secrets/([a-z0-9_]+)\s*\}", linha)
         if m:
             if m.group(1) != m.group(2):
                 erros.append(f"compose: o segredo {m.group(1)} aponta para o arquivo {m.group(2)}")

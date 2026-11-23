@@ -191,8 +191,8 @@ def redes(nome):
     return set((servicos[nome].get("networks") or {}).keys())
 
 # --- redes e portas (04 §Redes, S-M15)
-confere("redes da base: exatamente edge, borda, app, dados, playout, midia-borda, antivirus e saida-freshclam (nenhuma diag-*)",
-        set(prod["networks"]) == {"edge", "borda", "app", "dados", "playout", "midia-borda", "antivirus", "saida-freshclam"}, str(sorted(prod["networks"])))
+confere("redes da base: exatamente edge, borda, app, dados, playout, midia-borda, antivirus, saida-freshclam e saida-backup (nenhuma diag-*)",
+        set(prod["networks"]) == {"edge", "borda", "app", "dados", "playout", "midia-borda", "antivirus", "saida-freshclam", "saida-backup"}, str(sorted(prod["networks"])))
 publicadas = {n: sorted((p.get("published"), p.get("target"), p.get("host_ip")) for p in s.get("ports", [])) for n, s in servicos.items() if s.get("ports")}
 # E5-D1: só o edge (Caddy) publica porta na base, e explicitamente em 0.0.0.0 (no [::] o docker-proxy entrega o IP dele e o real_ip se perde). O web NÃO publica nada.
 confere("só o edge publica porta, só a 80 e a 443, e em 0.0.0.0", publicadas == {"edge": [("443", 443, "0.0.0.0"), ("80", 80, "0.0.0.0")]}, str(publicadas))
@@ -210,6 +210,29 @@ confere("edge: só o Caddyfile e o tls-acme.caddy do repositório, em leitura (o
         sorted((v["source"].rsplit("/", 1)[-1], v["target"], bool(v.get("read_only"))) for v in e["volumes"] if v["type"] == "bind")
         == [("Caddyfile", "/etc/caddy/Caddyfile", True), ("tls-acme.caddy", "/etc/caddy/tls.caddy", True)], str(e["volumes"]))
 confere("edge: certificados em volume nomeado (sobrevivem à recriação do contêiner)", {v["source"] for v in e["volumes"] if v["type"] == "volume"} == {"edge-data", "edge-config"})
+# --- E5-F03/E5-D10: o backup e a restauração. A ponte aceita entre os dados e a internet, só eles; identidade mínima; sem porta; nenhum segredo a mais em ninguém.
+def segredos(n): return sorted(x["source"] for x in servicos[n].get("secrets", []))
+quem_tem = lambda nome: sorted(n for n in servicos if nome in segredos(n))
+confere("saida-backup: só o backup e o restaurar, e NÃO é internal (é por ela que o storage externo se alcança)",
+        sorted(n for n in servicos if "saida-backup" in redes(n)) == ["backup", "restaurar"] and not prod["networks"]["saida-backup"].get("internal"))
+confere("backup e restaurar: só nas redes dados e saida-backup, sem porta, não root, cap_drop ALL sem cap_add, read_only, no-new-privileges, mem e pids limitados, só com o seu perfil",
+        all(redes(n) == {"dados", "saida-backup"} and not servicos[n].get("ports") and servicos[n].get("user") not in (None, "0", "0:0", "root") and servicos[n].get("cap_drop") == ["ALL"]
+            and not servicos[n].get("cap_add") and servicos[n].get("read_only") and "no-new-privileges:true" in (servicos[n].get("security_opt") or []) and servicos[n].get("mem_limit")
+            and servicos[n].get("pids_limit") and not servicos[n].get("privileged") for n in ("backup", "restaurar"))
+        and servicos["backup"].get("profiles") == ["backup"] and servicos["restaurar"].get("profiles") == ["restore"])
+confere("o `sa` só no sqlserver, no db-init e no restaurar; a credencial ROOT do MinIO só no minio, no minio-init e no restaurar (exceção aceita no 05 S-A04)",
+        quem_tem("mssql_sa_password") == ["db-init", "restaurar", "sqlserver"] and quem_tem("minio_root_password") == ["minio", "minio-init", "restaurar"]
+        and quem_tem("minio_root_user") == ["minio", "minio-init", "restaurar"])
+confere("segredos do backup só em quem usa: sql_backup_senha (db-init, backup), minio_backup_* (minio-init, backup), restic_senha e backup_s3_* (backup, restaurar)",
+        quem_tem("sql_backup_senha") == ["backup", "db-init"] and quem_tem("minio_backup_access_key") == quem_tem("minio_backup_secret_key") == ["backup", "minio-init"]
+        and quem_tem("restic_senha") == quem_tem("backup_s3_access_key") == quem_tem("backup_s3_secret_key") == ["backup", "restaurar"])
+confere("backup: o volume do .bak só em leitura; restaurar: em escrita (grava o .bak que o SQL Server lê); o backup-local só neles",
+        any(v.get("source") == "sql-backup" and v.get("read_only") for v in servicos["backup"]["volumes"])
+        and any(v.get("source") == "sql-backup" and not v.get("read_only") for v in servicos["restaurar"]["volumes"])
+        and sorted(n for n in servicos if any(v.get("source") == "backup-local" for v in servicos[n].get("volumes", []))) == ["backup", "restaurar"])
+confere("o `sqlserver` monta o volume sql-backup e espera o sql-backup-init; o init só com CAP_CHOWN e sem rede",
+        any(v.get("source") == "sql-backup" for v in servicos["sqlserver"]["volumes"]) and "sql-backup-init" in servicos["sqlserver"].get("depends_on", {})
+        and servicos["sql-backup-init"].get("cap_add") == ["CHOWN"] and servicos["sql-backup-init"].get("network_mode") == "none")
 # --- E5: o host público sai de UM valor, o DOMINIO (Storage__PublicEndpoint, AllowedHosts, hostname do Icecast, server_name e Host canônico do nginx)
 dominio = e["environment"]["DOMINIO"]
 confere("host público derivado do DOMINIO (api, worker, web, icecast), com https e sem porta",

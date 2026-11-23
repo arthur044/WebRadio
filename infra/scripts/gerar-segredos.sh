@@ -114,6 +114,12 @@ minio_worker_secret_key=B64:30
 redis_password=B64:32
 seed_admin_senha=B64:18
 seed_dev_senha=B64:18
+restic_senha=B64:32
+sql_backup_senha=B64:24
+minio_backup_access_key=HEX:20
+minio_backup_secret_key=B64:30
+backup_s3_access_key=VAZIO:0
+backup_s3_secret_key=VAZIO:0
 LISTA
 }
 
@@ -125,6 +131,8 @@ gerar_valor() {
     B64)     gerar_forte "$n" ;;
     HEX)     openssl rand -hex "$n" ;;
     HEXUSER) printf 'locutor-%s' "$(openssl rand -hex "$n")" ;;
+    # Arquivo que nasce VAZIO, para o operador colar (E5-D4: backup_s3_* são as chaves do storage externo, que a rádio não gera). Vazio = cópia externa desligada.
+    VAZIO)   printf '' ;;
     *)       echo "receita desconhecida: $1" >&2; exit 1 ;;
   esac
 }

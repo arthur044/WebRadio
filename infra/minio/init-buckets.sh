@@ -3,7 +3,7 @@
 # WebRadio — infra/minio/init-buckets.sh (minio-init, E1-F16, S-A04/S-A05)
 # One-shot e idempotente: buckets quarentena/midia/publico, quota da quarentena,
 # GetObject anônimo SÓ em publico/* (sem listagem), políticas mínimas e os
-# usuários de serviço svc-api/svc-worker com as chaves de /run/secrets.
+# usuários de serviço svc-api/svc-worker/svc-backup com as chaves de /run/secrets.
 # É o ÚNICO contêiner (além do próprio minio) que vê a credencial root.
 # =============================================================================
 set -eu
@@ -32,6 +32,8 @@ API_KEY="$(ler minio_api_access_key)"
 API_SECRET="$(ler minio_api_secret_key)"
 WORKER_KEY="$(ler minio_worker_access_key)"
 WORKER_SECRET="$(ler minio_worker_secret_key)"
+BACKUP_KEY="$(ler minio_backup_access_key)"
+BACKUP_SECRET="$(ler minio_backup_secret_key)"
 
 # Alias por variável de ambiente (só neste processo; nada gravado em disco).
 export MC_HOST_wr="http://${ROOT_USER}:${ROOT_PASS}@${ENDPOINT}"
@@ -53,6 +55,8 @@ mc anonymous set-json "$P/publico-anonimo.json" wr/publico
 # MinIO exige s3:ListBucket para isso. A listagem ANÔNIMA continua proibida (S-A05): o publico só tem GetObject.
 mc admin policy create wr webradio-svc-api "$P/svc-api.json"
 mc admin policy create wr webradio-svc-worker "$P/svc-worker.json"
+# E5-D10: a identidade do backup (serviço `backup`): só LER midia e publico. Nada na quarentena, nada de escrita, nunca a credencial root (S-A04).
+mc admin policy create wr webradio-svc-backup "$P/svc-backup.json"
 
 # RISCO ACEITO (igual ao migrator): o mc só recebe a secret key por argumento; o contêiner é one-shot,
 # efêmero e sem outro processo. O `--` impede que uma chave começando com '-' seja lida como flag, e a saída do mc NÃO vai ao log: o erro de
@@ -64,6 +68,7 @@ criar_usuario() {
 }
 criar_usuario "$API_KEY" "$API_SECRET" svc-api
 criar_usuario "$WORKER_KEY" "$WORKER_SECRET" svc-worker
+criar_usuario "$BACKUP_KEY" "$BACKUP_SECRET" svc-backup
 
 anexar() {
   saida="$(mc admin policy attach wr "$1" --user "$2" 2>&1)" && return 0
@@ -73,5 +78,6 @@ anexar() {
 }
 anexar webradio-svc-api "$API_KEY"
 anexar webradio-svc-worker "$WORKER_KEY"
+anexar webradio-svc-backup "$BACKUP_KEY"
 
 echo "minio-init: buckets, políticas e usuários de serviço prontos."

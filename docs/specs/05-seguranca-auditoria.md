@@ -111,9 +111,18 @@ A spec não diz com que credencial a API e o Worker falam com o MinIO. Se for `M
 |---|---|
 | `svc-api` | `s3:PutObject` em `quarentena/*` (quem assina a POST policy precisa desse direito); `s3:GetObject` em `midia/*` (preview); `s3:GetObject`/`s3:HeadObject` em `quarentena/*` (o `HEAD` do `concluir`); `s3:PutObject`, `s3:GetObject` e `s3:DeleteObject` **só** em `publico/divulgacoes/*` (imagens de divulgação, `07` E3-F06/F07); `s3:ListBucket` em `quarentena`, `midia` e `publico` **sem** condição de prefixo (o `HEAD` do bucket que o SDK faz dá 403 com a condição; exceção aceita pelo Sentinel no #82) |
 | `svc-worker` | Até o Épico 3: `s3:DeleteObject` em `publico/divulgacoes/*` e `s3:ListBucket` com `s3:prefix = divulgacoes/` (limpeza de órfãs, `07` E3-F07). O Épico 4 acrescenta, com revisão do Sentinel: `s3:GetObject` e `s3:DeleteObject` em `quarentena/*`; `s3:PutObject` e `s3:DeleteObject` em `midia/*` (**sem** `s3:GetObject` em `midia/*`: o pipeline nunca lê de volta); `s3:ListBucket` em `quarentena` e em `midia` com `StringLike` em `s3:prefix` num padrão explícito (`20??/*`, `20??/`) (limpeza de órfãos com trava contra apagão, `08` E4-D11 e E4-F09) |
-| root | só no `minio-init` e na operação manual; nunca no `.env` da API ou do Worker |
+| `svc-backup` (E5-D10, 2026-11-23) | **só ler**: `s3:GetObject` em `midia/*` e `publico/*` e `s3:ListBucket` em `midia` e `publico`. **Nada** na `quarentena` (transitória, pode ter arquivo malicioso), nenhuma escrita, nunca a credencial root. Política `webradio-svc-backup`, criada pelo `minio-init`; é a identidade do serviço `backup` |
+| root | só no `minio-init` e na operação manual; nunca no `.env` da API ou do Worker. **Exceção aceita (E5-D13, E5-F03, 2026-11-23): o one-shot `restaurar`** (`docker compose --profile restore run --rm restaurar`, manual, feito pelo operador) também recebe a credencial root: a volta da biblioteca precisa **gravar** em `midia` e `publico`, e o `svc-backup` é só leitura. Ele roda sem root no contêiner, sem capability, só nas redes `dados` e `saida-backup`, e nunca sobe no `up` comum (`profiles: [restore]`); o `smoke-compose.sh` confere que só `minio`, `minio-init` e `restaurar` têm o segredo |
 
 O Liquidsoap **não** recebe credencial: ele só consome URLs pré-assinadas.
+
+**Identidades do backup no SQL Server e o volume do `.bak` (E5-A01, E5-F03, 2026-11-23):**
+
+| Principal | O que é e o limite |
+|---|---|
+| `svc_backup` (SQL) | Login do serviço `backup`, **só** `db_backupoperator` no `WebRadio` (`infra/sql/logins-backup.sql`), nenhum papel de servidor. **Pode** `BACKUP DATABASE` com `WITH CHECKSUM`. **Não pode** ler tabela, `RESTORE` nem `RESTORE VERIFYONLY` (exigem `CREATE DATABASE`, que ele não tem), criar banco nem tocar em outro banco (conferido pelo `backup-check.sh`). **Risco aceito: o `BACKUP` escreve em qualquer caminho em que o processo do SQL Server escreva** (o `svc_backup` escolheria o destino se pudesse mandar T-SQL livre). O que o limita: a senha **só existe no serviço `backup`** (e no `db-init`, que cria o login), e o **caminho é fixo no `infra/sql/backup.sql`** (`/var/opt/mssql/backup/webradio.bak`, sem variável), que é o único T-SQL que o `backup.sh` roda com essa identidade |
+| `sql-backup-init` | One-shot que dá ao volume `sql-backup` o dono do `mssql` (uid 10001), sem o que o `BACKUP` falha com acesso negado. **Root** dentro do contêiner, mas só com `CAP_CHOWN` (`cap_drop ALL` + `cap_add CHOWN`), **sem rede** (`network_mode: none`), **só o volume `sql-backup` montado**, rootfs só leitura, sem `DAC_OVERRIDE` nem `FOWNER` (por isso só `chown`, sem `chmod`). Roda antes do SQL Server subir e termina; o `smoke-compose.sh` confere `cap_add == [CHOWN]` e `network_mode: none` |
+| `sa` | Só no `sqlserver`, no `db-init` e no `restaurar` (RESTORE exige `dbcreator`); o `restaurar` só roda manual, a pedido do operador (E5-D13) |
 
 ### S-A05 — Bucket `publico` listável e imagens de divulgação sem sanitização
 **Afeta:** E1-F16 (`minio-init`), `02-api-rest.md §7` (`POST /divulgacoes/imagens`) · **[CONTRATO]**
@@ -277,6 +286,10 @@ O Liquidsoap interpreta URIs com protocolos como `annotate:`, `process:` (que **
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | minio, minio-init | `openssl rand -hex 16` / `-base64 32` | 32 caracteres | anual; nunca nas aplicações (S-A04) |
 | `MINIO_API_ACCESS_KEY`/`SECRET` | api | criada pelo `minio-init` | 40 caracteres | 180 dias |
 | `MINIO_WORKER_ACCESS_KEY`/`SECRET` | worker | criada pelo `minio-init` | 40 caracteres | 180 dias |
+| `RESTIC_SENHA` (`restic_senha`) | backup, restaurar | `openssl rand -base64 32` | 32 caracteres | **não rotacionar sem refazer o repositório** (o restic troca a senha por `restic key`). **Guardar também FORA do servidor**: sem ela o backup (local e externo) não abre (E5-D4) |
+| `SQL_BACKUP_SENHA` (`sql_backup_senha`) | db-init (cria o login `svc_backup`, `db_backupoperator`), backup | idem às senhas do SQL | 24 caracteres | 180 dias (`ALTER LOGIN` + recriar o `backup`) |
+| `MINIO_BACKUP_ACCESS_KEY`/`SECRET` | backup | criada pelo `minio-init` (identidade `svc-backup`, S-A04) | 40 caracteres | 180 dias |
+| `BACKUP_S3_ACCESS_KEY`/`SECRET` (`backup_s3_*`) | backup, restaurar | **coladas pelo operador** (as chaves do bucket externo; a rádio não as gera). O arquivo nasce **vazio**: vazio = cópia externa desligada (`BACKUP_EXTERNO_NAO_CONFIGURADO`, aviso) | as do provedor | 180 dias. A chave não pode alterar versionamento, ciclo de vida nem object lock (E5-D11) |
 | `REDIS_PASSWORD` | redis, api, worker (se usar) | `openssl rand -base64 32` | 32 caracteres | 180 dias |
 | `Seed__AdminEmail` / `Seed__AdminSenha` | api (só no primeiro boot) | senha: `openssl rand -base64 18` | política de senha (≥ 12) | tirar do ambiente depois do seed (S-B07) |
 

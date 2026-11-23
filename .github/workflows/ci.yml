@@ -415,13 +415,14 @@ jobs:
       - name: Build das imagens do projeto
         run: |
           infra/scripts/gerar-segredos.sh dev
-          docker compose -f docker-compose.yml build
+          # --profile backup: a imagem do backup/restaurar (restic, sqlcmd e mc) só se constrói com o perfil.
+          docker compose -f docker-compose.yml --profile backup build
 
       - name: trivy image (HIGH e CRITICAL com correção disponível) em cada imagem construída
         run: |
           set -euo pipefail
           falhas=0
-          for imagem in webradio-api:local webradio-worker:local webradio-migrator:local webradio-web:local webradio-icecast:local webradio-liquidsoap:local webradio-harbor-borda:local webradio-sanitizer:local webradio-minio-init:local; do
+          for imagem in webradio-api:local webradio-worker:local webradio-migrator:local webradio-web:local webradio-icecast:local webradio-liquidsoap:local webradio-harbor-borda:local webradio-sanitizer:local webradio-minio-init:local webradio-backup:local; do
             echo "== ${imagem}"
             trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${imagem}" || falhas=$((falhas + 1))
           done
@@ -661,8 +662,8 @@ jobs:
           docker compose -f docker-compose.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml config --quiet
 
-      - name: Build das imagens
-        run: docker compose -f docker-compose.yml build
+      - name: "Build das imagens (com o perfil backup, para a imagem do backup e do restaurar)"
+        run: docker compose -f docker-compose.yml --profile backup build
 
       - name: Subir a base de produção e esperar healthy (< 5 min)
         run: docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml up -d --wait --wait-timeout 300
@@ -696,6 +697,13 @@ jobs:
         if: ${{ !cancelled() && env.CURL_CA_BUNDLE != '' }}
         run: infra/scripts/smoke-borda.sh
 
+      # E5-F03 (DoD 4 e 5): o `backup` e o `restaurar` como o operador os roda, no stack real: BACKUP_OK com a cópia externa só como AVISO, a trava com a api no ar, e a restauração
+      # devolvendo uma tabela e um objeto que foram apagados. Por último: ele para e religa a api e o worker.
+      - name: Smoke do backup e da restauração (BACKUP_OK, trava, restauração do banco e da mídia)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 12
+        run: infra/scripts/smoke-backup.sh
+
       - name: Estado e logs em caso de falha
         if: failure()
         run: |
@@ -714,3 +722,25 @@ jobs:
       - name: Derrubar
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml down -v
+
+  # E5-F03: o teste de DADOS do backup e da restauração (09, critério do E5-F03): o servidor morre e a rádio volta num servidor NOVO (SQL Server e MinIO novos, logins com SID novo)
+  # a partir só do storage externo e dos segredos. Falha simulada em cada etapa do backup. Usa os scripts e a imagem de verdade (infra/backup), o minio-init de verdade e o SQL Server real.
+  backup-restauracao:
+    name: Backup e restauração (restic, MinIO e SQL Server reais)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    needs: seguranca
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: backup-restore-check.sh (builda o minio-init e o backup, sobe SQL Server e MinIO descartáveis)
+        env:
+          MSSQL_IMAGEM: ${{ env.MSSQL_IMAGEM }}
+          MINIO_IMAGEM: ${{ env.MINIO_IMAGEM }}
+        run: infra/scripts/backup-restore-check.sh
