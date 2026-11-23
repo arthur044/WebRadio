@@ -148,12 +148,14 @@ minio_init "brc-minio-a" >/dev/null && ok "minio-init de verdade no A (buckets, 
 # objetos: 6 em midia (um com subpasta), 2 em publico e 1 na QUARENTENA (que NÃO pode ir para o backup)
 for i in 1 2 3 4 5 6; do head -c $((20000 + i * 1111)) /dev/urandom > "$ARQ/m$i.bin"; done
 head -c 5000 /dev/urandom > "$ARQ/img1.webp"; head -c 6000 /dev/urandom > "$ARQ/img2.webp"; head -c 3000 /dev/urandom > "$ARQ/hostil.bin"
+MARCADOR="TEXTO-EM-CLARO-$(openssl rand -hex 12)"; printf '%s' "$MARCADOR" > "$ARQ/marcador.txt"
 chmod 644 "$ARQ"/*
 for i in 1 2 3 4 5 6; do mc_raiz brc-minio-a cp "/arq/m$i.bin" "x/midia/2026/m$i.bin" >/dev/null; done
 mc_raiz brc-minio-a cp /arq/img1.webp x/publico/divulgacoes/img1.webp >/dev/null
 mc_raiz brc-minio-a cp /arq/img2.webp x/publico/divulgacoes/img2.webp >/dev/null
+mc_raiz brc-minio-a cp /arq/marcador.txt x/publico/divulgacoes/marcador.txt >/dev/null
 mc_raiz brc-minio-a cp /arq/hostil.bin x/quarentena/2026/hostil.bin >/dev/null
-[[ "$(mc_raiz brc-minio-a ls --recursive x/midia | wc -l)" -eq 6 ]] && ok "objetos de teste no A (6 em midia, 2 em publico, 1 na quarentena)" || falha "objetos de teste no A"
+[[ "$(mc_raiz brc-minio-a ls --recursive x/midia | wc -l)" -eq 6 ]] && ok "objetos de teste no A (6 em midia, 3 em publico, 1 na quarentena)" || falha "objetos de teste no A"
 
 # o "storage externo": outro MinIO, só com o bucket do backup
 docker volume create "brc-ext-data-$SUF" >/dev/null
@@ -190,7 +192,7 @@ rodar_na_imagem backup.sh "$SEC" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a
 { [[ "$RC" == 0 ]] && grep -q 'BACKUP_EXTERNO_NAO_CONFIGURADO' <<<"$OUT" && grep -q 'BACKUP_OK' <<<"$OUT" && ! grep -q 'BACKUP_FALHOU' <<<"$OUT"; } && ok "sem cópia externa configurada: BACKUP_EXTERNO_NAO_CONFIGURADO é aviso, o backup local fecha com BACKUP_OK (código 0)" || falha "backup só local (RC=$RC)" "$OUT"
 grep -q 'BACKUP_ENVIO_OK destino=local' <<<"$OUT" && ok "envio local (repositório restic criptografado no volume backup-local)" || falha "envio local" "$OUT"
 confere "o espelho tem midia e publico e NÃO tem a quarentena" docker run --rm --user 10001:0 -v "$LOC_A:/backup:ro" --entrypoint sh "$IMG_BKP" -c '[ -f /backup/espelho/midia/2026/m6.bin ] && [ -f /backup/espelho/publico/divulgacoes/img2.webp ] && [ ! -e /backup/espelho/quarentena ] && ! find /backup/espelho -name hostil.bin | grep -q .'
-confere "o repositório local é criptografado (sem o conteúdo dos arquivos em claro)" bash -c "! docker run --rm --user 10001:0 -v '$LOC_A:/backup:ro' --entrypoint sh '$IMG_BKP' -c 'grep -rl -F \"\$(head -c 64 /backup/espelho/midia/2026/m1.bin | tr -d \"\\000\" | head -c 16)\" /backup/repo 2>/dev/null' | grep -q ."
+confere "o marcador em texto está no espelho e NÃO aparece em claro em lugar nenhum do repositório (restic criptografa)" docker run --rm --user 10001:0 -v "$LOC_A:/backup:ro" -e M="$MARCADOR" --entrypoint sh "$IMG_BKP" -c 'grep -rqF "$M" /backup/espelho && ! grep -rqF "$M" /backup/repo'
 
 # externo ligado com endpoint inalcançável: a etapa envio (externo) falha com 30
 rodar_na_imagem backup.sh "$SEC" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_ETAPAS=envio -e BACKUP_S3_ENDPOINT=http://brc-ninguem:9000 -e BACKUP_S3_BUCKET=backup-ext
