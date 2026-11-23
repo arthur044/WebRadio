@@ -27,6 +27,8 @@
 #   DB_APP_PASSWORD_FILE         (padrão: /run/secrets/db_app_password)
 #   DB_MIGRATOR_PASSWORD_FILE    (padrão: /run/secrets/db_migrator_password)
 #   DB_RELATORIO_PASSWORD_FILE   (padrão: /run/secrets/db_relatorio_password)
+#   DB_BACKUP_PASSWORD_FILE      (padrão: /run/secrets/sql_backup_senha) — E5-A01. OPCIONAL por enquanto: sem o arquivo, o login
+#                                svc_backup não é criado e o entrypoint avisa. O E5-F03 liga o segredo no compose e torna isto obrigatório.
 #   DB_SERVER                    host do SQL Server (padrão: sqlserver)
 # =============================================================================
 set -euo pipefail
@@ -42,6 +44,7 @@ MSSQL_SA_PASSWORD_FILE="${MSSQL_SA_PASSWORD_FILE:-/run/secrets/mssql_sa_password
 DB_APP_PASSWORD_FILE="${DB_APP_PASSWORD_FILE:-/run/secrets/db_app_password}"
 DB_MIGRATOR_PASSWORD_FILE="${DB_MIGRATOR_PASSWORD_FILE:-/run/secrets/db_migrator_password}"
 DB_RELATORIO_PASSWORD_FILE="${DB_RELATORIO_PASSWORD_FILE:-/run/secrets/db_relatorio_password}"
+DB_BACKUP_PASSWORD_FILE="${DB_BACKUP_PASSWORD_FILE:-/run/secrets/sql_backup_senha}"
 
 # -v Ambiente é obrigatório aqui também (defesa em profundidade — init-db.sql já
 # aborta sozinho, mas falhar antes de tocar o sqlcmd é mais barato
@@ -86,6 +89,13 @@ validar_alfabeto_senha "DB_APP_PASSWORD" "$APP_PASSWORD"
 validar_alfabeto_senha "DB_MIGRATOR_PASSWORD" "$MIGRATOR_PASSWORD"
 validar_alfabeto_senha "DB_RELATORIO_PASSWORD" "$RELATORIO_PASSWORD"
 
+# E5-A01: a senha do svc_backup é opcional até o E5-F03 ligar o segredo; presente, vale o mesmo alfabeto das outras.
+BACKUP_PASSWORD=""
+if [[ -r "$DB_BACKUP_PASSWORD_FILE" ]]; then
+  BACKUP_PASSWORD="$(cat "$DB_BACKUP_PASSWORD_FILE")"
+  validar_alfabeto_senha "DB_BACKUP_PASSWORD" "$BACKUP_PASSWORD"
+fi
+
 # Argumentos comuns. -N exige a conexão cifrada (gatilho iii do risco aceito: Encrypt=True fixo, sem depender do padrão do cliente) e -C aceita
 # o certificado autoassinado (mesmo risco aceito do migrator, Api e Worker; docs/conexao-sql-server.md §2). -l 30 = Connect Timeout da §4. O sqlcmd NÃO deixa trocar o Application Name (ele fixa program_name = SQLCMD, mesmo
 # com APP= num DSN): o db-init se identifica por -H, em sys.dm_exec_sessions.host_name = WebRadio.DbInit.
@@ -105,5 +115,13 @@ DB_APP_PASSWORD="$APP_PASSWORD" \
 DB_MIGRATOR_PASSWORD="$MIGRATOR_PASSWORD" \
 DB_RELATORIO_PASSWORD="$RELATORIO_PASSWORD" \
   sqlcmd "${SQLCMD_BASE[@]}" -i "$DIR_SQL/logins.sql"
+
+if [[ -n "$BACKUP_PASSWORD" ]]; then
+  echo "entrypoint: rodando logins-backup.sql (svc_backup)..."
+  DB_BACKUP_PASSWORD="$BACKUP_PASSWORD" \
+    sqlcmd "${SQLCMD_BASE[@]}" -i "$DIR_SQL/logins-backup.sql"
+else
+  echo "entrypoint: AVISO — sem $DB_BACKUP_PASSWORD_FILE: o login svc_backup NÃO foi criado e o backup do SQL não vai rodar." >&2
+fi
 
 echo "entrypoint: db-init concluído."

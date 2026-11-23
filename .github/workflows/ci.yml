@@ -313,6 +313,11 @@ jobs:
         if: always()
         run: docker rm -f mssql-ddl >/dev/null 2>&1 || true
 
+      # E5-A01: backup como svc_backup e restauração numa INSTÂNCIA NOVA (dois contêineres próprios, subidos pelo script; por isso depois de
+      # derrubar o mssql-ddl): usuários órfãos religados, contagens iguais, DBCC CHECKDB limpo, .bak corrompido recusado.
+      - name: backup-check (backup e restauração do SQL Server numa instância nova)
+        run: infra/scripts/backup-check.sh
+
   # F17: lint, testes e build do frontend. O vitest exige Node >= 22.12 e o Node do runner é mais antigo, então os comandos
   # rodam na MESMA imagem node (por digest) do build de produção (frontend/Dockerfile): o que passa aqui é o que vai para a
   # imagem, sem uma action nova (actions/setup-node precisaria entrar no patterns_allowed do repositório).
