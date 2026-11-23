@@ -116,6 +116,14 @@ A spec não diz com que credencial a API e o Worker falam com o MinIO. Se for `M
 
 O Liquidsoap **não** recebe credencial: ele só consome URLs pré-assinadas.
 
+**Identidades do backup no SQL Server e o volume do `.bak` (E5-A01, E5-F03, 2026-11-23):**
+
+| Principal | O que é e o limite |
+|---|---|
+| `svc_backup` (SQL) | Login do serviço `backup`, **só** `db_backupoperator` no `WebRadio` (`infra/sql/logins-backup.sql`), nenhum papel de servidor. **Pode** `BACKUP DATABASE` com `WITH CHECKSUM`. **Não pode** ler tabela, `RESTORE` nem `RESTORE VERIFYONLY` (exigem `CREATE DATABASE`, que ele não tem), criar banco nem tocar em outro banco (conferido pelo `backup-check.sh`). **Risco aceito: o `BACKUP` escreve em qualquer caminho em que o processo do SQL Server escreva** (o `svc_backup` escolheria o destino se pudesse mandar T-SQL livre). O que o limita: a senha **só existe no serviço `backup`** (e no `db-init`, que cria o login), e o **caminho é fixo no `infra/sql/backup.sql`** (`/var/opt/mssql/backup/webradio.bak`, sem variável), que é o único T-SQL que o `backup.sh` roda com essa identidade |
+| `sql-backup-init` | One-shot que dá ao volume `sql-backup` o dono do `mssql` (uid 10001), sem o que o `BACKUP` falha com acesso negado. **Root** dentro do contêiner, mas só com `CAP_CHOWN` (`cap_drop ALL` + `cap_add CHOWN`), **sem rede** (`network_mode: none`), **só o volume `sql-backup` montado**, rootfs só leitura, sem `DAC_OVERRIDE` nem `FOWNER` (por isso só `chown`, sem `chmod`). Roda antes do SQL Server subir e termina; o `smoke-compose.sh` confere `cap_add == [CHOWN]` e `network_mode: none` |
+| `sa` | Só no `sqlserver`, no `db-init` e no `restaurar` (RESTORE exige `dbcreator`); o `restaurar` só roda manual, a pedido do operador (E5-D13) |
+
 ### S-A05 — Bucket `publico` listável e imagens de divulgação sem sanitização
 **Afeta:** E1-F16 (`minio-init`), `02-api-rest.md §7` (`POST /divulgacoes/imagens`) · **[CONTRATO]**
 
