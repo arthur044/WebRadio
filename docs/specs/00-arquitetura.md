@@ -18,6 +18,7 @@
 | `06-epico-2-tarefas.md` | Pacote de tarefas do Épico 2 | Forge, Atlas, Prism |
 | `07-epico-3-tarefas.md` | Pacote de tarefas do Épico 3 | Forge, Atlas, Prism |
 | `08-epico-4-tarefas.md` | Pacote de tarefas do Épico 4 | Forge, Atlas, Prism, Sentinel |
+| `09-epico-5-tarefas.md` | Pacote de tarefas do Épico 5 (fechamento da v1 e deploy) | Forge, Atlas, Prism, Lore, Sentinel, Nexus |
 
 ---
 

@@ -1,0 +1,150 @@
+# Épico 5 — Fechamento da v1 e deploy: pacote de tarefas
+
+> Autor: Nexus · 2026-11-22 · Referências: `00-arquitetura.md` (D9, D17, §5, §6), `05-seguranca-auditoria.md` (§5 segredos, §8 checklist, S-A05, S-B10, riscos aceitos), `08-epico-4-tarefas.md` (E4-D10, riscos), runbooks em `docs/runbooks/`.
+> Donos: **Forge** (borda HTTPS, backup, robustez, smoke da base de produção), **Atlas** (backup e restauração do SQL Server, A01b), **Prism** (ajustes de tela para produção), **Lore** (guia de deploy), **Sentinel** (passada da checklist do `05` §8 na base de produção), **Nexus** (revisão dos riscos aceitos com o dono do produto).
+> **Escopo definido pelo dono do produto (2026-11-22):** o Épico 5 fecha a v1 e põe a rádio no ar numa **VPS Linux própria**, com **HTTPS pelo Caddy e Let's Encrypt** e **backup no servidor com cópia externa criptografada**. Grade recorrente, métricas de audiência e busca full-text ficam para a **v2**.
+> **v1.1 (2026-11-23):** reviews do Guardian, do Sentinel e do Atlas no #165 (o Sentinel aceitou o E5-D6). `X-Forwarded-Proto` fixo em `https` na base de produção (sem isso todo refresh e logout dá 403 pela checagem de origem); produção passa a `RECOVERY SIMPLE` (com FULL e sem `BACKUP LOG` o log cresceria sem limite); qual login faz cada etapa do backup e da restauração; usuários do banco religados aos logins depois do restore; rede `edge` própria com subnet fixa; `.bak` em volume próprio; a pasta `secrets/` inteira guardada fora do servidor; `DOMINIO` como fonte das URLs públicas; disco com o dobro da biblioteca. Sentinel: identidade própria do `backup` no MinIO, rede de saída só dele, storage externo com versionamento contra quem tomar o servidor, endurecimento e logs do `edge`, IPv6 fora da v1 (E5-D9 a E5-D12). Atlas: sem `COMPRESSION` (a edição Express não aceita), dono do diretório de backup, restauração como one-shot com o `sa` e a ordem dos passos (E5-D13).
+> **Regra de testes (dono do produto, 2026-11-22):** teste automatizado novo só em auth/segurança e dados/SQL. Borda, Compose e telas são conferidos à mão no deploy (roteiro do E5-L01).
+
+## O que o Épico 5 entrega
+
+1. **HTTPS na borda.** Um contêiner `edge` (Caddy) tira e renova o certificado do Let's Encrypt e repassa tudo ao nginx do `web`. Só as portas 80 e 443 ficam abertas para a internet, além da porta do ao vivo no `harbor-borda`, que continua com lista de IPs.
+2. **IP real do ouvinte até a API.** Os limites por IP do nginx e da API (Épico 4, #162) continuam valendo atrás do Caddy.
+3. **Backup diário** do SQL Server e da biblioteca de mídia, guardado no servidor e copiado criptografado para um storage externo, com roteiro de restauração testado.
+4. **Robustez antes do deploy:** os itens ainda abertos do backlog #25.
+5. **Base de produção testada:** o `docker-compose.yml` de produção sobe inteiro num job do CI, com o Caddy em modo de certificado interno.
+6. **Guia de deploy** para o operador: requisitos da VPS, primeira subida, atualização, restauração e runbooks.
+7. **Revisão dos riscos aceitos** com o dono do produto antes de abrir a rádio ao público.
+
+## Fora do Épico 5 (v2)
+
+- **Grade recorrente** (programa semanal que se repete sozinho; abre a rotação por programa).
+- **Métricas de audiência** (ouvintes conectados agora e ao longo do tempo, pelo Icecast).
+- **Busca full-text** na biblioteca (hoje é `LIKE` com escape em título e artista).
+- **E5-F01, imagem de divulgação no `sanitizer`** (reservada pelo E4-D10): adiada para a v2 pelo E5-D6.
+- **Normalização de volume** (`loudnorm`), HLS, app mobile e sistema de alertas (e-mail, push): continuam fora (`00` §6, riscos do `08`).
+
+## Pré-requisitos do dono do produto (antes do E5-F06)
+
+- Uma VPS Linux com Docker Engine e o plugin Compose, nos requisitos do E5-D5.
+- Um **domínio** com registro A apontando para a VPS (**sem AAAA na v1**, E5-D12).
+- Uma conta num **storage externo compatível com S3** para a cópia do backup (Backblaze B2, Wasabi, AWS S3 ou um MinIO em outro servidor), com um bucket só para isso, **com versionamento ligado** e a regra de ciclo de vida do E5-D11.
+
+## Definição de pronto do Épico
+
+1. `https://<domínio>` abre a SPA com certificado válido do Let's Encrypt (o `DOMINIO` do Caddy e os `PUBLIC_HOST`/`PUBLIC_AUTHORITY`/`PUBLIC_ORIGIN` do nginx saem do mesmo valor, sem porta); `http://` redireciona para `https://`; o certificado renova sozinho (o volume do Caddy persiste entre recriações do contêiner).
+2. O stream `https://<domínio>/stream/radio.mp3` toca por 30 min sem corte pelo Caddy, e o player da SPA não pausa ao navegar (o DoD 2 do Épico 2, agora em HTTPS).
+3. Atrás do Caddy, o IP que o nginx usa nas zonas `limit_*` e o IP que a API usa no limitador global são os do cliente, não o do Caddy, e a API vê o esquema `https`. Conferido: dois clientes de IPs diferentes não dividem o balde, um `X-Forwarded-For` forjado pelo cliente não muda o IP visto, e login, `refresh` e `logout` respondem 200/204 por `https` (a checagem de `Origin` da API compara com `https://<domínio>`).
+4. O backup diário gera um `.bak` do banco com `CHECKSUM`, copia a biblioteca (`midia/`) e envia os dois, criptografados, ao storage externo; a retenção apaga as cópias velhas; o log tem `BACKUP_OK` ou `BACKUP_FALHOU` com o motivo.
+5. A restauração do runbook, feita numa VPS ou num Compose limpo a partir só do storage externo e dos segredos guardados fora do servidor, devolve banco e biblioteca funcionando: login, grade, biblioteca com pré-escuta e uma música da rotação tocando.
+6. O job de CI da base de produção sobe o `docker-compose.yml` sem o arquivo de dev, com o Caddy em `tls internal`, e passa o `smoke-compose.sh` por `https://`.
+7. A checklist do `05` §8 passada pelo Sentinel na base de produção, sem CRÍTICO nem ALTO aberto.
+8. O dono do produto revisou a lista de riscos aceitos (seção "Riscos aceitos para a revisão") e cada um ficou aceito, corrigido antes do deploy ou levado para a v2.
+
+## Decisões deste épico
+
+| ID | Decisão | Motivo |
+|---|---|---|
+| E5-D1 | **Caddy como borda TLS** (dono do produto). Serviço `edge` com a imagem oficial do Caddy fixada por digest (endurecimento no E5-D9), portas publicadas como `0.0.0.0:80` e `0.0.0.0:443` (explícito: no `[::]` o `docker-proxy` entrega o IP dele e o `real_ip` se perde), `Caddyfile` versionado em `infra/edge/`. O domínio vem de `DOMINIO` e o e-mail do ACME de `ACME_EMAIL` (não são segredos; ficam no `.env`). Volumes `edge-data` (certificados) e `edge-config`. O `web` **deixa de publicar** a `8080` na base de produção: só o `edge` o alcança, pela rede `edge` (E5-D2). `reverse_proxy web:8080` com `flush_interval -1` (o stream e o SignalR não podem ficar em buffer). Sem HTTP/3 na v1 (UDP 443 fechado). HSTS sai do Caddy com `max-age=86400` no primeiro deploy e sobe para `31536000` depois de uma semana sem problema (runbook) | Certificado automático e renovação sem cron; a configuração fica pequena e auditável. Um HSTS longo logo de saída prenderia os navegadores ao HTTPS se o deploy precisar voltar atrás |
+| E5-D2 | **IP real em duas camadas.** O Caddy **não confia** em `X-Forwarded-For` de fora (sem `trusted_proxies`) e manda ao nginx o IP do socket. O nginx usa `set_real_ip_from ${EDGE_SUBNET}` e `real_ip_header X-Forwarded-For` com `real_ip_recursive off`, e todas as zonas `limit_*` (`$binary_remote_addr`) passam a ver o cliente. O nginx continua mandando à API `X-Forwarded-For $remote_addr` (agora o IP real), e a API segue confiando só na `Rede:SubnetApp`. **Esquema:** o nginx manda à API `X-Forwarded-Proto ${PROTO_PUBLICO}`, com `PROTO_PUBLICO=https` fixo na base de produção, em **todo** `location` que repassa à API (`/api/` e `/hubs/`), (o `web` não tem porta publicada, então só chega tráfego que passou pelo Caddy, que já redireciona `http` para `https`) e `$scheme` na base de dev. Sem isso a API veria `http://` como a própria origem e recusaria todo `refresh` e `logout` com 403. **Rede `edge`** nova, com subnet fixa (`EDGE_SUBNET`, padrão `172.30.250.0/29`), só com o `edge` e o `web`: o `set_real_ip_from` confia só nela, e o `harbor-borda` fica fora. Na base de dev, sem o Caddy, nada muda | Sem isso, todo ouvinte divide o IP do Caddy: o `conn_stream` de 25 por IP derrubaria a rádio no 26º ouvinte, e o login de 30/min por IP valeria para o site inteiro |
+| E5-D3 | **Backup** (dono do produto: no servidor e cópia externa). Serviço `backup` na base de produção (imagem do `restic` fixada por digest, mais `sqlcmd` e `mc`), disparado por um `systemd.timer` do host às 03:30 no horário do servidor (o mesmo padrão do `limpar-logs.sh`, `docs/operacao-logs.md`). **Modelo de recuperação:** produção passa a `RECOVERY SIMPLE` (o `init-db.sql` hoje põe `FULL` em produção, e sem `BACKUP LOG` o log cresceria sem limite); a perda máxima é de 1 dia de dados, e o ponto entra na revisão de riscos (E5-N01), onde o dono do produto pode trocar por `FULL` com `BACKUP LOG` de hora em hora. **Quem faz o quê:** o backup noturno usa **só** o login `svc_backup` (`db_backupoperator`, sem `CREATE DATABASE`), por isso não roda `RESTORE VERIFYONLY`: a integridade vem do `WITH CHECKSUM` na gravação e da restauração de teste. A restauração (`restaurar.sh`) é manual, feita pelo operador com o `sa` (`RESTORE` exige `dbcreator`/`sysadmin`); o segredo do `sa` entra só nesse comando, nunca no serviço `backup`. Passos: (1) `BACKUP DATABASE ... TO DISK = '/var/opt/mssql/backup/webradio.bak' WITH CHECKSUM, INIT` pelo `svc_backup` (sem `COMPRESSION`: a edição Express não aceita, e o restic já comprime), num volume próprio `sql-backup` montado no SQL Server e no `backup` (não no `sqlserver-data`); (2) só se o `BACKUP` saiu com código 0, `mc mirror` (com a identidade do E5-D10) do bucket `midia` para um diretório de trabalho (**só `midia/`**: a quarentena é transitória e pode ter arquivo malicioso; o bucket `publico` entra, por ter as imagens de divulgação); (3) `restic backup` do `.bak` e do espelho para o repositório externo, criptografado pelo próprio restic; (4) `restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune`; (5) `restic check` aos domingos. Uma cópia local do último `.bak` e do espelho fica no volume `backup-local` (restauração rápida sem baixar). Log `BACKUP_OK` com tamanho e duração, ou `BACKUP_FALHOU etapa=<sql\|midia\|envio\|retencao\|check>` | O restic criptografa no cliente (o storage externo nunca vê dado aberto), deduplica a biblioteca entre dias e tem retenção e verificação embutidas. Banco e mídia na mesma rodada mantêm a referência entre `ArquivoMidia` e os objetos |
+| E5-D4 | **Segredos novos** (formato do `05` §5, gerados pelo `gerar-segredos`, em `secrets/`): `restic_senha` (32 bytes, **guardar também fora do servidor**: sem ela o backup não abre), `backup_s3_access_key`, `backup_s3_secret_key` (do storage externo, colados pelo operador), `sql_backup_senha`. Variáveis não secretas no `.env`: `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`. Recebem esses segredos só quem usa: `backup` (`restic_senha`, `backup_s3_*`, `sql_backup_senha`, `minio_backup_*`), `db-init` (`sql_backup_senha`, para criar o login), `minio-init` (`minio_backup_*`, para criar a identidade) e `restaurar` (`restic_senha`, `backup_s3_*`, `sa`, root do MinIO); os 6 nomes novos entram no `gerar-segredos` e na `verificar-paridade-segredos.sh` | O mesmo modelo dos outros segredos; o gitleaks e a checagem do `.env.example` cobrem os nomes novos. **Cópia fora do servidor** (cofre do dono do produto, na primeira subida e a cada rotação): **obrigatórios** `restic_senha` (sem ela o backup não abre), `seguranca_pepper` (trocá-lo zera hashes de IP, pseudônimos de dispositivo e sessões), `backup_s3_*` com o endpoint e o bucket. **Regeneráveis** na restauração: senhas dos logins do SQL, chaves do MinIO, chave do JWT (todo mundo loga de novo). Recomendado guardar a pasta `secrets/` inteira |
+| E5-D5 | **Requisitos da VPS.** Os serviços que ficam no ar somam ~7,6 GB de `mem_limit` (SQL Server 2 GB, `clamd` 1,5 GB, API e Worker 768 MB cada, o resto menor). **Mínimo:** 4 vCPU, 10 GB de RAM mais 2 GB de swap, 80 GB de SSD (o disco guarda a biblioteca **duas vezes**: no MinIO e no espelho local do backup, mais o `.bak`), Ubuntu 24.04 LTS ou Debian 12/13. **Recomendado:** 16 GB de RAM e 160 GB de SSD (a biblioteca cresce ~5 MB por música). Banda: 128 kbps por ouvinte (200 ouvintes ≈ 26 Mbps sustentados). Firewall do host: só 22 (SSH com chave), 80, 443 e a porta do ao vivo restrita aos IPs do `HARBOR_PERMITIDOS` | Medido pelo `mem_limit` do `docker-compose.yml`; o `clamd` sozinho exige 1,5 GB (E4-D8) |
+| E5-D6 | **E5-F01 (imagem de divulgação no `sanitizer`) vai para a v2.** As condições do aceite S-B10 continuam valendo: só Admin envia, até 2 MB, só JPEG/PNG por magic bytes, dimensões conferidas no cabeçalho, SkiaSharp no job de Vulnerabilidades. Levar a imagem ao `sanitizer` exigiria decodificadores de imagem no ffmpeg mínimo (parser novo dentro do contêiner isolado) e um envio assíncrono com estado na tela | Custo alto e ganho pequeno enquanto o aceite valer. **Revisão obrigatória do Sentinel neste PR de spec.** Se uma das condições do S-B10 cair, a tarefa volta antes do deploy |
+| E5-D7 | **Sem sistema de alertas na v1.** O operador acompanha os marcadores (`WORKER_DEGRADADO`, `OUTBOX_ESGOTADO`, `AUTH_401_TAXA`, `BACKUP_FALHOU`) pelo `docker compose logs` com os runbooks. Um monitor externo de disponibilidade (ex.: UptimeRobot no `https://<domínio>/` e no `/stream/radio.mp3`) é recomendado no guia, sem código | Alertas por e-mail ou push são um sistema à parte; os riscos BAIXO "Worker degradado só no log" e "OUTBOX_ESGOTADO sem alerta" entram na revisão com o dono do produto |
+| E5-D8 | **Atualização em produção.** `git pull` de uma tag, `docker compose build`, `docker compose up -d` (o `migrator` roda antes da API, como hoje). Sem blue-green: uma atualização derruba a API e o site por ~1 min; o stream segue pelo Liquidsoap com a playlist local enquanto a API volta. Backup manual (`docker compose run --rm backup`) **antes** de toda atualização com migration | O tamanho da rádio não justifica orquestração; a playlist local já cobre a API fora (Fluxo D) |
+| E5-D9 | **Endurecimento e logs do `edge`** (Sentinel): o padrão `*endurecido` do compose (`cap_drop: ALL` com `cap_add: NET_BIND_SERVICE`, `no-new-privileges`, `read_only` com `tmpfs` em `/tmp`, `mem_limit` 128m, `pids_limit`), escrita só em `edge-data` e `edge-config`; `admin off` no `Caddyfile`. Filtro no logger padrão do Caddy (acesso **e** erro), `read_header 10s` no servidor. Log **sem query string** (filtro por regexp na URI) (as URLs pré-assinadas e o `listenerId` vão na query) e com o IP mascarado (`/24` no IPv4), com a mesma rotação dos outros contêineres (`docs/operacao-logs.md`) | O Caddy é o único contêiner exposto à internet; o log não pode guardar assinatura de URL nem IP completo além do que o S-B04 já aceita |
+| E5-D10 | **Identidade e rede do `backup`** (Sentinel): identidade própria no MinIO, `minio_backup_access_key`/`minio_backup_secret_key`, criada pelo `minio-init` com a policy `webradio-svc-backup` (só `s3:GetObject` e `s3:ListBucket` em `midia` e `publico`; nada em `quarentena`; nunca a credencial root, S-A04). Redes: `dados` (SQL e MinIO) e uma `saida-backup` só dele, com saída para a internet; o `05` registra o `backup` como a ponte aceita entre dados e internet. `*endurecido`, usuário não-root, `read_only` com `tmpfs` de trabalho, sem portas | O contêiner que lê o banco e a biblioteca e fala com a internet tem de ter o mínimo de permissão e de rede |
+| E5-D11 | **Storage externo à prova de quem tomar o servidor** (Sentinel): versionamento ligado no bucket externo e regra de ciclo de vida que **mantém versões apagadas ou sobrescritas por 30 dias** antes de removê-las; a chave do backup (`backup_s3_*`) não pode alterar versionamento, ciclo de vida nem object lock. O `restic forget --prune` continua funcionando (apaga a versão atual), e um invasor que apagar tudo deixa as versões anteriores recuperáveis pelo dono do produto, com a conta do storage | A chave que faz o `prune` fica no servidor; sem versionamento, invadir a VPS apagaria o backup junto |
+| E5-D12 | **Sem IPv6 na v1** (Sentinel): sem registro AAAA, IPv6 desligado no Docker, e o firewall do host recusa entrada por IPv6. O DoD 3 vale para IPv4 | Os limites por IP e o `real_ip` foram pensados para IPv4; IPv6 entra depois, com o DoD 3 repetido por v6 |
+| E5-D13 | **Restauração** (Atlas, Guardian): one-shot sob demanda (`docker compose --profile restore run --rm restaurar`), sem timer, que é o **único** lugar que recebe o `mssql_sa_password` além do `db-init` (D20/S-A10) e a credencial root do MinIO além do `minio-init` (o `svc-backup` é só leitura e a volta da mídia precisa escrever em `midia` e `publico`); mesmo endurecimento e redes do `backup` (E5-D10). Trava no início do `restaurar.sh`: aborta se `api` ou `worker` estiverem no ar e pede a confirmação do nome do banco antes do `REPLACE`. Ordem, com `api`, `worker` e `migrator` **parados** (`docker compose stop`; o script também faz `ALTER DATABASE ... SET SINGLE_USER WITH ROLLBACK IMMEDIATE` antes, senão o `REPLACE` falha com "exclusive access could not be obtained"): `db-init` (logins) → `RESTORE DATABASE ... WITH CHECKSUM, REPLACE` → `SET MULTI_USER` → `infra/sql/pos-restore.sql` (`ALTER USER <u> WITH LOGIN = <u>` para cada usuário da aplicação) → `mc mirror` de volta → `migrator` → API e Worker. Banco antes da mídia: um objeto que entrou entre o `BACKUP` e o espelho vira órfão depois da restauração e o Worker o limpa dentro da trava, sem erro. O `RESTORE VERIFYONLY` com o `sa` faz parte do teste de restauração mensal do runbook. O diretório do volume `sql-backup` nasce de `root` e precisa ser do `mssql` (uid 10001): um one-shot `sql-backup-init` (root, `cap_drop: ALL` com `cap_add: CHOWN`, sem rede, só esse volume montado) faz o `chown` antes do SQL Server subir (o `db-init` não roda como root). A edição Express limita o banco a 10 GB, com folga para esta rádio (a mídia fica no MinIO) | O `svc_backup` fica mínimo, e o `sa` só aparece quando o operador restaura |
+
+## Contratos alterados
+
+- **`docker-compose.yml`:** serviço `edge` novo; `web` sem `ports` (o `docker-compose.dev.yml` volta a publicar a `8080` para dev); serviço `backup` novo, com `profiles: [backup]` para não subir no `up` comum; rede `edge` (subnet fixa, só `edge` e `web`); volumes `edge-data`, `edge-config`, `backup-local` e `sql-backup`.
+- **`infra/sql/logins.sql`:** login `svc_backup` com `db_backupoperator` no banco da rádio e nada mais.
+- **`infra/sql/init-db.sql`:** produção em `RECOVERY SIMPLE` (E5-D3), idempotente também para banco já criado como `FULL`; sem `chown` (fica com o `sql-backup-init`, E5-D13).
+- **Serviço `sql-backup-init`** novo, one-shot (E5-D13).
+- **`infra/sql/pos-restore.sql`** novo (E5-D13).
+- **`infra/minio/init-buckets.sh`:** identidade `svc-backup` e policy `webradio-svc-backup` (E5-D10).
+- **Rede `saida-backup`** só do `backup` (E5-D10); serviço `restaurar` com `profiles: [restore]` (E5-D13).
+- **URLs públicas:** `Storage__PublicEndpoint` e as demais `PUBLIC_*` derivadas de `DOMINIO` (`https://${DOMINIO}/storage`), sem uma segunda fonte para o mesmo host.
+- **`infra/nginx/nginx.conf`:** `set_real_ip_from`/`real_ip_header` (E5-D2), com a `EDGE_SUBNET` vinda de variável (o `envsubst` que já existe).
+- **`05` §5:** os segredos do E5-D4 na tabela; **`05` S-A04:** o `svc_backup` na lista de identidades; **`00` §2:** o `edge` no desenho da borda (D9 continua: o nginx segue sendo o gateway; o Caddy só termina o TLS).
+
+## Tarefas — Forge (Backend, Worker e contêineres)
+
+| ID | Tarefa | Depende | Critério de aceite |
+|---|---|---|---|
+| **E5-F02** | **Borda HTTPS** (E5-D1, E5-D2): serviço `edge`, `Caddyfile`, `web` sem porta publicada, `real_ip` no nginx, `docker-compose.dev.yml` publicando a `8080` como hoje | — | DoD 1 a 3 conferidos à mão no deploy (roteiro do E5-L01); no CI, pelo E5-F05 |
+| **E5-F03** | **Backup** (E5-D3, E5-D4): serviço `backup`, script `infra/backup/backup.sh` com as etapas e os logs do E5-D3, `restaurar.sh` (baixa do restic, `RESTORE DATABASE ... WITH CHECKSUM, REPLACE` pelo `sa`, recria os logins pelo `logins.sql` e **religa cada usuário do banco ao login** com `ALTER USER <usuario> WITH LOGIN = <login>`, porque num servidor novo os logins nascem com outro SID e os usuários restaurados ficariam órfãos; `mc mirror` de volta; a varredura de órfãos de `midia/` não roda antes de o espelho terminar), `systemd.timer` de exemplo (senha do `sqlcmd` por `SQLCMDPASSWORD` lida do arquivo do segredo, nunca na linha de comando; binários `restic`, `mc` e `sqlcmd` baixados com SHA-256 conferido; a imagem `backup` no trivy do CI), segredos no `gerar-segredos` (sh e ps1) e no `verificar-paridade-segredos.sh` | E5-A01 | **Com teste (dados):** num Compose descartável com um MinIO no papel de storage externo, backup → **subir uma instância nova** (volumes do SQL e do MinIO apagados, logins recriados) → restaurar → migrator e API abrem o banco (sem usuário órfão) → contagem de `ArquivoMidia` e de objetos igual e uma mídia tocando pela pré-escuta (DoD 4 e 5). Falha simulada em cada etapa grava `BACKUP_FALHOU etapa=...` e sai com código diferente de 0 |
+| **E5-F04** | **Robustez antes do deploy** (#25): conferir item a item o que ainda vale e fazer, num PR só: `Transacoes.cs` separado por assunto; `EventoOutbox` com `IClock`; timeout do applock e banco fora como 503 com `Retry-After` (não 500); backoff do dispatcher por evento, não do laço inteiro; eventos esgotados fora do `IX_EventoOutbox_Pendentes`; READ COMMITTED documentado no runbook. O item "smoke com Redis e MinIO reais" é coberto pelo E5-F05, e o "alerta de `OUTBOX_ESGOTADO`" pelo E5-D7 | — | Teste dos itens de dados (outbox, applock); o resto pela revisão. Fecha o #25 |
+| **E5-F05** | **Job do CI da base de produção**: sobe só o `docker-compose.yml` (sem o de dev), com um override de CI que põe o Caddy em `tls internal` com `DOMINIO=webradio.test` resolvido para `127.0.0.1`; roda o `smoke-compose.sh` por `https://` com a CA interna do Caddy; confere que só `80`/`443` (e a porta do harbor) estão publicadas que o IP visto pela API é o do cliente (DoD 3, com um `X-Forwarded-For` forjado que **não** pode mudar o IP) e que login, `refresh` e `logout` passam por `https` (sem o 403 da checagem de origem) | E5-F02 | Job verde no PR. Substitui o item "subida da base de produção num job" do README |
+
+## Tarefas — Atlas (Banco de dados)
+
+| ID | Tarefa | Depende | Critério de aceite |
+|---|---|---|---|
+| **E5-A01** | **Backup e restauração do SQL Server** (E5-D3): login `svc_backup` (`db_backupoperator`) no `logins.sql`; `RECOVERY SIMPLE` em produção no `init-db.sql`; volume `sql-backup`; o T-SQL do `BACKUP ... WITH CHECKSUM` (pelo `svc_backup`) e do `RESTORE ... WITH CHECKSUM` + `ALTER USER ... WITH LOGIN` (pelo `sa`) usado pelo E5-F03 | — | Teste com SQL real numa **instância nova** (outro contêiner, logins recriados): backup, restore, usuários religados, `DBCC CHECKDB` limpo, contagem de linhas das tabelas principais igual e o login da API abrindo o banco. Revisão do Sentinel nas permissões do `svc_backup` e no uso do `sa` só na restauração |
+| **E4-A01b** | (pendente do Épico 4) Planos com o código real e o dataset sintético de 50.000 mídias | — | Como no `08` |
+
+## Tarefas — Prism (Frontend)
+
+| ID | Tarefa | Depende | Critério de aceite |
+|---|---|---|---|
+| **E5-P01** | **Ajustes para produção:** player e `/hubs` só com URL relativa (nenhum `http://localhost` ou porta fixa no build de produção); página 404 da SPA; `<title>`, favicon e `meta description` com o nome da rádio vindo de variável de build (`VITE_NOME_RADIO`); aviso amigável quando o stream não carrega (o ouvinte vê "a rádio volta em instantes", não um player mudo) | — | Conferido à mão no deploy; sem teste novo (tela) |
+
+## Tarefas — Lore (Documentação)
+
+| ID | Tarefa | Depende | Critério de aceite |
+|---|---|---|---|
+| **E5-L01** | **Guia de deploy** em `docs/deploy.md`: requisitos (E5-D5), preparar a VPS (usuário sem root, SSH só com chave, firewall, Docker, `unattended-upgrades`, timers de logs e de backup), DNS, gerar segredos e **guardar a `restic_senha` fora do servidor**, primeira subida, roteiro de conferência manual (DoD 1 a 3, o player, o ao vivo pelo harbor, um upload de música), atualização (E5-D8), restauração (E5-F03) e índice dos runbooks. README apontando para ele | E5-F02, E5-F03 | Revisão do Forge (passos técnicos) e do Sentinel (passos de segurança) |
+
+## Tarefas — Sentinel e Nexus
+
+| ID | Tarefa | Depende | Critério de aceite |
+|---|---|---|---|
+| **E5-S01** | **Checklist do `05` §8 na base de produção**: passada completa no `docker-compose.yml` com o `edge` e o `backup`, segredos por serviço, portas publicadas, cabeçalhos de segurança pelo Caddy + nginx (sem duplicar nem perder a CSP), HSTS só pelo Caddy, sem `includeSubDomains` nem `preload` na v1 (E5-D1); avaliar `upgrade-insecure-requests` na CSP; permissões do `svc_backup` e do `svc-backup` do MinIO | E5-F02, E5-F03 | Comentário no PR do E5-F05 com cada item; DoD 7 |
+| **E5-N01** | **Revisão dos riscos aceitos com o dono do produto** (DoD 8): a lista consolidada abaixo, cada risco com a decisão dele | E5-S01 | Decisões registradas neste arquivo (v1.1) e no `05` |
+
+## Agrupamento de entrega
+
+| Pacote | Conteúdo | Donos | Revisão |
+|---|---|---|---|
+| **E1** | E5-F02 + E5-F05 (borda HTTPS e o job da base de produção) | Forge | Guardian, Sentinel |
+| **E2** | E5-A01 + E5-F03 (backup e restauração) | Atlas, Forge | Guardian, Sentinel, Atlas |
+| **E3** | E5-F04 (robustez, #25) | Forge | Guardian, Atlas |
+| **E4** | E5-P01 | Prism | Guardian |
+| **E5** | E5-L01 (guia de deploy), depois o E5-S01 e o E5-N01 | Lore, Sentinel, Nexus | Forge, Sentinel |
+
+Ordem: E1 e E2 em paralelo (Forge começa pelo E1, Atlas pelo E5-A01); E3 e E4 a qualquer momento; E5 por último. O deploy real acontece depois do E5-N01, com o dono do produto.
+
+## Riscos aceitos para a revisão (E5-N01)
+
+Consolidação dos riscos aceitos nos `05`, `07` e `08` e nos PRs do Épico 4, para o dono do produto decidir antes de abrir a rádio:
+
+| Origem | Risco | Situação hoje |
+|---|---|---|
+| `05` | `TrustServerCertificate=True` com o SQL Server no contêiner (certificado autoassinado, rede interna) | Aceito com condições |
+| `05` | Harbor sem TLS (só por lista de IPs ou VPN, credencial por locutor) | Aceito com condições |
+| `05` S-B10 / E5-D6 | Imagem de divulgação recodificada na API | Aceito enquanto valerem as condições |
+| `07` | IPv6 girando /64 escapa do limite de pedidos por IP (teto global de 300 pendentes) | Aceito |
+| `08` | Worker degradado e `OUTBOX_ESGOTADO` só no log, sem alarme (E5-D7) | Aceito na v1 |
+| `08` | Auditoria `MIDIA_EXCLUIDA` com a retenção do log do contêiner (14 dias) | Aceito na v1 |
+| `08` | Volume diferente entre faixas (sem `loudnorm`) | Aceito na v1 |
+| `08` | Música protegida por direito autoral enviada pelo locutor (termo de uso) | Depende do texto do termo |
+| `08` v1.7 | Worker em banco vazio apaga até 5 objetos de `midia/` e até 50 da quarentena antes da trava | Aceito |
+| `08` / #143 | Pedido preso na instância quando a URL falha (some em 24 h; locutor marca à mão) | Aceito |
+| #162 | Cadastro 3/h e sessão 30/min por IP penalizam ouvintes atrás de NAT; `conn_stream` 25 por IP deixa 8 IPs encherem os 200 lugares do Icecast | Aceito; capacidade do Icecast a medir no deploy |
+| E5-D3 | Modelo de recuperação `SIMPLE`: perda de até 1 dia de dados se o servidor morrer (alternativa: `FULL` com `BACKUP LOG` de hora em hora) | Novo, a decidir |
+
+## Riscos
+
+| Nível | Risco | Mitigação |
+|---|---|---|
+| ALTO | Atrás do Caddy, todo cliente divide um IP e os limites por IP derrubam a rádio | E5-D2 e o DoD 3 conferido no CI (E5-F05) e no deploy |
+| ALTO | Backup que nunca foi restaurado não serve | DoD 5: restauração testada no E5-F03 e repetida no deploy; `restic check` semanal |
+| ALTO | Perder a `restic_senha` torna o backup ilegível | Guia do E5-L01 manda guardá-la fora do servidor (gerenciador de senhas do dono do produto) antes da primeira subida |
+| MÉDIO | O Caddy com buffer corta o stream ou atrasa o SignalR | `flush_interval -1` (E5-D1) e o DoD 2 de 30 min |
+| MÉDIO | Let's Encrypt recusa por limite de emissão ao repetir deploy | Volume `edge-data` persistente; testes de CI com `tls internal`, nunca contra o Let's Encrypt |
+| BAIXO | Atualização derruba o site por ~1 min | Aceito (E5-D8); o stream segue pela playlist local |
