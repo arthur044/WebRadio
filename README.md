@@ -189,10 +189,27 @@ O pendente de atualizar as imagens do SQL Server e do Liquidsoap antes do upload
 - **Regra de testes (2026-11-22)**: teste automatizado novo só para auth/segurança e dados/SQL; o resto é teste manual. O smoke (`smoke-midia.sh`, seção DoD 2 e 8) segue cobrindo o pedido tocado pelo playout e a rotação; só a asserção de repetição em sequência saiu dele (#143), e o DoD 2 do playout passa a contar como teste manual do usuário.
 - **Revisão**: todo PR do Épico 4 passa pelo Sentinel, por ser o épico do upload não confiável.
 
+## Status do Épico 5
+
+**Em andamento.** O Épico 5 fecha a v1 e leva a rádio para uma VPS própria: HTTPS pelo Caddy com Let's Encrypt e backup com cópia externa. O pacote de tarefas é [`docs/specs/09-epico-5-tarefas.md`](docs/specs/09-epico-5-tarefas.md) (spec: #165). **Como colocar no ar, passo a passo e escrito para quem não é desenvolvedor: [`docs/deploy.md`](docs/deploy.md).**
+
+| Entrega | PR | Situação |
+|---|---|---|
+| Ajustes de produção no frontend (E5-P01): página 404, nome da rádio no título, na descrição, no favicon e no player (`NOME_RADIO` no `.env`) e aviso "A rádio volta em instantes." com o stream fora do ar | #166 | Na `main` |
+| Backup e restauração do SQL Server (E5-A01): `RECOVERY SIMPLE` em produção, login `svc_backup` só com `db_backupoperator`, `BACKUP ... WITH CHECKSUM`, restauração pelo `sa` e teste com SQL real numa instância nova | #167 | Na `main` |
+| Borda HTTPS (E5-F02) e job de CI da base de produção (E5-F05): serviço `edge` (Caddy), `web` sem porta publicada, IP real do ouvinte até o nginx e a API | #168 | Na `main` |
+| Backup com restic (E5-F03): local e criptografado, cópia externa em S3 **opcional**, `restaurar` manual, timer `systemd` às 03:30 | #170 | Na `main` |
+| `pos-restore.sql` confere papéis, usuários e `guest` do banco restaurado (E5-A01b) | #171 | Na `main` |
+
+- **Produção**: só o Caddy publica portas (`80` e `443`). Certificado automático, HSTS de 1 dia no primeiro deploy (sobe para 1 ano depois de uma semana). Sem IPv6 na v1 (sem registro AAAA). Operação em [`docs/runbooks/borda-https.md`](docs/runbooks/borda-https.md).
+- **Backup**: o serviço `backup` (perfil `backup`) grava o `.bak` do banco e o espelho de `midia/` e `publico/` num repositório restic local; **com a cópia externa ligada**, copia também para um bucket S3 versionado (`BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET` e `secrets/backup_s3_*`). Sem ela, o log traz o aviso `BACKUP_EXTERNO_NAO_CONFIGURADO` e só há cópia local. A perda máxima é de 1 dia. A `restic_senha` precisa ser guardada **fora do servidor**: sem ela nenhum backup abre. Operação, restauração e o caso de invasão suspeita (restaurar o ponto **anterior** à suspeita) estão em [`docs/runbooks/backup-e-restauracao.md`](docs/runbooks/backup-e-restauracao.md).
+- **Adiado para a v2**: a imagem de divulgação no `sanitizer` (E5-F01, decisão E5-D6).
+
 ## O que vem a seguir
 
 - **Épico 4**: o A01b do Atlas e conferir a Definição de Pronto item a item.
-- **Épico 5**: imagem de divulgação passa para o `sanitizer` (E5-F01).
+- **Épico 5**: a revisão dos riscos aceitos com o dono do produto (E5-N01) e o deploy, depois do checklist de segurança do `05` na base de produção (E5-S01). A robustez antes do deploy (E5-F04, issue #25) segue na spec 09.
+- **v2**: imagem de divulgação no `sanitizer` (E5-F01), grade recorrente, métricas de audiência e busca de texto.
 
 ## Como contribuir
 
@@ -262,6 +279,19 @@ WebRadio é um projeto **público no GitHub**. Nenhum segredo, credencial, e-mai
 | [`06-epico-2-tarefas.md`](docs/specs/06-epico-2-tarefas.md) | Pacote de tarefas do Épico 2 (grade, ao vivo, credencial de transmissão) | Time |
 | [`07-epico-3-tarefas.md`](docs/specs/07-epico-3-tarefas.md) | Pacote de tarefas do Épico 3 (pedidos de música, moderação, divulgações) | Time |
 | [`08-epico-4-tarefas.md`](docs/specs/08-epico-4-tarefas.md) | Pacote de tarefas do Épico 4 (biblioteca de mídia, upload, sanitização, playout) | Time |
+| [`09-epico-5-tarefas.md`](docs/specs/09-epico-5-tarefas.md) | Pacote de tarefas do Épico 5 (borda HTTPS, backup, deploy) | Time |
+
+## Operação e deploy
+
+| Documento | Para quê |
+|---|---|
+| [`docs/deploy.md`](docs/deploy.md) | Guia de deploy para o dono do produto: VPS, domínio, segredos, bucket externo, primeira subida, conferência, backup, atualização e restauração |
+| [`docs/runbooks/borda-https.md`](docs/runbooks/borda-https.md) | Caddy, certificado, HSTS e IP real do ouvinte |
+| [`docs/runbooks/backup-e-restauracao.md`](docs/runbooks/backup-e-restauracao.md) | Backup, cópia externa, restauração e teste mensal |
+| [`docs/runbooks/worker-degradado.md`](docs/runbooks/worker-degradado.md) | O que fazer com cada `WORKER_DEGRADADO` |
+| [`docs/runbooks/auth-401-taxa.md`](docs/runbooks/auth-401-taxa.md) | O alerta de 401 do login |
+| [`docs/runbooks/rotacao-jwt-signing-key.md`](docs/runbooks/rotacao-jwt-signing-key.md) | Rotação da chave de assinatura do login |
+| [`docs/operacao-logs.md`](docs/operacao-logs.md) | Rotação e retenção dos logs |
 
 ## Licença
 
@@ -269,6 +299,6 @@ WebRadio é licenciado sob a [MIT License](LICENSE).
 
 ---
 
-**Versão**: Épico 3 fechado; Épico 4 em andamento (spec v1.7; D1 a D4 na `main`)  
-**Última atualização**: 2026-11-22  
+**Versão**: Épico 4 entregue (A01b do Atlas pendente); Épico 5 em andamento (spec 09; borda HTTPS e backup na `main`)  
+**Última atualização**: 2026-11-23  
 **Mantido por**: Nexus (Planejador), Forge (Backend), Atlas (DBA), Prism (Frontend), Lore (Documentação)

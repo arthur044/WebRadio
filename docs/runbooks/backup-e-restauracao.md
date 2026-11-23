@@ -32,9 +32,9 @@ Rode uma vez à mão antes de confiar no timer: `docker compose --profile backup
 
 ## Ligar a cópia externa (depois, sem mudar código)
 
-1. No provedor (Backblaze B2, Wasabi, AWS S3 ou um MinIO em outro servidor): um **bucket só para isso**, com **versionamento ligado** e uma regra de ciclo de vida que **mantém versões apagadas ou sobrescritas por 30 dias** (E5-D11). A chave do backup **não** pode alterar versionamento, ciclo de vida nem object lock: com isso, quem invadir o servidor e apagar tudo deixa as versões recuperáveis pela conta do provedor.
+1. No provedor (Backblaze B2, Wasabi, AWS S3 ou um MinIO em outro servidor): um **bucket só para isso**, com **versionamento ligado** e uma regra de ciclo de vida que **mantém versões apagadas ou sobrescritas por 30 dias** (E5-D11). A chave do backup **não** pode alterar versionamento, ciclo de vida nem object lock. **Limite conhecido:** o backup precisa apagar (o `restic forget --prune`), e quem tiver a chave pode apagar **uma versão específica** de forma definitiva (`DeleteObject` com `versionId`); então o versionamento e os 30 dias protegem contra erro, bug e apagada sem querer, **não** contra um invasor que use a chave. Só o **Object Lock** com retenção protegeria disso; ele está desligado até o E5-N01 decidir (e o Forge provar o restic com ele).
 2. No `.env`: `BACKUP_S3_ENDPOINT=https://s3.exemplo.com` (**só `https://`**: com `http://` o backup e o restaurar recusam, `etapa=config`, para as chaves e os dados não irem em claro; sem o bucket no fim) e `BACKUP_S3_BUCKET=nome-do-bucket`.
-3. Cole as chaves nos arquivos `secrets/backup_s3_access_key` e `secrets/backup_s3_secret_key` (nascem **vazios**; sem newline no fim: `printf '%s' 'CHAVE' > secrets/backup_s3_access_key`).
+3. Cole as chaves nos arquivos `secrets/backup_s3_access_key` e `secrets/backup_s3_secret_key` (nascem **vazios**; sem newline no fim). Grave sem deixar a chave no histórico do terminal nem em argumento de comando: `read -rsp 'access key: ' V; printf '%s' "$V" > secrets/backup_s3_access_key; unset V` (e o mesmo para `secrets/backup_s3_secret_key`).
 4. `docker compose --profile backup run --rm backup`: o log passa a ter `BACKUP_ENVIO_OK destino=externo` e o aviso some. O repositório externo nasce com os mesmos parâmetros do local (`--copy-chunker-params`) e usa a **mesma** `restic_senha`.
 
 ## Guardar fora do servidor (obrigatório, antes da primeira subida)
@@ -69,7 +69,7 @@ docker compose --profile restore run --rm --no-deps --entrypoint restic restaura
 docker compose --profile restore run --rm -e RESTAURAR_SNAPSHOT=<id-do-snapshot-anterior> restaurar
 ```
 
-E, no servidor que foi invadido, **não reaproveite os segredos**: gere de novo as senhas dos logins do SQL, as chaves do MinIO e a chave do JWT ([`rotacao-jwt-signing-key.md`](rotacao-jwt-signing-key.md)); a `restic_senha` e as chaves `backup_s3_*` entram na avaliação do Sentinel (quem tomou o servidor leu os arquivos de `secrets/`). A cópia externa com versionamento (E5-D11) é o que garante que ainda existe um snapshot anterior. Este aviso também vale para o guia de deploy (E5-L01).
+E, no servidor que foi invadido, **não reaproveite os segredos**: gere de novo as senhas dos logins do SQL, as chaves do MinIO e a chave do JWT ([`rotacao-jwt-signing-key.md`](rotacao-jwt-signing-key.md)); a `restic_senha` e as chaves `backup_s3_*` entram na avaliação do Sentinel (quem tomou o servidor leu os arquivos de `secrets/`). A cópia externa com versionamento (E5-D11) costuma deixar um snapshot anterior, **mas não é garantia** (quem tomou o servidor leu a chave `backup_s3_*`, que pode apagar versões; veja o limite conhecido em "Ligar a cópia externa"): confira na conta do provedor se os snapshots anteriores ainda existem e revogue a chave. Este aviso também vale para o guia de deploy (E5-L01).
 
 ## Teste de restauração mensal
 
