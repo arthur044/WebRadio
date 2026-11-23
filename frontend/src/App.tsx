@@ -10,6 +10,7 @@ import { AdminGradePage } from './features/admin/AdminGradePage'
 import { AdminDivulgacoesPage } from './features/admin/AdminDivulgacoesPage'
 import { BibliotecaPage } from './features/biblioteca/BibliotecaPage'
 import { MaisTocadasPage } from './features/admin/MaisTocadasPage'
+import { NaoEncontradaPage } from './features/NaoEncontradaPage'
 import { RequireRole } from './features/auth/RequireRole'
 
 function App() {
@@ -61,6 +62,7 @@ function App() {
         />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/trocar-senha" element={<TrocarSenhaPage />} />
+        <Route path="*" element={<NaoEncontradaPage />} />
       </Route>
     </Routes>
   )

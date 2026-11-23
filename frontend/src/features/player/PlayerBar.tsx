@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { NOME_RADIO } from '../../shared/lib/nomeRadio'
 import { STREAM_URL, usePlayerStore } from './playerStore'
 import { rotuloDoAgora, useStreamInfo } from './useStreamInfo'
 
@@ -64,7 +65,13 @@ export function PlayerBar() {
               ? 'Conectando'
               : 'Fora do ar'}
         </span>
-        <span className="text-text-muted truncate text-sm">{nowPlaying ?? 'WebRadio'}</span>
+        {status === 'error' ? (
+          <span aria-live="polite" className="text-text-muted truncate text-sm">
+            A rádio volta em instantes.
+          </span>
+        ) : (
+          <span className="text-text-muted truncate text-sm">{nowPlaying ?? NOME_RADIO}</span>
+        )}
       </div>
 
       <button

@@ -7,6 +7,8 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ .
+# Nome da rádio no <title>, na meta description, no favicon e no player (E5-P01); sem o argumento vale o padrão "WebRadio".
+ARG VITE_NOME_RADIO
 # Build puro, sem limpeza pós-build (Guardian H2): o vite.config.ts de produção não
 # tem a entry do probe nem a fixture de áudio — elas só existem no
 # vite.config.e2e.ts, usado pelo Playwright local, nunca por este Dockerfile.
