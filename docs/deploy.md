@@ -243,6 +243,7 @@ ACME_EMAIL=seu-email-real@exemplo.com.br
 
 - `DOMINIO`: o endereço **sem** `https://` e **sem** porta. Ele vira o certificado do cadeado e o nome do site em toda a rádio.
 - `ACME_EMAIL`: o e-mail do Let's Encrypt.
+- As linhas `PUBLIC_HOST`, `PUBLIC_AUTHORITY`, `PUBLIC_ORIGIN` e `WEB_PORT` do modelo são do ambiente de desenvolvimento: **em produção são ignoradas, deixe como estão** (o endereço sai só do `DOMINIO`).
 - `NOME_RADIO` (já vem como `WebRadio`): o nome da sua rádio, que aparece no título da aba, na descrição e no player. Mude se quiser **antes da primeira subida** (muda o site montado).
 
 > **Quem já tinha um `.env` de antes do Épico 5** precisa **acrescentar** as linhas `DOMINIO` e `ACME_EMAIL` (e conferir as demais contra o `.env.example`): sem elas o certificado não sai. Não apague o `.env` antigo: edite-o.
@@ -365,13 +366,13 @@ cd /opt/webradio
 docker compose up -d --wait
 ```
 
-Na **primeira vez**, o servidor monta as imagens da rádio (vários minutos). Espere o comando voltar sozinho. Ao fim, confira:
+Na **primeira vez**, o servidor monta as imagens da rádio e o antivírus baixa a base de vírus (centenas de MB). **Reserve de 10 a 20 minutos** e espere o comando voltar sozinho: ele só termina quando tudo estiver pronto. Ao fim, confira:
 
 ```bash
 docker compose ps
 ```
 
-Você deve ver os serviços com `healthy` (ou `running`, os que não têm checagem). Se algum ficar `unhealthy` ou ficar reiniciando, olhe o log dele: `docker compose logs --tail 50 <nome-do-serviço>`.
+Os serviços que ficam no ar devem aparecer como `healthy` (o `icecast` não tem checagem e aparece só como `Up`). **Quatro serviços são tarefas de uma vez só e terminam sozinhos: aparecem como `Exited (0)` e isso é o normal, não é erro** (`sql-backup-init`, `db-init`, `minio-init` e `migrator`). Se algum ficar `unhealthy` ou ficar reiniciando, olhe o log dele: `docker compose logs --tail 50 <nome-do-serviço>`.
 
 Confira o certificado:
 
@@ -421,7 +422,7 @@ Abra a página de entrada. Entre com o e-mail que você informou na seção 5.3 
 Na página inicial, aperte o play: o som deve começar. Navegue entre as páginas do site (Grade, Mural): **o som não pode parar**. Deixe tocando por **30 minutos** sem cortes (é o teste do Caddy com o stream; o endereço direto é `https://radio.exemplo.com.br/stream/radio.mp3`).
 
 **6. Enviar uma música (biblioteca).**
-Entre como Administrador ou Locutor, abra **Biblioteca** e envie um MP3 de **pelo menos 30 segundos**. O status deve ir de "Aguardando" a **Aprovada** em instantes (o antivírus e o conversor trabalham nele). Use a **pré-escuta** para ouvir. Depois de aprovada, a música entra na rotação e toca sozinha em algum momento: acompanhe em "Tocando agora".
+Entre como Administrador ou Locutor, abra **Biblioteca** e envie um MP3 de **30 segundos a 20 minutos** e **até 250 MiB** (fora disso o envio é recusado). O status deve ir de "Aguardando" a **Aprovada** em instantes (o antivírus e o conversor trabalham nele). Use a **pré-escuta** para ouvir. Depois de aprovada, a música entra na rotação e toca sozinha em algum momento: acompanhe em "Tocando agora".
 
 **7. Pedido de música (opcional, mas recomendado).**
 Como ouvinte, faça um pedido; como Administrador, abra a fila de moderação e escolha **Aprovar com mídia**, apontando a música da biblioteca. O pedido aprovado deve tocar sozinho.
@@ -467,6 +468,8 @@ Pode levar alguns minutos. No fim você deve ver, entre as linhas:
 - `BACKUP_ENVIO_OK destino=externo`
 - `BACKUP_OK duracao_s=... externo=sim`
 
+O backup também confere a integridade do repositório (`restic check`), mas **só aos domingos**: no primeiro teste você **não** verá uma linha `BACKUP_CHECK_OK`, e isso é normal.
+
 Se aparecer `BACKUP_EXTERNO_NAO_CONFIGURADO`, o `.env` ou os arquivos `secrets/backup_s3_*` não estão certos. Se aparecer `BACKUP_FALHOU etapa=... motivo=...`, procure o motivo na tabela de erros do runbook [`backup-e-restauracao.md`](runbooks/backup-e-restauracao.md#erros-comuns). **Não** copie a saída crua do comando em lugar nenhum.
 
 ### 10.3 O timer: backup automático todo dia às 03:30
@@ -478,7 +481,7 @@ sudo systemctl enable --now webradio-backup.timer
 systemctl list-timers webradio-backup.timer
 ```
 
-A última linha deve mostrar o **próximo disparo às 03:30** (no horário do servidor). O arquivo `webradio-backup.service` assume que o projeto está em `/opt/webradio`; se você o pôs em outro lugar, ajuste a linha `WorkingDirectory=`.
+A última linha deve mostrar o **próximo disparo às 03:30** (no horário do servidor). O serviço roda como administrador do servidor (`root`), por isso consegue ler o `.env` e a pasta `secrets/`. O arquivo `webradio-backup.service` assume que o projeto está em `/opt/webradio`; se você o pôs em outro lugar, ajuste a linha `WorkingDirectory=`.
 
 **Primeiro teste do timer** (sem esperar a madrugada):
 
@@ -517,7 +520,7 @@ Só faça esta seção se vai ter locutor transmitindo ao vivo com um programa c
 
 3. Libere a porta no firewall do **provedor** (o `ufw` não segura portas do Docker; veja o aviso da seção 4.5), só para os IPs dos locutores. A trava de verdade é a lista `HARBOR_PERMITIDOS` da própria rádio.
 
-4. **A partir de agora, todo `up` da rádio leva os dois `-f`.** Subir só com `docker-compose.yml` apaga a porta do ao vivo.
+4. **A partir de agora, todo `up` da rádio leva os dois `-f`.** Subir só com `docker-compose.yml` apaga a porta do ao vivo. (O timer do backup, da seção 10.3, **não** leva o arquivo do ao vivo e não precisa: ele não recria a API nem o harbor, então não derruba o ao vivo.)
 
 **Conferência:** o locutor entra no painel dele, gera a **credencial de transmissão** (o segredo aparece **uma única vez**), digita no programa o endereço e a porta mostrados e conecta **dentro do horário do programa dele** (fora da janela, a conexão é recusada). A página inicial deve passar a mostrar **Ao vivo**.
 
@@ -527,14 +530,14 @@ Atualizar derruba a rádio **por cerca de 1 minuto** (a API e o site); o som con
 
 ```bash
 cd /opt/webradio
+docker compose --profile backup run --rm backup     # 1. backup ANTES de trocar de versão, ainda na versão que está no ar (obrigatório se a nova mexe no banco; na dúvida, faça sempre)
 git fetch --tags
-git checkout <nova-versão>     # se o time assina as versões: antes, git verify-tag <nova-versão>
-docker compose --profile backup run --rm backup     # backup ANTES (obrigatório se a versão mexe no banco; na dúvida, faça sempre)
-docker compose --profile backup build   # o perfil 'backup' inclui a imagem do backup, que o build comum não reconstrói
-docker compose up -d --wait
+git checkout <nova-versão>     # 2. se o time assina as versões: antes, git verify-tag <nova-versão>
+docker compose --profile backup build   # 3. o perfil 'backup' inclui a imagem do backup, que o build comum não reconstrói
+docker compose up -d --wait             # 4.
 ```
 
-(Se o ao vivo está ligado, use os dois `-f` no `build` e no `up`. A imagem do backup é a mesma da restauração.) O sistema aplica sozinho as mudanças do banco antes de a API subir. Depois, refaça os itens 1, 4 e 5 da conferência da seção 9. Se algo der errado, **não** faça `down -v`: chame o time.
+(Se o ao vivo está ligado, use os dois `-f` no `build` e no `up`. A imagem do backup é a mesma da restauração.) O sistema aplica sozinho as mudanças do banco antes de a API subir. Depois, refaça os itens 1, 4 e 5 da conferência da seção 9. Se algo der errado, **não** faça `down -v` (apaga os certificados, o backup local e o banco): chame o time.
 
 **HSTS depois de uma semana.** No primeiro deploy o navegador é "preso" ao HTTPS só por 1 dia. Depois de **uma semana** sem problema de certificado, o time sobe esse prazo para 1 ano; o passo está em [`runbooks/borda-https.md`](runbooks/borda-https.md#hsts-de-1-dia-para-1-ano).
 
@@ -543,6 +546,8 @@ docker compose up -d --wait
 O passo a passo completo e os comandos estão em [`runbooks/backup-e-restauracao.md`](runbooks/backup-e-restauracao.md#restaurar-servidor-novo-ou-bancobiblioteca-perdidos). O que **você** precisa saber:
 
 - **Num servidor novo, o timer do backup fica DESLIGADO até a restauração terminar** (e não rode o backup à mão). Um backup feito antes da restauração gravaria um banco **vazio** como "mais recente", e a restauração pegaria o banco vazio. Se o timer da seção 10.3 já foi ligado nesse servidor, faça `sudo systemctl disable --now webradio-backup.timer` e só religue (`enable --now`) depois de conferir a rádio restaurada.
+- O comando da restauração é `docker compose --profile restore run --rm restaurar` (para escolher um ponto específico: `docker compose --profile restore run --rm -e RESTAURAR_SNAPSHOT=<id> restaurar`), depois de parar a `api` e o `worker`: o runbook tem a sequência completa. Se o Compose disser que não acha a imagem `webradio-backup:local`, rode antes `docker compose --profile backup build backup`.
+- **Não use `docker compose down -v`** no servidor: apaga os certificados, o backup local e o banco.
 - Você precisa, **fora do servidor**: a `restic_senha`, as chaves `backup_s3_*`, o endpoint e o nome do bucket (seções 6 e 7). Num servidor novo a restauração vem **do bucket externo**.
 - Antes de a restauração apagar e recriar o banco, ela **mostra o ponto de backup** (data e servidor) e pede o nome do banco. Confira que o ponto é o que você espera.
 - Depois, confira: login do Administrador, a grade, a biblioteca com pré-escuta e uma música da rotação tocando.
