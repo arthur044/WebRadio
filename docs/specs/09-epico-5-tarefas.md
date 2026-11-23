@@ -4,7 +4,7 @@
 > Donos: **Forge** (borda HTTPS, backup, robustez, smoke da base de produção), **Atlas** (backup e restauração do SQL Server, A01b), **Prism** (ajustes de tela para produção), **Lore** (guia de deploy), **Sentinel** (passada da checklist do `05` §8 na base de produção), **Nexus** (revisão dos riscos aceitos com o dono do produto).
 > **Escopo definido pelo dono do produto (2026-11-22):** o Épico 5 fecha a v1 e põe a rádio no ar numa **VPS Linux própria**, com **HTTPS pelo Caddy e Let's Encrypt** e **backup no servidor com cópia externa criptografada**. Grade recorrente, métricas de audiência e busca full-text ficam para a **v2**.
 > **v1.1 (2026-11-23):** reviews do Guardian, do Sentinel e do Atlas no #165 (o Sentinel aceitou o E5-D6). `X-Forwarded-Proto` fixo em `https` na base de produção (sem isso todo refresh e logout dá 403 pela checagem de origem); produção passa a `RECOVERY SIMPLE` (com FULL e sem `BACKUP LOG` o log cresceria sem limite); qual login faz cada etapa do backup e da restauração; usuários do banco religados aos logins depois do restore; rede `edge` própria com subnet fixa; `.bak` em volume próprio; a pasta `secrets/` inteira guardada fora do servidor; `DOMINIO` como fonte das URLs públicas; disco com o dobro da biblioteca. Sentinel: identidade própria do `backup` no MinIO, rede de saída só dele, storage externo com versionamento contra quem tomar o servidor, endurecimento e logs do `edge`, IPv6 fora da v1 (E5-D9 a E5-D12). Atlas: sem `COMPRESSION` (a edição Express não aceita), dono do diretório de backup, restauração como one-shot com o `sa` e a ordem dos passos (E5-D13).
-> **v1.2 (2026-11-23):** ajustes do que a implementação mostrou: cópia externa do backup opcional até o dono do produto criar o bucket (E5-D3); o disco guarda a biblioteca três vezes (E5-D5); o versionamento do bucket externo não protege contra invasor deliberado, só Object Lock (E5-D11, Sentinel no #173).
+> **v1.2 (2026-11-23):** ajustes do que a implementação mostrou: cópia externa do backup opcional até o dono do produto criar o bucket (E5-D3); o disco guarda a biblioteca três vezes (E5-D5); o versionamento do bucket externo não protege contra invasor deliberado, só Object Lock (E5-D11, Sentinel no #173); 10 riscos do E5-S01 (#178) na tabela de riscos aceitos.
 > **Regra de testes (dono do produto, 2026-11-22):** teste automatizado novo só em auth/segurança e dados/SQL. Borda, Compose e telas são conferidos à mão no deploy (roteiro do E5-L01).
 
 ## O que o Épico 5 entrega
@@ -127,7 +127,7 @@ Consolidação dos riscos aceitos nos `05`, `07` e `08` e nos PRs do Épico 4, p
 | Origem | Risco | Situação hoje |
 |---|---|---|
 | `05` | `TrustServerCertificate=True` com o SQL Server no contêiner (certificado autoassinado, rede interna) | Aceito com condições |
-| `05` | Harbor sem TLS (só por lista de IPs ou VPN, credencial por locutor) | Aceito com condições |
+| `05` | Harbor sem TLS (só por lista de IPs ou VPN, credencial por locutor); **sem VPN**, a porta do ao vivo fica exposta à internet, filtrada só pela lista de IPs fixos (Sentinel no #178) | Aceito com condições |
 | `05` S-B10 / E5-D6 | Imagem de divulgação recodificada na API | Aceito enquanto valerem as condições |
 | `07` | IPv6 girando /64 escapa do limite de pedidos por IP (teto global de 300 pendentes) | Aceito |
 | `08` | Worker degradado e `OUTBOX_ESGOTADO` só no log, sem alarme (E5-D7) | Aceito na v1 |
@@ -141,6 +141,16 @@ Consolidação dos riscos aceitos nos `05`, `07` e `08` e nos PRs do Épico 4, p
 | E5-D3 | Sem o bucket externo configurado, o backup fica só no servidor: perder a VPS (disco, conta, invasão) perde também o backup | Novo, a decidir (o dono do produto cria o bucket seguindo o `docs/deploy.md`, que manda criar antes de abrir a rádio ao público) |
 | E5-D11 | **Cópia externa e invasor com a chave.** Quem tomar o servidor lê a `backup_s3_*` e a `restic_senha` e pode apagar as versões de forma definitiva (`DeleteObject` com `versionId`; a chave precisa de `deleteFiles` pelo `forget --prune`). Versionamento + 30 dias protegem contra erro, bug e apagada sem querer, não contra invasor deliberado. Mitigação já no `docs/deploy.md` (14.3): conferir a conta do provedor e revogar a chave depois de suspeita | Novo, a decidir: (a) aceitar; (b) Object Lock com retenção de 30 dias, só depois de o Forge provar `backup`, `forget --prune`, `check` e restauração contra um B2 com Object Lock. Recomendação do Sentinel e do Nexus: (b) se o Forge provar, senão (a) |
 | E4-D4 | **Tamanho da biblioteca** (Atlas, A01b no #174): rotação e listagem foram medidas com 50 mil mídias; acima de ~200 mil mídias, ou com a página da biblioteca acima de 200 ms, consultas e índices precisam de nova revisão (o índice de listagem testado piorou páginas fundas e não entrou; caminhos no parecer) | Novo, a decidir (aceitar com o gatilho de revisão) |
+| E5-D9 (#178) | `edge` (Caddy) roda como **root dentro do contêiner**, só com `NET_BIND_SERVICE` e rootfs só leitura | Proposta do Sentinel: aceito |
+| E5-D9 (#178) | **Exceção do HIGH CVE-2026-78661** no Caddy (parser de HTML do x/net, não alcançável no `reverse_proxy`), válida até 2026-12-23 | Proposta: aceito com prazo; trocar o digest se sair Caddy novo, conferido antes do deploy |
+| `05` S-A04 (#178) | `restaurar` recebe o `sa` e a credencial **root do MinIO** (one-shot manual, sem root no contêiner, sem capability) | Proposta: aceito |
+| `05` S-A04 (#178) | `svc_backup` grava o `.bak` em **qualquer caminho** em que o SQL Server escreve (o caminho fixo está só no `backup.sql`); `sql-backup-init` roda como root com `CAP_CHOWN` | Proposta: aceito |
+| E5-D10 (#178) | `backup` e `restaurar` são a **ponte** entre a rede `dados` e a internet (`saida-backup`) | Proposta: aceito |
+| compose (#178) | **Imagens de terceiros** (SQL Server, Redis, ClamAV, Caddy) fixadas por digest **sem Dependabot**: a troca é manual; o HIGH do CI é só aviso | Proposta: aceito com rotina (cron semanal do trivy avisa, Forge troca, conferência antes de cada deploy no guia); digests trocados antes da 1ª subida |
+| E5-D7 (#178) | `BACKUP_FALHOU` só no log/`journalctl`, sem alarme | Proposta: aceito na v1, com a olhada semanal do guia |
+| `05` §5 (#178) | **Rotação de segredos** sem procedimento utilizável: só a do JWT tem runbook; `rotacao-de-segredos.md` é rascunho e o `05` §5 promete 180 dias | A decidir: aceitar na v1 ou pedir o runbook ao Forge antes do deploy |
+| guia 4.5 (#178) | O Docker publica 80/443 **por cima do `ufw`**: o firewall do host não segura as portas publicadas; a segunda camada é o firewall do provedor | Proposta: aceito, documentado no `deploy.md` |
+| repouso (#178) | Banco, `.bak` e biblioteca **sem criptografia de volume** no servidor: quem lê o disco (ou um snapshot do provedor) lê os dados; os backups do restic são criptografados | A decidir (dono do produto) |
 
 ## Riscos
 
