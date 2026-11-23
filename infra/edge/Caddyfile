@@ -1,0 +1,59 @@
+# Borda HTTPS (E5-D1, E5-D2, E5-D9). O Caddy termina o TLS (Let's Encrypt) e repassa tudo ao nginx do `web`; o nginx continua sendo o gateway (D9).
+# Variáveis (não secretas, do .env pelo docker-compose.yml): DOMINIO (obrigatória), ACME_EMAIL e HSTS_MAX_AGE (padrão 86400).
+{
+	# Sem API de administração: nada para um invasor da rede `edge` chamar (E5-D9).
+	admin off
+	email {$ACME_EMAIL}
+
+	# Sem HTTP/3 na v1 (a UDP 443 fica fechada). read_header 10 s: o mesmo espírito do slowloris do nginx (S-M13).
+	servers {
+		protocols h1 h2
+		timeouts {
+			read_header 10s
+		}
+	}
+
+	# Logger PADRÃO: vale para o log de acesso e para o de erro (E5-D9). Sem query string (as URLs pré-assinadas e o listenerId vão na query) e com o IP
+	# mascarado (/24 no IPv4, /64 no IPv6; o S-B04 já aceita este nível). O `http.stdlib` fica de fora: as mensagens dele ("TLS handshake error from <ip>:<porta>")
+	# trazem o IP inteiro dentro do texto, onde nenhum filtro alcança, e a causa é quase sempre um scanner da internet.
+	log {
+		output stdout
+		exclude http.stdlib
+		format filter {
+			wrap json
+			request>uri regexp \?.* ""
+			request>remote_ip ip_mask {
+				ipv4 24
+				ipv6 64
+			}
+			request>client_ip ip_mask {
+				ipv4 24
+				ipv6 64
+			}
+			request>remote_port delete
+			request>headers delete
+			resp_headers delete
+		}
+	}
+}
+
+{$DOMINIO} {
+	# O modo do TLS vem de um arquivo montado: em produção `tls-acme.caddy` (sem diretiva: Let's Encrypt automático, com o e-mail global); o override do CI monta no lugar
+	# o `tls-interno.caddy` (`tls internal`). Um arquivo, e não uma variável: o Caddyfile não aceita um `tls` vazio nem um valor padrão aninhado.
+	import /etc/caddy/tls.caddy
+
+	log
+
+	# HSTS só aqui (o nginx não o emite, E5-D1): 86400 no primeiro deploy, 31536000 depois de uma semana sem problema (runbook). Sem includeSubDomains nem preload na v1.
+	header Strict-Transport-Security "max-age={$HSTS_MAX_AGE:86400}"
+	# Sem o `Server: nginx` do upstream na resposta (não revela o gateway nem a versão da linha).
+	header -Server
+
+	# flush_interval -1: o stream (/stream/radio.mp3) e o SignalR (/hubs/) não podem ficar em buffer. O Caddy NÃO confia em X-Forwarded-For de fora (sem
+	# trusted_proxies): ele o sobrescreve com o IP do socket, e é isso que o nginx lê (E5-D2). O Host é fixo no domínio: um `Host: dominio:443` não pode cair no
+	# server default do nginx (444).
+	reverse_proxy web:8080 {
+		flush_interval -1
+		header_up Host {$DOMINIO}
+	}
+}

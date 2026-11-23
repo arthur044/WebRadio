@@ -433,6 +433,18 @@ jobs:
           # (nginx, a única imagem publicada para fora) também é imagem própria agora e está no passo estrito acima.
           # E4-F06: o passo bloqueia POR PADRÃO (hoje sqlserver, redis, minio e clamav/clamav); só as imagens listadas aqui são informativas (o alpine do minio-init, 0 CRITICAL).
           informativas="alpine"
+          # E5-F02 (Sentinel, MÉDIO no #168): o Caddy é o ÚNICO contêiner exposto à internet, então HIGH corrigível também QUEBRA o job para ele (como o harbor-borda, que é imagem própria).
+          # Exceção NOMINAL, aceita em 2026-11-23: CVE-2026-78661 (golang.org/x/net/html 0.60.0, DoS por texto quadrático no PARSER de HTML; corrigido em 0.62.0, sem imagem do Caddy que o traga:
+          # a 2.11.9-alpine é a mais nova). Não é alcançável aqui: o Caddyfile só usa reverse_proxy, header, log e tls; nenhum módulo que lê HTML de terceiros (templates, file_server browse) está ligado,
+          # e o reverse_proxy não interpreta o corpo do upstream. A exceção TEM PRAZO (aceito_ate): passada a data, ela deixa de valer e o passo quebra (o cron semanal acusa), até alguém trocar o
+          # digest por uma imagem com x/net >= 0.62.0 ou renovar o prazo com nova justificativa (o Dependabot NÃO acompanha imagem de compose: a troca é manual; o E5-S01 a confere).
+          bloqueia_alto="caddy"
+          aceitos_caddy="CVE-2026-78661"
+          aceito_ate="2026-12-23"
+          if [ "$(date -u +%F)" \> "${aceito_ate}" ]; then
+            echo "::warning::A exceção ${aceitos_caddy} do caddy venceu em ${aceito_ate}: ela deixa de valer neste passo."
+            aceitos_caddy=""
+          fi
           {
             echo "### Imagens de terceiros do compose (com correção disponível)"
             echo "| Imagem | HIGH | CRITICAL | CRITICAL quebra o job |"
@@ -443,8 +455,9 @@ jobs:
           for imagem in $(grep -hoE 'image: [^ ]+@sha256:[0-9a-f]+' docker-compose.yml | awk '{print $2}' | sort -u); do
             nome="${imagem%%@*}"
             nome="${nome%%:*}"
+            ignorar=""; [ "${nome}" = "caddy" ] && ignorar="${aceitos_caddy}"
             contagem="$(trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --format json "${imagem}" 2>/dev/null \
-              | python3 -c "import json,sys; d=json.load(sys.stdin); v=[x for r in d.get('Results',[]) for x in (r.get('Vulnerabilities') or [])]; print(sum(x['Severity']=='HIGH' for x in v), sum(x['Severity']=='CRITICAL' for x in v))" || echo "? ?")"
+              | IGNORAR="${ignorar}" python3 -c "import json,os,sys; d=json.load(sys.stdin); ign=set(filter(None, os.environ.get('IGNORAR','').split(','))); v=[x for r in d.get('Results',[]) for x in (r.get('Vulnerabilities') or []) if x['VulnerabilityID'] not in ign]; print(sum(x['Severity']=='HIGH' for x in v), sum(x['Severity']=='CRITICAL' for x in v))" || echo "? ?")"
             read -r altas criticas <<<"${contagem}"
             case " ${informativas} " in *" ${nome} "*) bloqueia="não" ;; *) bloqueia="sim" ;; esac
             echo "| \`${nome}\` | ${altas} | ${criticas} | ${bloqueia} |" >> "$GITHUB_STEP_SUMMARY"
@@ -457,6 +470,12 @@ jobs:
             if [ "${altas}" != "0" ] || [ "${criticas}" != "0" ]; then
               echo "::warning::${nome}: ${altas} HIGH, ${criticas} CRITICAL com correção disponível (imagem de terceiros, sem build aqui)."
             fi
+            case " ${bloqueia_alto} " in *" ${nome} "*)
+              if [ "${altas}" != "0" ]; then
+                echo "::error::${nome}: ${altas} HIGH com correção disponível (imagem exposta à internet: HIGH também quebra; exceção só para ${ignorar:-nenhuma}). Troque o digest no docker-compose.yml."
+                quebradas=$((quebradas + 1))
+              fi ;;
+            esac
             if [ "${bloqueia}" = "sim" ] && [ "${criticas}" != "0" ]; then
               echo "::error::${nome}: ${criticas} CRITICAL com correção disponível. Troque o digest no docker-compose.yml."
               quebradas=$((quebradas + 1))
@@ -593,3 +612,100 @@ jobs:
       - name: Derrubar
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
+
+  # E5-F05: a base de PRODUÇÃO (docker-compose.yml, sem o dev.yml) de pé atrás do Caddy, com o certificado de uma CA interna (`tls internal`, nunca o Let's Encrypt).
+  # Confere por https:// o que o job `compose-smoke` (que é do dev, em http://localhost:8080) não alcança: só 80/443 publicadas e nada em IPv6, o IP real do
+  # cliente atrás do Caddy (DoD 3 do Épico 5, com um X-Forwarded-For forjado), HSTS, e login, refresh e logout por https (a checagem de Origin).
+  compose-producao:
+    name: Compose de produção (Caddy com tls internal, E5-F05)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    needs: seguranca
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      # O host público do job: não resolve fora do runner (o /etc/hosts abaixo o aponta para 127.0.0.1). Não é segredo.
+      DOMINIO: webradio.test
+      ACME_EMAIL: ci@webradio.test
+      # /28 (e não o /29 padrão) para sobrar endereço aos dois clientes do smoke da borda (.10 e .11); o nginx confia nesta mesma subnet.
+      EDGE_SUBNET: 172.30.250.0/28
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Modo prod: nenhum .env é criado (o DOMINIO e o ACME_EMAIL vêm do ambiente do job) e o e-mail do Admin é o do job.
+      - name: Segredos gerados NO runner (modo prod; nenhum segredo cadastrado no GitHub)
+        run: infra/scripts/gerar-segredos.sh prod admin@webradio.test
+
+      - name: O domínio do job aponta para o runner
+        run: echo "127.0.0.1 ${DOMINIO}" | sudo tee -a /etc/hosts
+
+      - name: As portas 80 e 443 do runner estão livres
+        run: |
+          if ss -H -ltn '( sport = :80 or sport = :443 )' | grep -q .; then
+            echo "::error::Algo já escuta nas portas 80/443 do runner:"
+            ss -ltnp '( sport = :80 or sport = :443 )' || true
+            exit 1
+          fi
+
+      - name: docker compose config (a base sozinha e com os overrides do CI)
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml config --quiet
+
+      - name: Build das imagens
+        run: docker compose -f docker-compose.yml build
+
+      - name: Subir a base de produção e esperar healthy (< 5 min)
+        run: docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml up -d --wait --wait-timeout 300
+
+      # A CA interna nasce quando o Caddy emite o certificado do domínio (logo depois de ele aceitar conexão): espera o root.crt existir e o https responder com ele.
+      - name: CA interna do Caddy
+        run: |
+          set -euo pipefail
+          ca="${RUNNER_TEMP}/edge-ca.crt"
+          for _ in $(seq 1 60); do
+            if docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml cp edge:/data/caddy/pki/authorities/local/root.crt "${ca}" 2>/dev/null \
+               && curl -s -o /dev/null --max-time 5 --cacert "${ca}" "https://${DOMINIO}/"; then
+              # Legível pelos clientes do smoke (uid 101, em contêiner) e pelo curl do host.
+              chmod 644 "${ca}"
+              echo "CURL_CA_BUNDLE=${ca}" >> "$GITHUB_ENV"
+              echo "https://${DOMINIO}/ responde com a CA interna do Caddy."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::O Caddy não respondeu por https com a CA interna em 2 min."
+          exit 1
+
+      - name: Smoke da base de produção (portas, topologia, isolamento, login por https)
+        env:
+          SMOKE_PRODUCAO: "1"
+        run: infra/scripts/smoke-compose.sh
+
+      - name: Smoke da borda (IP real atrás do Caddy, HSTS, login/refresh/logout por https, log do Caddy)
+        # Roda mesmo se o smoke acima falhou (um resultado dos dois por rodada do CI); só não roda se o job foi cancelado.
+        if: ${{ !cancelled() && env.CURL_CA_BUNDLE != '' }}
+        run: infra/scripts/smoke-borda.sh
+
+      - name: Estado e logs em caso de falha
+        if: failure()
+        run: |
+          f=(-f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml)
+          docker compose "${f[@]}" ps -a
+          docker compose "${f[@]}" ps -aq | xargs -r docker inspect -f '{{.Name}} exit={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}}'
+          docker compose "${f[@]}" logs --no-color --tail 80
+          echo "::group::edge (log completo)"
+          docker compose "${f[@]}" logs --no-color edge || true
+          echo "::endgroup::"
+          echo "::group::api (log completo)"
+          docker compose "${f[@]}" logs --no-color api || true
+          echo "::endgroup::"
+          ss -ltnp '( sport = :80 or sport = :443 )' || true
+
+      - name: Derrubar
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f docker-compose.ci-prod.yml down -v

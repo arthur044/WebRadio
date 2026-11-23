@@ -38,6 +38,11 @@ ENV PUBLIC_HOST="localhost 127.0.0.1"
 # Host:porta EXATA que o proxy repassa aos upstreams (revisão do Sentinel — nunca o
 # que o cliente mandou). Tem que bater com Storage__PublicEndpoint do backend.
 ENV PUBLIC_AUTHORITY="localhost:8080"
+# Subnet da rede `edge` (a do Caddy): o nginx só confia no X-Forwarded-For de quem vem dela (set_real_ip_from, E5-D2). O padrão FALHA FECHADO: só o loopback é confiável (a
+# imagem rodada sem o Compose não confia em X-Forwarded-For de ninguém). O docker-compose.yml de produção define a subnet real; o de dev fixa o mesmo 127.0.0.1/32.
+ENV EDGE_SUBNET="127.0.0.1/32"
+# Esquema que a API enxerga (X-Forwarded-Proto). `$scheme` (literal, o nginx o resolve) fora do Compose de produção, que fixa `https`; ver proxy-api.inc.template.
+ENV PROTO_PUBLICO="\$scheme"
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY infra/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY infra/nginx/security-headers.conf /etc/nginx/security-headers.conf
