@@ -21,7 +21,7 @@ export LC_ALL=C
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$RAIZ"
-IMG_SQL="${MSSQL_IMAGEM:-mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090}"
+IMG_SQL="${MSSQL_IMAGEM:-mcr.microsoft.com/mssql/server@sha256:4525e3efac9f3e241cb003bb2ff2a82818b502f37e12049d788b1a9fa7e13b7f}"
 IMG_MINIO="${MINIO_IMAGEM:-cgr.dev/chainguard/minio@sha256:a1ac4589a5f8136b616e667b48a0bea9719bb10bd45799ea946f24bbedfafde4}"
 PID_SQL="${MSSQL_PID:-Express}"
 SUF="$$"

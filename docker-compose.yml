@@ -56,7 +56,7 @@ x-dotnet-env: &dotnet-env
 services:
   # ------------------------------------------------------------------ dados
   sqlserver:
-    image: mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090 # 2022-latest
+    image: mcr.microsoft.com/mssql/server@sha256:4525e3efac9f3e241cb003bb2ff2a82818b502f37e12049d788b1a9fa7e13b7f # 2022-latest (2026-11-05, Ubuntu 22.04; trivy 2026-11-23: 1 HIGH, a stdlib Go dos binários da Microsoft)
     <<: *endurecido
     # O binário sqlservr tem a file capability cap_net_bind_service=ep: sem ela no conjunto limite, o exec
     # falha com EPERM (cap_drop ALL + no-new-privileges). É a ÚNICA capability devolvida.
@@ -89,7 +89,7 @@ services:
   # serve (não é root e tem cap_drop ALL). Só o chown: root com CAP_CHOWN, sem rede, só este volume, nada de DAC_OVERRIDE/FOWNER.
   # Não dá chmod depois do chown (sem CAP_FOWNER): o modo 755 de um volume novo já deixa o dono escrever.
   sql-backup-init:
-    image: mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090 # a mesma do sqlserver (já baixada; traz o chown)
+    image: mcr.microsoft.com/mssql/server@sha256:4525e3efac9f3e241cb003bb2ff2a82818b502f37e12049d788b1a9fa7e13b7f # a mesma do sqlserver (já baixada; traz o chown)
     <<: *one-shot
     user: "0:0"
     cap_add: [CHOWN]
@@ -102,7 +102,7 @@ services:
 
   db-init:
     # Mesma imagem do SQL Server: traz o sqlcmd 18 (-C, -I). É o ÚNICO serviço que usa a SA (D20, S-A10).
-    image: mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090
+    image: mcr.microsoft.com/mssql/server@sha256:4525e3efac9f3e241cb003bb2ff2a82818b502f37e12049d788b1a9fa7e13b7f
     <<: *one-shot
     entrypoint: ["/bin/bash", "/init/db-init/entrypoint.sh"]
     environment:
@@ -141,7 +141,7 @@ services:
       db-init: { condition: service_completed_successfully }
 
   redis:
-    image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499 # 7.4-alpine
+    image: redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe # 7.4-alpine (7.4.12; trivy 2026-11-23: 0 HIGH)
     <<: *endurecido
     user: "999:1000"
     entrypoint: ["/bin/sh", "/etc/webradio/redis-entrypoint.sh"]
@@ -317,7 +317,7 @@ services:
   # clamd em contêiner próprio, numa rede interna só com o worker (INSTREAM na 3310). Sem o NotifyClamd (o freshclam é outro contêiner): SelfCheck de 10 min.
   # ~1 GB residente medido com a base completa; o limite deixa folga para a recarga (ConcurrentDatabaseReload no). Em dev fica no perfil `antivirus`.
   clamd:
-    image: clamav/clamav@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a # 1.5.x, alpine 3.24
+    image: clamav/clamav@sha256:64e30c0bf976198024deb3dc6d5cfe2485fb969c0f73549ba0fdb364b9469614 # 1.5.5, alpine 3.24 (trivy 2026-11-23: 0 HIGH)
     <<: *endurecido
     user: "100:101"
     entrypoint: ["clamd"]
@@ -342,7 +342,7 @@ services:
   # Único contêiner do Épico 4 com saída à internet (os espelhos de assinatura), numa rede só dele. Não tem dado, segredo nem acesso à rede interna; grava a base no
   # volume clamav-db, que o clamd monta só leitura.
   freshclam:
-    image: clamav/clamav@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a
+    image: clamav/clamav@sha256:64e30c0bf976198024deb3dc6d5cfe2485fb969c0f73549ba0fdb364b9469614
     <<: *endurecido
     user: "100:101"
     entrypoint: ["freshclam"]
