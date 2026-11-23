@@ -19,6 +19,7 @@
 # Segredos SEMPRE de arquivo em /run/secrets, nunca em argv: a senha do sqlcmd por SQLCMDPASSWORD, a do restic por --password-file, as chaves do MinIO e do S3 por variável de
 # ambiente montada aqui, só para o processo filho.
 # Variáveis: DB_SERVER (sqlserver), MINIO_ENDPOINT (minio:9000), BACKUP_S3_ENDPOINT (com o esquema: https://s3.exemplo.com), BACKUP_S3_BUCKET,
+#   BACKUP_TIMEOUT_EXTERNO_S (padrão 7200: cada comando restic contra o storage externo; o restic repete uma conexão que falha por ~15 min antes de desistir),
 #   BACKUP_ETAPAS (padrão: sql,midia,envio,retencao,check), BACKUP_FORCAR_CHECK, BACKUP_DEBUG; para o teste: SEGREDOS_DIR, BAK_DIR, BACKUP_LOCAL, SQL_DIR.
 # =============================================================================
 set -uo pipefail
@@ -42,11 +43,13 @@ log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
 etapa_ativa() { [[ ",$ETAPAS," == *",$1,"* ]]; }
 
 # Classifica a saída guardada em um token fixo. NUNCA devolve o texto cru.
+RC_ULTIMO=0
 motivo_de() {
+  if [[ "$RC_ULTIMO" == "124" || "$RC_ULTIMO" == "143" ]]; then echo tempo_esgotado; return; fi
   if grep -qiE 'login failed|access ?denied|signaturedoesnotmatch|signature we calculated|does not match the signature|invalidaccesskeyid|forbidden|unauthorized|wrong password|no key found|permission denied' "$SAIDA"; then echo credencial_ou_permissao_recusada
   elif grep -qiE 'no space left|disk full|quota|there is not enough space' "$SAIDA"; then echo sem_espaco
-  elif grep -qiE 'nosuchbucket|bucket does not exist|repository does not exist|unable to open config|is there a repository' "$SAIDA"; then echo destino_inexistente
   elif grep -qiE 'connection refused|no such host|dial tcp|timeout|timed out|could not open a connection|network is unreachable|tls:' "$SAIDA"; then echo sem_conexao
+  elif grep -qiE 'nosuchbucket|bucket does not exist|repository does not exist|unable to open config|is there a repository' "$SAIDA"; then echo destino_inexistente
   elif grep -qiE 'locked|lock' "$SAIDA"; then echo repositorio_travado
   elif grep -qiE 'pack|index|integrity|checksum|corrupt|missing|damaged|3043|3201' "$SAIDA"; then echo dado_inconsistente
   else echo desconhecido; fi
@@ -58,7 +61,7 @@ falhar() { # falhar <etapa> <código> [destino]
   exit "$2"
 }
 config_falhou() { log "BACKUP_FALHOU etapa=config motivo=$1"; exit 2; }
-rodar() { "$@" >"$SAIDA" 2>&1; }
+rodar() { "$@" >"$SAIDA" 2>&1; RC_ULTIMO=$?; return "$RC_ULTIMO"; }
 ler() { # segredo de arquivo; imprime o valor
   [[ -r "$S/$1" ]] || config_falhou "segredo_ilegivel:$1"
   local v; v="$(cat "$S/$1")"
@@ -80,7 +83,7 @@ externo_configurado() {
 # Roda o restic contra o repositório EXTERNO: as chaves do S3 entram só no ambiente deste processo, lidas de arquivo.
 restic_externo() {
   AWS_ACCESS_KEY_ID="$(cat "$S/backup_s3_access_key")" AWS_SECRET_ACCESS_KEY="$(cat "$S/backup_s3_secret_key")" \
-    restic -r "s3:${BACKUP_S3_ENDPOINT%/}/${BACKUP_S3_BUCKET}" "$@"
+    timeout "${BACKUP_TIMEOUT_EXTERNO_S:-7200}" restic -r "s3:${BACKUP_S3_ENDPOINT%/}/${BACKUP_S3_BUCKET}" "$@"
 }
 restic_local() { restic -r "$REPO_LOCAL" "$@"; }
 

@@ -32,11 +32,13 @@ SAIDA="$(mktemp)"
 trap 'rm -f "$SAIDA"' EXIT
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
+RC_ULTIMO=0
 motivo_de() {
+  if [[ "$RC_ULTIMO" == "124" || "$RC_ULTIMO" == "143" ]]; then echo tempo_esgotado; return; fi
   if grep -qiE 'login failed|access ?denied|signaturedoesnotmatch|signature we calculated|does not match the signature|invalidaccesskeyid|forbidden|wrong password|no key found|permission denied' "$SAIDA"; then echo credencial_ou_permissao_recusada
   elif grep -qiE 'no space left|disk full|there is not enough space' "$SAIDA"; then echo sem_espaco
-  elif grep -qiE 'nosuchbucket|repository does not exist|unable to open config|is there a repository' "$SAIDA"; then echo destino_inexistente
   elif grep -qiE 'connection refused|no such host|dial tcp|timeout|timed out|could not open a connection|network is unreachable' "$SAIDA"; then echo sem_conexao
+  elif grep -qiE 'nosuchbucket|repository does not exist|unable to open config|is there a repository' "$SAIDA"; then echo destino_inexistente
   elif grep -qiE 'msg 3189|msg 3241|msg 3043|checksum|corrupt|damaged|3013|3203' "$SAIDA"; then echo arquivo_de_backup_invalido
   else echo desconhecido; fi
 }
@@ -46,7 +48,7 @@ falhar() { # falhar <etapa> <código>
   exit "$2"
 }
 abortar() { log "RESTAURACAO_ABORTADA motivo=$1"; exit "${2:-2}"; }
-rodar() { "$@" >"$SAIDA" 2>&1; }
+rodar() { "$@" >"$SAIDA" 2>&1; RC_ULTIMO=$?; return "$RC_ULTIMO"; }
 ler() { [[ -r "$S/$1" && -s "$S/$1" ]] || abortar "segredo_ausente:$1"; cat "$S/$1"; }
 
 export RESTIC_PASSWORD_FILE="$S/restic_senha"
@@ -72,7 +74,7 @@ else abortar "sem_terminal_e_sem_RESTAURAR_CONFIRMA"; fi
 externo_configurado() { [[ -n "${BACKUP_S3_ENDPOINT:-}" && -n "${BACKUP_S3_BUCKET:-}" && -s "$S/backup_s3_access_key" && -s "$S/backup_s3_secret_key" ]]; }
 restic_externo() {
   AWS_ACCESS_KEY_ID="$(cat "$S/backup_s3_access_key")" AWS_SECRET_ACCESS_KEY="$(cat "$S/backup_s3_secret_key")" \
-    restic -r "s3:${BACKUP_S3_ENDPOINT%/}/${BACKUP_S3_BUCKET}" "$@"
+    timeout "${BACKUP_TIMEOUT_EXTERNO_S:-7200}" restic -r "s3:${BACKUP_S3_ENDPOINT%/}/${BACKUP_S3_BUCKET}" "$@"
 }
 FONTE="${RESTAURAR_FONTE:-}"
 if [[ -z "$FONTE" ]]; then

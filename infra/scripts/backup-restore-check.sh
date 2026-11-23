@@ -195,11 +195,10 @@ confere "o espelho tem midia e publico e NÃO tem a quarentena" docker run --rm 
 confere "o marcador em texto está no espelho e NÃO aparece em claro em lugar nenhum do repositório (restic criptografa)" docker run --rm --user 10001:0 -v "$LOC_A:/backup:ro" -e M="$MARCADOR" --entrypoint sh "$IMG_BKP" -c 'grep -rqF "$M" /backup/espelho && ! grep -rqF "$M" /backup/repo'
 
 # externo ligado com endpoint inalcançável: a etapa envio (externo) falha com 30
-rodar_na_imagem backup.sh "$SEC" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_ETAPAS=envio -e BACKUP_S3_ENDPOINT=http://brc-ninguem:9000 -e BACKUP_S3_BUCKET=backup-ext
 # as chaves externas vazias desligam o externo; para este caso elas precisam existir:
 ext="$(copia_segredos sec-ext)"; printf '%s' "$EXT_USER" > "$ext/backup_s3_access_key"; printf '%s' "$EXT_PASS" > "$ext/backup_s3_secret_key"
-rodar_na_imagem backup.sh "$ext" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_ETAPAS=envio -e BACKUP_S3_ENDPOINT=http://brc-ninguem:9000 -e BACKUP_S3_BUCKET=backup-ext
-{ [[ "$RC" == 30 ]] && grep -q 'BACKUP_FALHOU etapa=envio destino=externo motivo=sem_conexao' <<<"$OUT" && grep -q 'BACKUP_ENVIO_OK destino=local' <<<"$OUT"; } && ok "etapa envio (storage externo inalcançável): código 30, destino=externo, o local já tinha sido gravado" || falha "etapa envio (RC=$RC)" "$OUT"
+rodar_na_imagem backup.sh "$ext" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_ETAPAS=envio -e BACKUP_TIMEOUT_EXTERNO_S=20 -e BACKUP_S3_ENDPOINT=http://brc-ninguem:9000 -e BACKUP_S3_BUCKET=backup-ext
+{ [[ "$RC" == 30 ]] && grep -qE 'BACKUP_FALHOU etapa=envio destino=externo motivo=(sem_conexao|tempo_esgotado)' <<<"$OUT" && grep -q 'BACKUP_ENVIO_OK destino=local' <<<"$OUT"; } && ok "etapa envio (storage externo inalcançável): código 30, destino=externo, o local já tinha sido gravado" || falha "etapa envio (RC=$RC)" "$OUT"
 log_limpo "etapa envio"
 
 echo "== 3. backup completo COM a cópia externa (o MinIO 'externo'), retenção e restic check"
@@ -216,8 +215,8 @@ rodar_na_imagem backup.sh "$SEC" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e B
 { [[ "$RC" == 50 ]] && grep -q 'BACKUP_FALHOU etapa=check destino=local motivo=' <<<"$OUT"; } && ok "etapa check (pack apagado no repositório): código 50" || falha "etapa check (RC=$RC)" "$OUT"
 log_limpo "etapa check"
 # A retenção local passa mesmo com o pack apagado (não há o que podar); a que falha é a EXTERNA, com o storage fora do ar na hora (o caso real).
-rodar_na_imagem backup.sh "$ext" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_ETAPAS=retencao -e BACKUP_S3_ENDPOINT=http://brc-ninguem:9000 -e BACKUP_S3_BUCKET=backup-ext
-{ [[ "$RC" == 40 ]] && grep -q 'BACKUP_FALHOU etapa=retencao destino=externo motivo=sem_conexao' <<<"$OUT"; } && ok "etapa retencao (storage externo fora do ar): código 40, destino=externo" || falha "etapa retencao (RC=$RC)" "$OUT"
+rodar_na_imagem backup.sh "$ext" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_ETAPAS=retencao -e BACKUP_TIMEOUT_EXTERNO_S=20 -e BACKUP_S3_ENDPOINT=http://brc-ninguem:9000 -e BACKUP_S3_BUCKET=backup-ext
+{ [[ "$RC" == 40 ]] && grep -qE 'BACKUP_FALHOU etapa=retencao destino=externo motivo=(sem_conexao|tempo_esgotado)' <<<"$OUT"; } && ok "etapa retencao (storage externo fora do ar): código 40, destino=externo" || falha "etapa retencao (RC=$RC)" "$OUT"
 log_limpo "etapa retencao"
 
 # ================================================================== o servidor morre
