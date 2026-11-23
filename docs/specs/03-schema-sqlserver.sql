@@ -273,7 +273,10 @@ CREATE INDEX IX_ArquivoMidia_Rotacao ON midia.ArquivoMidia (TipoMidia, Sorteio)
 -- retry vs. lease expirado sem key lookup.
 CREATE INDEX IX_ArquivoMidia_FilaSanitizacao ON midia.ArquivoMidia (StatusSanitizacao, DataUploadUtc)
     INCLUDE (UploadExpiraEmUtc, TentativasSanitizacao, EmAnaliseDesdeUtc) WHERE StatusSanitizacao IN (1, 2, 3);
-CREATE INDEX IX_ArquivoMidia_EnviadoPor ON midia.ArquivoMidia (EnviadoPorUsuarioId);
+-- [Atlas/E4-A01b] Limites do S-M06 pelo SQL (abertos, 20/h, bytes/h, espera): usuário + hora. Só por usuário, cada POST lia a tabela inteira (2.375 páginas com
+-- 50 mil mídias, parecer e4-a01-midia); com a data na chave e as colunas das quatro consultas na folha: 3 a 13 páginas. Continua sendo o índice da FK.
+CREATE INDEX IX_ArquivoMidia_EnviadoPor ON midia.ArquivoMidia (EnviadoPorUsuarioId, DataUploadUtc)
+    INCLUDE (StatusSanitizacao, TamanhoBytes, UploadExpiraEmUtc);
 GO
 
 /* ---------- 6. interacao.PedidoMusica ---------- */
