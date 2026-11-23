@@ -166,6 +166,11 @@ planta "usuário no db_securityadmin" "ALTER ROLE db_securityadmin ADD MEMBER we
 planta "webradio_app com db_datareader a mais" "ALTER ROLE db_datareader ADD MEMBER webradio_app" "ALTER ROLE db_datareader DROP MEMBER webradio_app" "webradio_app:db_datareader (a mais)"
 planta "svc_backup sem o db_backupoperator" "ALTER ROLE db_backupoperator DROP MEMBER svc_backup" "ALTER ROLE db_backupoperator ADD MEMBER svc_backup" "svc_backup:db_backupoperator (faltando)"
 planta "usuário a mais no banco" "CREATE USER intruso WITHOUT LOGIN" "DROP USER intruso" "intruso"
+planta "CONTROL direto no webradio_app" "GRANT CONTROL TO webradio_app" "REVOKE CONTROL FROM webradio_app" "webradio_app:CONTROL"
+planta "IMPERSONATE direto no webradio_relatorio" "GRANT IMPERSONATE ON USER::webradio_migrator TO webradio_relatorio" "REVOKE IMPERSONATE ON USER::webradio_migrator FROM webradio_relatorio" "webradio_relatorio:IMPERSONATE"
+planta "GRANT ... WITH GRANT OPTION no webradio_app" "GRANT SELECT ON SCHEMA::rel TO webradio_app WITH GRANT OPTION" "REVOKE SELECT ON SCHEMA::rel FROM webradio_app CASCADE" "webradio_app:SELECT"
+planta "schema midia com dono webradio_app" "ALTER AUTHORIZATION ON SCHEMA::midia TO webradio_app" "ALTER AUTHORIZATION ON SCHEMA::midia TO dbo" "midia (dono webradio_app)"
+planta "application role no banco" "CREATE APPLICATION ROLE intruso_app WITH PASSWORD = N'Intruso-Plantado-9x!'" "DROP APPLICATION ROLE intruso_app" "intruso_app"
 planta "guest com CONNECT" "GRANT CONNECT TO guest" "REVOKE CONNECT FROM guest" "o guest tem CONNECT"
 confere "depois de desfazer tudo, o pos-restore.sql volta a passar" bash -c "docker exec -i -e SQLCMDPASSWORD='$SA' '$B' $SQLCMD -C -N -S localhost -U sa -b -I -i /dev/stdin < infra/sql/pos-restore.sql | grep -q POS_RESTORE_OK"
 
@@ -181,7 +186,21 @@ echo "== 6. restore com conexão aberta e idempotência"
 docker exec -d -e SQLCMDPASSWORD="$APP" "$B" "$SQLCMD" -C -N -S localhost -U webradio_app -d WebRadio -Q "WAITFOR DELAY '00:01:00'" >/dev/null 2>&1 || true
 sleep 3
 saida="$(sa_sql "$B" -i /dev/stdin < infra/sql/restore.sql 2>&1)" && echo "$saida" | grep -q RESTORE_SQL_OK && ok "restore.sql com uma conexão aberta no banco (SINGLE_USER WITH ROLLBACK IMMEDIATE)" || falha "restore.sql com conexão aberta falhou" "$saida"
-sa_sql "$B" -i /dev/stdin < infra/sql/pos-restore.sql >/dev/null 2>&1 && ok "pos-restore.sql de novo depois do segundo restore" || falha "pos-restore.sql do segundo restore falhou"
+# Falha fechada (Guardian no #171): o banco acabou de voltar com os usuários órfãos; com um db_owner plantado, o pos-restore.sql aborta ANTES de
+# religar e o login da API continua sem abrir o banco.
+# (o .bak da B já é o da própria B, com os SIDs dela: refaz o login da API com SID novo para voltar ao estado de depois de um restore de outro servidor)
+sa_sql "$B" -d master -Q 'DROP LOGIN webradio_app; CREATE LOGIN webradio_app WITH PASSWORD = N'"'"'$(DB_APP_PASSWORD)'"'"', SID = 0x0A0B0C0D0E0F101112131415161718AA, CHECK_POLICY = ON, CHECK_EXPIRATION = OFF;' >/dev/null 2>&1 || falha "não consegui recriar o login da API com SID novo"
+confere "o usuário webradio_app está órfão (SID novo no login) antes da conferência" \
+  bash -c "! docker exec -e SQLCMDPASSWORD='$APP' '$B' $SQLCMD -C -N -S localhost -U webradio_app -b -I -d WebRadio -Q 'SELECT 1'"
+sa_sql "$B" -d WebRadio -Q "ALTER ROLE db_owner ADD MEMBER webradio_app" >/dev/null 2>&1 || falha "não consegui plantar o db_owner no banco recém-restaurado"
+if saida="$(sa_sql "$B" -i /dev/stdin < infra/sql/pos-restore.sql 2>&1)"; then falha "pos-restore.sql aceitou o db_owner plantado" "$saida"
+elif grep -q "webradio_app em db_owner" <<<"$saida"; then ok "pos-restore.sql recusa o db_owner plantado no banco recém-restaurado"
+else falha "pos-restore.sql falhou, mas sem a mensagem do db_owner" "$saida"; fi
+confere "falha fechada: depois da recusa o login da API (webradio_app, ainda órfão) NÃO abre o banco" \
+  bash -c "! docker exec -e SQLCMDPASSWORD='$APP' '$B' $SQLCMD -C -N -S localhost -U webradio_app -b -I -d WebRadio -Q 'SELECT 1'"
+sa_sql "$B" -d WebRadio -Q "ALTER ROLE db_owner DROP MEMBER webradio_app" >/dev/null 2>&1 || falha "não consegui desfazer o db_owner plantado"
+sa_sql "$B" -i /dev/stdin < infra/sql/pos-restore.sql >/dev/null 2>&1 && ok "pos-restore.sql de novo depois do segundo restore (religa o login da API)" || falha "pos-restore.sql do segundo restore falhou"
+confere "e agora o login da API abre o banco" como "$B" webradio_app "$APP" -d WebRadio -Q "SELECT 1"
 
 echo "== 7. .bak corrompido: recusado antes de tocar no banco"
 contagens "$B" > "$TMP/antes.txt"
