@@ -22,7 +22,7 @@ export LC_ALL=C
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$RAIZ"
-IMAGEM="${MSSQL_IMAGEM:-mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090}"
+IMAGEM="${MSSQL_IMAGEM:-mcr.microsoft.com/mssql/server@sha256:4525e3efac9f3e241cb003bb2ff2a82818b502f37e12049d788b1a9fa7e13b7f}"
 PID_SQL="${MSSQL_PID:-Express}"
 SUF="$$"
 A="atlasbk-a-$SUF"; B="atlasbk-b-$SUF"

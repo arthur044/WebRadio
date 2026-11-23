@@ -23,14 +23,14 @@ env:
   # não autenticidade. Ao subir a versão, o valor novo vem de uma conferência independente da release, nunca do próprio download.
   GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
   # Imagem do Redis dos testes do throttle: a mesma, por digest, do docker-compose.yml.
-  REDIS_IMAGEM: "redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"
+  REDIS_IMAGEM: "redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe"
   # Imagem do MinIO dos testes do storage (S-M02, backend-sql): a mesma, por digest, do docker-compose.yml.
   MINIO_IMAGEM: "cgr.dev/chainguard/minio@sha256:a1ac4589a5f8136b616e667b48a0bea9719bb10bd45799ea946f24bbedfafde4"
   # trivy: binário com sha256 esperado fixado aqui, como o gitleaks (05 §9.2).
   TRIVY_VERSION: "0.75.0"
   TRIVY_SHA256: "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f"
   # Imagem do SQL Server dos testes (backend-sql e ddl-check): a mesma, por digest, do docker-compose.yml.
-  MSSQL_IMAGEM: "mcr.microsoft.com/mssql/server@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090"
+  MSSQL_IMAGEM: "mcr.microsoft.com/mssql/server@sha256:4525e3efac9f3e241cb003bb2ff2a82818b502f37e12049d788b1a9fa7e13b7f"
 
 jobs:
   seguranca:
