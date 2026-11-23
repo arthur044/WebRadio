@@ -15,3 +15,14 @@ ExecStart=/usr/bin/docker compose --profile backup run --rm -T backup
 # Um backup que passa de 3 h está preso (o normal é minutos): o systemd o derruba e o próximo timer tenta de novo.
 TimeoutStartSec=3h
 Nice=10
+# Endurecimento (o `docker compose` só precisa do socket do Docker e da pasta do projeto): sem nova privilégio, /tmp próprio, /usr e /etc só leitura, sem /home.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes

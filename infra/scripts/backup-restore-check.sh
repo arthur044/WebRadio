@@ -185,6 +185,15 @@ BAK_A="brc-bak-a-$SUF"; LOC_A="brc-local-a-$SUF"
 copia_segredos() { local d="$TMP/$1"; mkdir -p "$d"; chmod 755 "$d"; cp "$SEC"/* "$d/"; chmod 644 "$d"/*; echo "$d"; }
 
 echo "== 2. falha simulada em cada etapa: BACKUP_FALHOU etapa=..., código diferente de 0, as etapas seguintes não rodam, nada cru no log"
+bad="$(copia_segredos sec-vazio)"; printf '' > "$bad/sql_backup_senha"
+rodar_na_imagem backup.sh "$bad" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a
+{ [[ "$RC" == 2 ]] && grep -q 'BACKUP_FALHOU etapa=config motivo=segredo_ausente_ou_vazio:sql_backup_senha' <<<"$OUT" && ! grep -q 'BACKUP_SQL_OK' <<<"$OUT"; } && ok "segredo VAZIO: etapa=config (código 2), nomeia o arquivo e nenhuma etapa rodou" || falha "segredo vazio (RC=$RC)" "$OUT"
+bad="$(copia_segredos sec-vazio-sa)"; printf '' > "$bad/mssql_sa_password"
+rodar_na_imagem restaurar.sh "$bad" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e RESTAURAR_CONFIRMA=WebRadio
+{ [[ "$RC" == 2 ]] && grep -q 'RESTAURACAO_ABORTADA motivo=segredo_ausente_ou_vazio' <<<"$OUT"; } && ok "restaurar com segredo obrigatório vazio: aborta (2) antes de tocar em qualquer coisa" || falha "restaurar com segredo vazio (RC=$RC)" "$OUT"
+bad="$(copia_segredos sec-vazio-root)"; printf '' > "$bad/minio_root_password"
+rodar_na_imagem restaurar.sh "$bad" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e RESTAURAR_CONFIRMA=WebRadio
+{ [[ "$RC" == 2 ]] && grep -q 'RESTAURACAO_ABORTADA motivo=segredo_ausente_ou_vazio' <<<"$OUT" && ! grep -q 'RESTAURACAO_SQL_OK' <<<"$OUT"; } && ok "restaurar sem a credencial root do MinIO: aborta no pré-voo, ANTES do RESTORE (não restaura o banco para depois falhar na mídia)" || falha "restaurar sem a credencial root (RC=$RC)" "$OUT"
 bad="$(copia_segredos sec-sql)"; printf '%s' "SenhaErrada123abc" > "$bad/sql_backup_senha"
 rodar_na_imagem backup.sh "$bad" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a
 { [[ "$RC" == 10 ]] && grep -q 'BACKUP_FALHOU etapa=sql motivo=' <<<"$OUT" && ! grep -q 'BACKUP_MIDIA_OK' <<<"$OUT"; } && ok "etapa sql (senha do svc_backup errada): código 10 e a etapa midia não rodou" || falha "etapa sql (RC=$RC)" "$OUT"
@@ -204,12 +213,14 @@ confere "o marcador em texto está no espelho e NÃO aparece em claro em lugar n
 # externo ligado com endpoint inalcançável: a etapa envio (externo) falha com 30
 # as chaves externas vazias desligam o externo; para este caso elas precisam existir:
 ext="$(copia_segredos sec-ext)"; printf '%s' "$EXT_USER" > "$ext/backup_s3_access_key"; printf '%s' "$EXT_PASS" > "$ext/backup_s3_secret_key"
-rodar_na_imagem backup.sh "$ext" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_ETAPAS=envio -e BACKUP_TIMEOUT_EXTERNO_S=20 -e BACKUP_S3_ENDPOINT=http://brc-ninguem:9000 -e BACKUP_S3_BUCKET=backup-ext
+rodar_na_imagem backup.sh "$ext" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_PERMITIR_HTTP=1 -e BACKUP_ETAPAS=envio -e BACKUP_TIMEOUT_EXTERNO_S=20 -e BACKUP_S3_ENDPOINT=http://brc-ninguem:9000 -e BACKUP_S3_BUCKET=backup-ext
 { [[ "$RC" == 30 ]] && grep -qE 'BACKUP_FALHOU etapa=envio destino=externo motivo=(sem_conexao|tempo_esgotado)' <<<"$OUT" && grep -q 'BACKUP_ENVIO_OK destino=local' <<<"$OUT"; } && ok "etapa envio (storage externo inalcançável): código 30, destino=externo, o local já tinha sido gravado" || falha "etapa envio (RC=$RC)" "$OUT"
 log_limpo "etapa envio"
 
 echo "== 3. backup completo COM a cópia externa (o MinIO 'externo'), retenção e restic check"
-rodar_na_imagem backup.sh "$ext" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_S3_ENDPOINT=http://brc-ext:9000 -e BACKUP_S3_BUCKET=backup-ext -e BACKUP_FORCAR_CHECK=1
+rodar_na_imagem backup.sh "$ext" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_S3_ENDPOINT=http://brc-ext:9000 -e BACKUP_S3_BUCKET=backup-ext
+{ [[ "$RC" == 2 ]] && grep -q 'BACKUP_FALHOU etapa=config motivo=endpoint_s3_precisa_de_https' <<<"$OUT" && ! grep -q 'BACKUP_SQL_OK' <<<"$OUT"; } && ok "BACKUP_S3_ENDPOINT em http:// é recusado (2, etapa=config): as chaves e os dados não vão em claro" || falha "endpoint http sem a variável de teste (RC=$RC)" "$OUT"
+rodar_na_imagem backup.sh "$ext" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_PERMITIR_HTTP=1 -e BACKUP_S3_ENDPOINT=http://brc-ext:9000 -e BACKUP_S3_BUCKET=backup-ext -e BACKUP_FORCAR_CHECK=1
 { [[ "$RC" == 0 ]] && grep -q 'BACKUP_ENVIO_OK destino=externo' <<<"$OUT" && grep -q 'BACKUP_RETENCAO_OK' <<<"$OUT" && grep -q 'BACKUP_CHECK_OK' <<<"$OUT" && grep -q 'BACKUP_OK' <<<"$OUT" && ! grep -q 'NAO_CONFIGURADO' <<<"$OUT"; } && ok "BACKUP_OK com envio externo, retenção e check" || falha "backup com externo (RC=$RC)" "$OUT"
 # o repositório externo existe e tem os snapshots (o `restic copy`): só com a senha do restic
 snaps_ext="$(docker run --rm --network "$NET" --user 10001:0 -e HOME=/tmp -e RESTIC_PASSWORD_FILE=/run/secrets/restic_senha -e AWS_ACCESS_KEY_ID="$EXT_USER" -e AWS_SECRET_ACCESS_KEY="$EXT_PASS" -v "$SEC:/run/secrets:ro" --entrypoint restic "$IMG_BKP" -r s3:http://brc-ext:9000/backup-ext snapshots --json 2>/dev/null | python3 -I -c 'import json,sys; print(len(json.load(sys.stdin)))' || echo 0)"
@@ -222,7 +233,7 @@ rodar_na_imagem backup.sh "$SEC" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e B
 { [[ "$RC" == 50 ]] && grep -q 'BACKUP_FALHOU etapa=check destino=local motivo=' <<<"$OUT"; } && ok "etapa check (pack apagado no repositório): código 50" || falha "etapa check (RC=$RC)" "$OUT"
 log_limpo "etapa check"
 # A retenção local passa mesmo com o pack apagado (não há o que podar); a que falha é a EXTERNA, com o storage fora do ar na hora (o caso real).
-rodar_na_imagem backup.sh "$ext" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_ETAPAS=retencao -e BACKUP_TIMEOUT_EXTERNO_S=20 -e BACKUP_S3_ENDPOINT=http://brc-ninguem:9000 -e BACKUP_S3_BUCKET=backup-ext
+rodar_na_imagem backup.sh "$ext" "$BAK_A" ro "$LOC_A" brc-sql-a brc-minio-a -e BACKUP_PERMITIR_HTTP=1 -e BACKUP_ETAPAS=retencao -e BACKUP_TIMEOUT_EXTERNO_S=20 -e BACKUP_S3_ENDPOINT=http://brc-ninguem:9000 -e BACKUP_S3_BUCKET=backup-ext
 { [[ "$RC" == 40 ]] && grep -qE 'BACKUP_FALHOU etapa=retencao destino=externo motivo=(sem_conexao|tempo_esgotado)' <<<"$OUT"; } && ok "etapa retencao (storage externo fora do ar): código 40, destino=externo" || falha "etapa retencao (RC=$RC)" "$OUT"
 log_limpo "etapa retencao"
 
@@ -238,7 +249,7 @@ db_init "brc-sql-b-$SUF" && ok "db-init no B (logins recriados com SID novo; o W
 subir_minio "brc-minio-b-$SUF" "brc-data-b-$SUF"
 minio_init "brc-minio-b" >/dev/null && ok "minio-init no B" || falha "minio-init no B falhou"
 BAK_B="brc-bak-b-$SUF"; LOC_B="brc-local-b-$SUF"
-ext_cfg=(-e BACKUP_S3_ENDPOINT=http://brc-ext:9000 -e BACKUP_S3_BUCKET=backup-ext)
+ext_cfg=(-e BACKUP_PERMITIR_HTTP=1 -e BACKUP_S3_ENDPOINT=http://brc-ext:9000 -e BACKUP_S3_BUCKET=backup-ext)
 
 echo "-- a trava e a confirmação do restaurar.sh"
 rodar_na_imagem restaurar.sh "$ext" "$BAK_B" rw "$LOC_B" brc-sql-b brc-minio-b "${ext_cfg[@]}" -e RESTAURAR_CONFIRMA=NaoEhOBanco
@@ -255,6 +266,12 @@ sa_sql "brc-sql-b-$SUF" -h -1 -W -Q "SET NOCOUNT ON; SELECT state_desc + N' ' + 
 sa_sql "brc-sql-b-$SUF" -h -1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM WebRadio.sys.tables" | tr -d '[:space:]' | grep -qx 0 && ok "o banco B segue intacto (vazio, como o db-init o deixou)" || falha "o banco B foi alterado pelo .bak corrompido"
 docker run --rm --user 10001:0 -v "$BAK_B:/bak" --entrypoint sh "$IMG_BKP" -c 'rm -f /bak/webradio.bak'
 
+echo "-- restaurar.sh com um backup em andamento (o flock do backup.sh segurado por outro contêiner no MESMO volume) aborta"
+docker run -d --name "brc-lock-$SUF" --user 10001:0 -v "$LOC_B:/backup" --entrypoint sh "$IMG_BKP" -c 'exec 9>/backup/.backup.lock; flock -n 9 && sleep 120' >/dev/null
+sleep 3
+rodar_na_imagem restaurar.sh "$ext" "$BAK_B" rw "$LOC_B" brc-sql-b brc-minio-b "${ext_cfg[@]}" -e RESTAURAR_CONFIRMA=WebRadio
+{ [[ "$RC" == 23 ]] && grep -q 'RESTAURACAO_ABORTADA motivo=backup_em_andamento' <<<"$OUT"; } && ok "backup em andamento: o restaurar aborta (23) sem tocar no banco" || falha "restaurar com backup em andamento (RC=$RC)" "$OUT"
+docker rm -f "brc-lock-$SUF" >/dev/null 2>&1 || true
 echo "-- restaurar.sh a partir SÓ do storage externo (o volume local do B é novo, sem repositório)"
 rodar_na_imagem restaurar.sh "$ext" "$BAK_B" rw "$LOC_B" brc-sql-b brc-minio-b "${ext_cfg[@]}" -e RESTAURAR_CONFIRMA=WebRadio
 { [[ "$RC" == 0 ]] && grep -q 'RESTAURACAO_FONTE fonte=externo' <<<"$OUT" && grep -q 'RESTAURACAO_SQL_OK' <<<"$OUT" && grep -q 'RESTAURACAO_POS_RESTORE_OK' <<<"$OUT" && grep -q 'RESTAURACAO_OK' <<<"$OUT"; } && ok "RESTAURACAO_OK a partir do repositório EXTERNO (db-init → restore.sql → pos-restore.sql → mc mirror)" || falha "restaurar.sh (RC=$RC)" "$OUT"

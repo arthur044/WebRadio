@@ -4,7 +4,7 @@
 # É o ÚNICO lugar (com o db-init e o minio-init) que recebe o `sa` e a credencial root do MinIO: o RESTORE exige dbcreator e a volta da mídia escreve nos buckets.
 #
 # Ordem (E5-D13). O Compose já rodou o db-init (logins) e o minio-init (buckets) antes deste contêiner (depends_on):
-#   0. TRAVA: aborta se a api ou o worker estiverem com sessão aberta no SQL Server; pede o nome do banco antes do REPLACE
+#   0. PRÉ-VOO: todos os segredos (sa, root do MinIO, restic) conferidos ANTES de tocar em qualquer coisa. TRAVA: aborta se a api ou o worker estiverem com sessão aberta no SQL Server (21) ou se um backup estiver rodando (23, o mesmo flock do backup.sh); pede o nome do banco antes do REPLACE
 #   1. restic restore do .bak e do espelho da mídia (repositório local; se não existir, o externo) para /backup/restauracao
 #   2. restore.sql (sa): VERIFYONLY, SINGLE_USER, RESTORE ... WITH CHECKSUM, REPLACE, MULTI_USER
 #   3. pos-restore.sql (sa): religa cada usuário do banco ao login (num servidor novo os logins nascem com outro SID)
@@ -29,7 +29,7 @@ TRABALHO="$LOCAL/restauracao"
 SNAPSHOT="${RESTAURAR_SNAPSHOT:-latest}"
 export RESTIC_CACHE_DIR="$LOCAL/cache-restic" HOME="${HOME:-/tmp}" MC_CONFIG_DIR="${MC_CONFIG_DIR:-/tmp/.mc}"
 SAIDA="$(mktemp)"
-trap 'rm -f "$SAIDA"' EXIT
+trap 'rm -f "$SAIDA"; rm -rf "$TRABALHO"' EXIT
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
 RC_ULTIMO=0
@@ -49,10 +49,14 @@ falhar() { # falhar <etapa> <código>
 }
 abortar() { log "RESTAURACAO_ABORTADA motivo=$1"; exit "${2:-2}"; }
 rodar() { "$@" >"$SAIDA" 2>&1; RC_ULTIMO=$?; return "$RC_ULTIMO"; }
-ler() { [[ -r "$S/$1" && -s "$S/$1" ]] || abortar "segredo_ausente:$1"; cat "$S/$1"; }
+# Todos os segredos que a restauração usa, conferidos AQUI, no shell principal e ANTES de tocar em qualquer coisa: dentro de um $(...) o exit sairia só do subshell e o log viraria o "valor".
+exigir() { local n; for n in "$@"; do [[ -r "$S/$n" && -s "$S/$n" ]] || abortar "segredo_ausente_ou_vazio:$n"; done; }
+ler() { cat "$S/$1"; } # só depois do exigir
+exigir restic_senha mssql_sa_password minio_root_user minio_root_password
 
 export RESTIC_PASSWORD_FILE="$S/restic_senha"
-[[ -s "$RESTIC_PASSWORD_FILE" ]] || abortar "segredo_ausente:restic_senha"
+# SÓ https:// no storage externo (BACKUP_PERMITIR_HTTP=1 é só do teste).
+if [[ -n "${BACKUP_S3_ENDPOINT:-}" && "$BACKUP_S3_ENDPOINT" != https://* && "${BACKUP_PERMITIR_HTTP:-}" != "1" ]]; then abortar endpoint_s3_precisa_de_https; fi
 sql_sa() { SQLCMDPASSWORD="$(ler mssql_sa_password)" sqlcmd -b -C -N -I -S "$DB_SERVER" -U sa -l 30 -H WebRadio.Restaurar "$@"; }
 
 # --------------------------------------------------------------------- 0. trava
@@ -63,12 +67,10 @@ SESSOES="$(tr -d '[:space:]' <"$SAIDA")"
 if [[ "$SESSOES" != "0" ]]; then
   abortar "api_ou_worker_no_ar sessoes=$SESSOES (rode: docker compose stop api worker; e o migrator não pode estar rodando)" 21
 fi
-if [[ -n "${RESTAURAR_CONFIRMA:-}" ]]; then CONFIRMA="$RESTAURAR_CONFIRMA"
-elif [[ -t 0 ]]; then
-  echo "ATENÇÃO: o banco WebRadio atual será SUBSTITUÍDO pelo backup. Digite o nome do banco para continuar:" >&2
-  read -r CONFIRMA
-else abortar "sem_terminal_e_sem_RESTAURAR_CONFIRMA"; fi
-[[ "$CONFIRMA" == "WebRadio" ]] || abortar "confirmacao_diferente_do_nome_do_banco" 22
+# O mesmo flock do backup.sh (o volume backup-local é compartilhado): um backup em andamento (o timer das 03:30) escreveria o MESMO webradio.bak e o espelho que esta restauração lê.
+mkdir -p "$LOCAL" 2>/dev/null
+exec 9>"$LOCAL/.backup.lock"
+flock -n 9 || abortar "backup_em_andamento (espere o backup terminar: o timer roda às 03:30)" 23
 
 # ------------------------------------------------------------- 1. baixar do restic
 externo_configurado() { [[ -n "${BACKUP_S3_ENDPOINT:-}" && -n "${BACKUP_S3_BUCKET:-}" && -s "$S/backup_s3_access_key" && -s "$S/backup_s3_secret_key" ]]; }
@@ -86,6 +88,16 @@ case "$FONTE" in
   *) abortar "RESTAURAR_FONTE_invalida:$FONTE" ;;
 esac
 log "RESTAURACAO_FONTE fonte=$FONTE snapshot=$SNAPSHOT"
+# Mostra QUAL snapshot vai voltar (id, data, host) ANTES de pedir o nome do banco: num servidor novo, um backup rodando antes da restauração pode ter criado um "latest" de banco VAZIO.
+if [[ "$SNAPSHOT" == "latest" ]]; then rodar restic_fonte snapshots --compact --latest 1; else rodar restic_fonte snapshots --compact "$SNAPSHOT"; fi || falhar baixar 30
+echo "Snapshot que será restaurado (id, data, host, caminhos):" >&2
+grep -E '^[0-9a-f]{8} ' "$SAIDA" >&2 || true
+if [[ -n "${RESTAURAR_CONFIRMA:-}" ]]; then CONFIRMA="$RESTAURAR_CONFIRMA"
+elif [[ -t 0 ]]; then
+  echo "ATENÇÃO: o banco WebRadio atual será SUBSTITUÍDO pelo backup. Digite o nome do banco para continuar:" >&2
+  read -r CONFIRMA
+else abortar "sem_terminal_e_sem_RESTAURAR_CONFIRMA"; fi
+[[ "$CONFIRMA" == "WebRadio" ]] || abortar "confirmacao_diferente_do_nome_do_banco" 22
 rm -rf "$TRABALHO"; mkdir -p "$TRABALHO" || abortar "pasta_de_trabalho_nao_gravavel"
 # O snapshot guarda os caminhos absolutos do backup.sh: o .bak e o espelho.
 rodar restic_fonte restore "$SNAPSHOT" --target "$TRABALHO" --include "$BAK_DIR/webradio.bak" --include "$LOCAL/espelho" || falhar baixar 30

@@ -421,8 +421,8 @@ services:
     pids_limit: 100
     stdin_open: true
     tty: true
+    # SEM depends_on do `backup`: com o perfil backup ativo, subir o restaurar faria um BACKUP do banco ruim antes, e a retenção trocaria o snapshot bom (local e externo).
     depends_on:
-      backup: { condition: service_completed_successfully, required: false }
       db-init: { condition: service_completed_successfully }
       minio-init: { condition: service_completed_successfully }
 

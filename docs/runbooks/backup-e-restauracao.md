@@ -33,7 +33,7 @@ Rode uma vez à mão antes de confiar no timer: `docker compose --profile backup
 ## Ligar a cópia externa (depois, sem mudar código)
 
 1. No provedor (Backblaze B2, Wasabi, AWS S3 ou um MinIO em outro servidor): um **bucket só para isso**, com **versionamento ligado** e uma regra de ciclo de vida que **mantém versões apagadas ou sobrescritas por 30 dias** (E5-D11). A chave do backup **não** pode alterar versionamento, ciclo de vida nem object lock: com isso, quem invadir o servidor e apagar tudo deixa as versões recuperáveis pela conta do provedor.
-2. No `.env`: `BACKUP_S3_ENDPOINT=https://s3.exemplo.com` (com o esquema, sem o bucket) e `BACKUP_S3_BUCKET=nome-do-bucket`.
+2. No `.env`: `BACKUP_S3_ENDPOINT=https://s3.exemplo.com` (**só `https://`**: com `http://` o backup e o restaurar recusam, `etapa=config`, para as chaves e os dados não irem em claro; sem o bucket no fim) e `BACKUP_S3_BUCKET=nome-do-bucket`.
 3. Cole as chaves nos arquivos `secrets/backup_s3_access_key` e `secrets/backup_s3_secret_key` (nascem **vazios**; sem newline no fim: `printf '%s' 'CHAVE' > secrets/backup_s3_access_key`).
 4. `docker compose --profile backup run --rm backup`: o log passa a ter `BACKUP_ENVIO_OK destino=externo` e o aviso some. O repositório externo nasce com os mesmos parâmetros do local (`--copy-chunker-params`) e usa a **mesma** `restic_senha`.
 
@@ -44,6 +44,8 @@ Rode uma vez à mão antes de confiar no timer: `docker compose --profile backup
 - Recomendado: a pasta `secrets/` inteira. **Regeneráveis** na restauração (todo mundo loga de novo): senhas dos logins do SQL, chaves do MinIO, chave do JWT.
 
 ## Restaurar (servidor novo ou banco/biblioteca perdidos)
+
+**Num servidor novo, deixe o `webradio-backup.timer` DESLIGADO (e não rode o `backup`) até a restauração terminar.** Um backup antes dela grava um snapshot de banco VAZIO, que vira o `latest` e a fonte padrão: o restaurar mostra o snapshot (id, data, host) antes de pedir o nome do banco; confira que ele é o que você espera. Se o `latest` for o errado, passe o id: `RESTAURAR_SNAPSHOT=<id>`.
 
 Pré-requisitos: o Compose no servidor, os segredos de volta em `secrets/` (a `restic_senha` é a mesma) e, se for um servidor novo, o repositório local **não existe**: a restauração vai ao externo (precisa da cópia externa ligada e das chaves `backup_s3_*`).
 
@@ -92,9 +94,10 @@ O repositório local e o espelho ficam no volume `backup-local`; o `.bak` do dia
 
 | Sintoma | Causa | O que fazer |
 |---|---|---|
-| `BACKUP_FALHOU etapa=sql motivo=credencial_ou_permissao_recusada` | A senha do `svc_backup` do arquivo não é a do login (o `db-init` não rodou com a senha atual) | Rode `docker compose run --rm db-init` (idempotente; o login existente mantém a senha: para trocar, `ALTER LOGIN` e recrie) |
+| `BACKUP_FALHOU etapa=sql motivo=credencial_ou_permissao_recusada` | A senha do `svc_backup` do arquivo `secrets/sql_backup_senha` não é a do login no SQL Server | O `db-init` **não** troca a senha de um login que já existe (só cria). Ou volte o segredo antigo, ou ajuste o login com o `sa`: `docker compose exec -T sqlserver bash -c 'SQLCMDPASSWORD="$(cat /run/secrets/mssql_sa_password)" /opt/mssql-tools18/bin/sqlcmd -C -N -S localhost -U sa -b -Q "ALTER LOGIN svc_backup WITH PASSWORD = N'"'"'<a senha do arquivo>'"'"'"'` (a senha só tem `[A-Za-z0-9_-]`) |
 | `etapa=midia motivo=credencial_ou_permissao_recusada` | A chave do `svc-backup` no MinIO não bate com `secrets/minio_backup_*` | `docker compose run --rm minio-init` (recria as identidades) |
 | `etapa=envio destino=externo motivo=sem_conexao` | Storage externo fora do ar, endpoint errado ou sem saída de rede | Confira `BACKUP_S3_ENDPOINT` (com `https://`) e o DNS do servidor; o backup **local** desta rodada já está gravado |
 | `etapa=envio motivo=credencial_ou_permissao_recusada` | Chave do S3 errada, sem permissão no bucket, ou `restic_senha` diferente da do repositório | Confira as chaves e a senha; **nunca** crie um repositório novo por cima de um existente |
 | `etapa=check motivo=dado_inconsistente` | Repositório danificado (disco, pack apagado) | Não apague nada; rode `restic check` à mão e `restic repair index`/`snapshots` conforme a saída; a cópia externa é o backup do backup |
 | `RESTAURACAO_ABORTADA motivo=api_ou_worker_no_ar` | Há sessão da api ou do worker no SQL Server | `docker compose stop api worker`, espere ~10 s e rode de novo |
+| `RESTAURACAO_ABORTADA motivo=backup_em_andamento` (código 23) | O backup (timer das 03:30 ou manual) está rodando e segura o mesmo lock do volume `backup-local` | Espere o `BACKUP_OK` e rode de novo |

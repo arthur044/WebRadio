@@ -18,7 +18,7 @@
 #
 # Segredos SEMPRE de arquivo em /run/secrets, nunca em argv: a senha do sqlcmd por SQLCMDPASSWORD, a do restic por --password-file, as chaves do MinIO e do S3 por variável de
 # ambiente montada aqui, só para o processo filho.
-# Variáveis: DB_SERVER (sqlserver), MINIO_ENDPOINT (minio:9000), BACKUP_S3_ENDPOINT (com o esquema: https://s3.exemplo.com), BACKUP_S3_BUCKET,
+# Variáveis: DB_SERVER (sqlserver), MINIO_ENDPOINT (minio:9000), BACKUP_S3_ENDPOINT (SÓ https://, ex.: https://s3.exemplo.com; http:// é recusado), BACKUP_S3_BUCKET,
 #   BACKUP_TIMEOUT_EXTERNO_S (padrão 7200: cada comando restic contra o storage externo; o restic repete uma conexão que falha por ~15 min antes de desistir),
 #   BACKUP_ETAPAS (padrão: sql,midia,envio,retencao,check), BACKUP_FORCAR_CHECK, BACKUP_DEBUG; para o teste: SEGREDOS_DIR, BAK_DIR, BACKUP_LOCAL, SQL_DIR.
 # =============================================================================
@@ -62,19 +62,20 @@ falhar() { # falhar <etapa> <código> [destino]
 }
 config_falhou() { log "BACKUP_FALHOU etapa=config motivo=$1"; exit 2; }
 rodar() { "$@" >"$SAIDA" 2>&1; RC_ULTIMO=$?; return "$RC_ULTIMO"; }
-ler() { # segredo de arquivo; imprime o valor
-  [[ -r "$S/$1" ]] || config_falhou "segredo_ilegivel:$1"
-  local v; v="$(cat "$S/$1")"
-  [[ -n "$v" ]] || config_falhou "segredo_vazio:$1"
-  printf '%s' "$v"
-}
+# Os segredos obrigatórios das etapas ativas são conferidos AQUI, no shell principal, antes de qualquer etapa: dentro de um $(...) o exit sairia só do subshell e o log viraria o "valor".
+exigir() { local n; for n in "$@"; do [[ -r "$S/$n" && -s "$S/$n" ]] || config_falhou "segredo_ausente_ou_vazio:$n"; done; }
+ler() { cat "$S/$1"; } # só depois do exigir
 
 # Um backup por vez (o timer e uma execução manual não se pisam).
 mkdir -p "$LOCAL" 2>/dev/null
 exec 9>"$LOCAL/.backup.lock"
 flock -n 9 || { log "BACKUP_FALHOU etapa=config motivo=outro_backup_em_andamento"; exit 3; }
 
-[[ -r "$S/restic_senha" && -s "$S/restic_senha" ]] || config_falhou "segredo_ilegivel:restic_senha"
+exigir restic_senha
+etapa_ativa sql && exigir sql_backup_senha
+etapa_ativa midia && exigir minio_backup_access_key minio_backup_secret_key
+# O endpoint do storage externo SÓ em https:// (as chaves do S3 e os dados não podem ir em claro). BACKUP_PERMITIR_HTTP=1 existe só para o teste (backup-restore-check.sh, MinIO local).
+if [[ -n "${BACKUP_S3_ENDPOINT:-}" && "$BACKUP_S3_ENDPOINT" != https://* && "${BACKUP_PERMITIR_HTTP:-}" != "1" ]]; then config_falhou endpoint_s3_precisa_de_https; fi
 export RESTIC_PASSWORD_FILE="$S/restic_senha"
 
 externo_configurado() {
@@ -92,7 +93,6 @@ log "BACKUP_INICIO etapas=$ETAPAS"
 # ---------------------------------------------------------------------- sql
 if etapa_ativa sql; then
   SQLCMDPASSWORD="$(ler sql_backup_senha)"; export SQLCMDPASSWORD
-  rm -f "$BAK_DIR/webradio.bak.ok" 2>/dev/null
   rodar sqlcmd -b -C -N -I -S "$DB_SERVER" -U svc_backup -l 30 -H WebRadio.Backup -i "$SQL_DIR/backup.sql" || falhar sql 10
   unset SQLCMDPASSWORD
   [[ -s "$BAK_DIR/webradio.bak" ]] || { echo "webradio.bak ausente ou vazio" >"$SAIDA"; falhar sql 10; }
