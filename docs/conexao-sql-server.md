@@ -93,6 +93,17 @@ ortogonal ao `EnableRetryOnFailure` do EF Core (E1-F04), que retenta **comando**
 após falha transitória. Empilhar os dois sem necessidade mascara problemas reais de rede
 em vez de corrigi-los.
 
+### 4.1 Nível de isolamento: READ COMMITTED (decisão do #25)
+
+O banco **WebRadio roda em `READ COMMITTED`** (o padrão do SQL Server; RCSI, `READ_COMMITTED_SNAPSHOT`, funciona igual, e o `init-db.sql` não liga `ALLOW_SNAPSHOT_ISOLATION`). Duas filas dependem disso:
+
+- O **outbox** (`OutboxProcessor`) e a **fila de sanitização do Worker** pegam as linhas com `WITH (UPDLOCK, READPAST, ROWLOCK)`: duas réplicas nunca pegam o mesmo evento, e a que chega depois **pula** as linhas travadas. A dica `READPAST` só vale em `READ COMMITTED` e `REPEATABLE READ`; sob **`SNAPSHOT`** a consulta **falha** ("READPAST is not supported under snapshot isolation"). Por isso **ninguém liga `ALLOW_SNAPSHOT_ISOLATION` nem `SET TRANSACTION ISOLATION LEVEL SNAPSHOT`** no WebRadio.
+- A **trava transacional** (`sp_getapplock` exclusivo, `ITransacaoComTrava`, D7/D22) serializa a grade, o último Admin ativo e os limites de pedido e de upload; ela vale em qualquer nível, mas a consulta de interseção "sob a trava" assume que o que foi confirmado é visível na hora (nível padrão).
+
+Antes de mudar o isolamento do banco (por exemplo, para um relatório), repita o teste de duas réplicas do `OutboxProcessorTests` e o da fila de sanitização.
+
+O `GET /usuarios` faz a contagem e a página em **duas consultas sem snapshot comum**: sob escrita concorrente o total pode diferir da página por uma linha. É aceito hoje; reavalie junto com a busca se a tabela de usuários passar de ~50 mil linhas.
+
 ## 5. Valores não-secretos para `.env.example` (Forge, E1-F16)
 
 Segredos (senhas) seguem o padrão `__GERAR__` de `docs/specs/05-seguranca-auditoria.md §5.2`

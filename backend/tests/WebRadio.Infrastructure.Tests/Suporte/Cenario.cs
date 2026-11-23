@@ -58,7 +58,7 @@ public sealed class Cenario(BancoDeTeste banco)
     public TrocarSenhaHandler NovoTrocarSenha()
     {
         var db = NovoDb();
-        return new TrocarSenhaHandler(db, Hasher, NovoRefresh(db), ThrottleReal(), NovaVersaoDeSeguranca(db), new OutboxEf(db), Relogio);
+        return new TrocarSenhaHandler(db, Hasher, NovoRefresh(db), ThrottleReal(), NovaVersaoDeSeguranca(db), new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), Relogio);
     }
 
     /// <summary>Um cache só para o cenário inteiro, como o singleton da Api: é ele que segura a versão por 15 s.</summary>
@@ -69,7 +69,7 @@ public sealed class Cenario(BancoDeTeste banco)
     public AlterarUsuarioHandler NovoAlterarUsuario()
     {
         var db = NovoDb();
-        return new AlterarUsuarioHandler(db, new TransacaoComTrava(db), NovoRefresh(db), new OutboxEf(db), NovaVersaoDeSeguranca(db), Relogio);
+        return new AlterarUsuarioHandler(db, new TransacaoComTrava(db), NovoRefresh(db), new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), NovaVersaoDeSeguranca(db), Relogio);
     }
 
     public MemoryLoginThrottle ThrottleReal() =>

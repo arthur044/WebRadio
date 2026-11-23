@@ -5,9 +5,9 @@ using Microsoft.Extensions.Logging;
 namespace WebRadio.Infrastructure.Persistencia.Outbox;
 
 /// <summary>
-/// E1-F10: laço do outbox dentro da API. Um passe por segundo; lote cheio emenda o próximo. Com falha (ex.: Redis do
-/// backplane fora), a espera dobra até 1 min: assim as 10 tentativas de um evento se espalham por minutos, e não por
-/// 10 segundos, antes de ele ficar parado.
+/// E1-F10: laço do outbox dentro da API. Um passe por segundo; lote cheio emenda o próximo. O backoff de um evento que falhou (ex.: Redis do backplane fora) é DELE
+/// (<c>EventoOutbox.ProximaTentativaEmUtc</c>, #25): ele só volta à fila depois da espera própria e os demais eventos seguem no ritmo normal. A espera do LAÇO dobra (até 1 min)
+/// só quando o passe inteiro falha (banco fora), porque aí nada anda.
 /// </summary>
 public sealed class OutboxDispatcher(IServiceScopeFactory escopos, ILogger<OutboxDispatcher> logger) : BackgroundService
 {
@@ -23,8 +23,9 @@ public sealed class OutboxDispatcher(IServiceScopeFactory escopos, ILogger<Outbo
             {
                 await using var escopo = escopos.CreateAsyncScope();
                 var lote = await escopo.ServiceProvider.GetRequiredService<OutboxProcessor>().ProcessarLoteAsync(stoppingToken);
-                espera = ProximaEspera(espera, falhou: lote.Falhas > 0);
-                if (lote.Falhas == 0 && lote.Lidos == OutboxProcessor.TamanhoDoLote) continue;
+                // Falha de entrega de um evento NÃO desacelera o laço: ele já saiu da fila pelo próprio backoff.
+                espera = ProximaEspera(espera, falhou: false);
+                if (lote.Lidos == OutboxProcessor.TamanhoDoLote) continue;
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

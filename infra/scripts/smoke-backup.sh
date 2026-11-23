@@ -70,8 +70,13 @@ grep -q 'RESTAURACAO_OK' <<<"$SAIDA" && ok "RESTAURACAO_OK" || falha "sem RESTAU
 
 echo "== 6. o que voltou"
 esperar "tabela marcadora de volta" 4242 "$(sa_sql -d WebRadio -Q 'SET NOCOUNT ON; SELECT v FROM dbo.smoke_backup_marker' | tr -d '[:space:]')"
-SHA_DEPOIS="$(mc_raiz cat x/midia/2026/ci-marker.bin 2>/dev/null | sha256sum | cut -d' ' -f1)"
+# O SHA-256 é calculado DENTRO do contêiner (como o do "antes"): o stdout do `docker compose run` pode trazer linhas do próprio Compose, e os bytes do objeto passariam misturados a elas.
+SHA_DEPOIS="$("${C[@]}" --profile restore run --rm -T --no-deps --entrypoint bash restaurar -c 'export MC_HOST_x="http://$(cat /run/secrets/minio_root_user):$(cat /run/secrets/minio_root_password)@minio:9000"; mc cat x/midia/2026/ci-marker.bin 2>/dev/null | sha256sum | cut -d" " -f1' 2>/dev/null | tail -1 | tr -d '\r')"
 esperar "objeto marcador de volta, com o mesmo SHA-256" "$SHA_ANTES" "$SHA_DEPOIS"
+if [[ "$SHA_ANTES" != "$SHA_DEPOIS" ]]; then
+  echo "  (diagnóstico) objetos em midia/2026/ depois da restauração:"
+  mc_raiz ls --recursive x/midia/2026/ 2>&1 | sed 's/^/        /'
+fi
 esperar "usuários órfãos no WebRadio" 0 "$(sa_sql -d WebRadio -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.database_principals dp WHERE dp.type = 'S' AND dp.authentication_type = 1 AND dp.name NOT IN (N'dbo', N'guest', N'INFORMATION_SCHEMA', N'sys') AND NOT EXISTS (SELECT 1 FROM sys.server_principals sp WHERE sp.sid = dp.sid)" | tr -d '[:space:]')"
 sa_sql -d WebRadio -Q "DROP TABLE dbo.smoke_backup_marker" >/dev/null
 echo "-- sobe o migrator, a api e o worker de novo (o banco restaurado)"

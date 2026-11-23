@@ -38,13 +38,13 @@ public class ProgramasSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
     private EncerrarProgramaHandler Encerrar()
     {
         var db = _c.NovoDb();
-        return new EncerrarProgramaHandler(db, new TransacaoComTrava(db), new OutboxEf(db), _c.Relogio);
+        return new EncerrarProgramaHandler(db, new TransacaoComTrava(db), new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), _c.Relogio);
     }
 
     private CancelarProgramaHandler Cancelar()
     {
         var db = _c.NovoDb();
-        return new CancelarProgramaHandler(db, new TransacaoComTrava(db), new OutboxEf(db), _c.Relogio);
+        return new CancelarProgramaHandler(db, new TransacaoComTrava(db), new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), _c.Relogio);
     }
 
     private async Task<Guid> LocutorAsync() => (await _c.CriarUsuarioAsync(Cenario.Email(), Role.Locutor)).Id;
@@ -283,7 +283,7 @@ public class ProgramasSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         var (locutor, id) = await AgendadoEmCursoAsync();
         var corrida = new CorridaNoPrimeiroSave(() => WorkerIniciaAsync(id)); // o Worker passa o programa para AoVivo entre a leitura e o UPDATE
         await using var db = DbComCorrida(corrida);
-        var handler = new EncerrarProgramaHandler(db, new TransacaoComTrava(db), new OutboxEf(db), _c.Relogio);
+        var handler = new EncerrarProgramaHandler(db, new TransacaoComTrava(db), new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), _c.Relogio);
 
         var dto = await handler.Handle(new EncerrarProgramaCommand(id, locutor, SolicitanteEhAdmin: false), default);
 
@@ -298,7 +298,7 @@ public class ProgramasSqlTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
         var (_, id) = await AgendadoEmCursoAsync();
         var corrida = new CorridaNoPrimeiroSave(() => WorkerIniciaAsync(id));
         await using var db = DbComCorrida(corrida);
-        var handler = new CancelarProgramaHandler(db, new TransacaoComTrava(db), new OutboxEf(db), _c.Relogio);
+        var handler = new CancelarProgramaHandler(db, new TransacaoComTrava(db), new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), _c.Relogio);
 
         // A repetição relê o status (AoVivo): só Agendado se cancela.
         await Assert.ThrowsAsync<TransicaoInvalidaException>(() => handler.Handle(new CancelarProgramaCommand(id), default));

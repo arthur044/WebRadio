@@ -176,7 +176,7 @@ Invariante: `Aprovado ⇒ MimeType, HashSHA256, DuracaoSegundos, SanitizadoEmUtc
 `Id bigint identity`, `MidiaId`, `PedidoId?`, `ProgramaId?`, `IniciadoEmUtc`. Só inserção. É a base dos relatórios do Atlas ("mais tocadas no mês").
 
 ### 2.8 `EventoOutbox` (schema `infra`)
-`Id bigint identity`, `Tipo varchar(100)`, `Payload nvarchar(max)` (JSON), `CriadoEmUtc`, `ProcessadoEmUtc?`, `Tentativas`, `UltimoErro?`. Gravado na **mesma transação** da mudança de estado. Depois de 10 tentativas o evento fica parado para análise (não entra mais na fila de envio).
+`Id bigint identity`, `Tipo varchar(100)`, `Payload nvarchar(max)` (JSON), `CriadoEmUtc`, `ProcessadoEmUtc?`, `Tentativas`, `UltimoErro?`, `ProximaTentativaEmUtc?`. Gravado na **mesma transação** da mudança de estado, com o instante do `IClock` (nunca o relógio do sistema). Depois de uma falha o evento só volta à fila a partir de `ProximaTentativaEmUtc` (backoff **por evento**: 5 s, 10 s, 20 s, ... até 5 min; os outros eventos do lote seguem no ritmo normal). Depois de 10 tentativas o evento fica parado para análise: sai do índice da fila (`IX_EventoOutbox_Pendentes` é filtrado por `ProcessadoEmUtc IS NULL AND Tentativas < 10`) e continua na tabela.
 
 ## 3. Erros de domínio → HTTP
 

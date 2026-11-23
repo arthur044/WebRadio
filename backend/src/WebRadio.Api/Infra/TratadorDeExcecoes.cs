@@ -2,6 +2,7 @@ using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using WebRadio.Domain.Erros;
+using WebRadio.Infrastructure.Persistencia;
 
 namespace WebRadio.Api.Infra;
 
@@ -38,6 +39,12 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
             ImagemEmUsoException i => Criar(409, "/erros/imagem-em-uso", "Imagem em uso.", i.Message),
             VersaoDesatualizadaException d => Criar(412, "/erros/versao-desatualizada", "Versão desatualizada.", d.Message),
             ServidorOcupadoException o => Criar(503, "/erros/servidor-ocupado", "Servidor ocupado.", o.Message),
+            // #25: a espera da trava (sp_getapplock) estourou e ninguém a tratou: o servidor está ocupado, não quebrou. Tentar de novo resolve.
+            TravaOcupadaException t => Criar(503, "/erros/servidor-ocupado", "Servidor ocupado.", t.Message),
+            // #25: banco fora ou ocupado (a conexão caiu, o servidor não responde, deadlock): a requisição não é culpa de ninguém, e o cliente deve tentar de novo. É o caso do `sv` do token,
+            // que consulta o banco em TODA requisição autenticada. Quem decide o que é "banco fora" é a Infrastructure (FalhaDeBanco: só os números de conectividade e o RetryLimitExceeded;
+            // permissão, objeto inexistente, restrição e RAISERROR continuam 500 com o erro completo no log): a Api não conhece o EF Core.
+            Exception e when FalhaDeBanco.Indisponivel(e) => Criar(503, "/erros/servidor-ocupado", "Servidor ocupado.", "O serviço está temporariamente indisponível. Tente novamente em instantes."),
             LimiteExcedidoException l => Criar(429, "/erros/limite-excedido", "Limite excedido.", l.Message,
                 ("retryAfterSeconds", SegundosDeEspera(l))),
             GeracaoConcorrenteException g => Criar(409, "/erros/conflito-credencial", "Geração concorrente.", g.Message),
@@ -55,7 +62,10 @@ public sealed class TratadorDeExcecoes(ILogger<TratadorDeExcecoes> logger) : IEx
         }
 
         http.Response.StatusCode = problema.Status!.Value;
-        if (ex is ServidorOcupadoException) http.Response.Headers.RetryAfter = "5";
+        var bancoFora = FalhaDeBanco.Indisponivel(ex);
+        if (ex is ServidorOcupadoException or TravaOcupadaException || bancoFora) http.Response.Headers.RetryAfter = "5";
+        // Sem a stack e sem o texto do banco (pode ter nome de servidor): o tipo e o NÚMERO do erro do SQL Server, no nível de aviso.
+        if (bancoFora) logger.LogWarning("BANCO_INDISPONIVEL: {Tipo} numero={Numero}", ex.GetType().Name, FalhaDeBanco.Numero(ex));
         if (ex is LimiteExcedidoException limite)
             http.Response.Headers.RetryAfter = SegundosDeEspera(limite).ToString(System.Globalization.CultureInfo.InvariantCulture);
         if (ex is MuitosPedidosException pedidos)

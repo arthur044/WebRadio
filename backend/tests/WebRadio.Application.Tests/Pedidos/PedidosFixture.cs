@@ -117,7 +117,7 @@ public sealed class PedidosFixture
         Disjuntor = new DisjuntorDoRedis(Relogio);
         Cache = new CacheDoTeto(Relogio);
         Estado = new EstadoDoThrottle();
-        Outbox = new OutboxEf(Db);
+        Outbox = new OutboxEf(Db, Relogio);
     }
 
     public RadioDbContext Db { get; }

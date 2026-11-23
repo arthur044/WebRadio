@@ -72,7 +72,7 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         // Atalho dos testes: lista vazia aqui quer dizer "para todos"; o destino real continua explícito no IOutbox.
         await using var db = banco.CriarContexto();
         await db.EventosOutbox.Where(e => e.ProcessadoEmUtc == null).ExecuteUpdateAsync(s => s.SetProperty(e => e.ProcessadoEmUtc, DateTime.UtcNow));
-        var outbox = new OutboxEf(db);
+        var outbox = new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio());
         foreach (var (tipo, carga, grupos) in eventos)
         {
             if (tipo == EventosDoOutbox.UsuarioSessoesRevogadas) outbox.EnfileirarSessoesRevogadas(JsonSerializer.SerializeToElement(carga).GetProperty("usuarioId").GetGuid());
@@ -148,8 +148,16 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         Assert.Contains("backplane fora do ar", ruim.UltimoErro, StringComparison.Ordinal);
         Assert.NotNull((await LerAsync(ids[1])).ProcessadoEmUtc);
 
-        for (var i = 0; i < 8; i++) Assert.Equal(new ResultadoDoLote(1, 1), await Novo(notificador).ProcessarLoteAsync(default));
+        // Backoff POR EVENTO (#25): o "Ruim" só volta à fila depois da espera própria; sem avançar o relógio o passe não o lê.
+        Assert.Equal(new ResultadoDoLote(0, 0), await Novo(notificador).ProcessarLoteAsync(default));
+        for (var i = 0; i < 8; i++)
+        {
+            _relogio.Avancar(EventoOutbox.EsperaMaximaEntreTentativas);
+            Assert.Equal(new ResultadoDoLote(1, 1), await Novo(notificador).ProcessarLoteAsync(default));
+        }
+
         // Décima tentativa: além de falhar, o evento sai da fila (e o processor registra OUTBOX_ESGOTADO).
+        _relogio.Avancar(EventoOutbox.EsperaMaximaEntreTentativas);
         Assert.Equal(new ResultadoDoLote(1, 1, Parados: 1), await Novo(notificador).ProcessarLoteAsync(default));
         Assert.Equal(EventoOutbox.MaximoDeTentativas, (await LerAsync(ids[0])).Tentativas);
 
@@ -167,6 +175,7 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         await Novo(notificador).ProcessarLoteAsync(default);
 
         notificador.EventoQueFalha = null;
+        _relogio.Avancar(EventoOutbox.EsperaDepoisDaFalha(1)); // o backoff do evento venceu
         Assert.Equal(new ResultadoDoLote(1, 0), await Novo(notificador).ProcessarLoteAsync(default));
 
         var salvo = await LerAsync(ids[0]);
@@ -180,11 +189,11 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         await using (var db = banco.CriarContexto())
         {
             await db.EventosOutbox.Where(e => e.ProcessadoEmUtc == null).ExecuteUpdateAsync(s => s.SetProperty(e => e.ProcessadoEmUtc, DateTime.UtcNow));
-            db.EventosOutbox.Add(new EventoOutbox("SemDados", """{"grupos":null}"""));
-            db.EventosOutbox.Add(new EventoOutbox("DadosNaoObjeto", """{"grupos":null,"dados":[1,2]}"""));
-            db.EventosOutbox.Add(new EventoOutbox("NaoEObjeto", """[1,2]"""));
-            db.EventosOutbox.Add(new EventoOutbox(EventosDoOutbox.UsuarioSessoesRevogadas, """{"grupos":null,"dados":{"usuarioId":"nao-e-guid"}}"""));
-            new OutboxEf(db).EnfileirarParaTodos("Bom", new { n = 1 });
+            db.EventosOutbox.Add(new EventoOutbox("SemDados", """{"grupos":null}""", DateTime.UtcNow));
+            db.EventosOutbox.Add(new EventoOutbox("DadosNaoObjeto", """{"grupos":null,"dados":[1,2]}""", DateTime.UtcNow));
+            db.EventosOutbox.Add(new EventoOutbox("NaoEObjeto", """[1,2]""", DateTime.UtcNow));
+            db.EventosOutbox.Add(new EventoOutbox(EventosDoOutbox.UsuarioSessoesRevogadas, """{"grupos":null,"dados":{"usuarioId":"nao-e-guid"}}""", DateTime.UtcNow));
+            new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()).EnfileirarParaTodos("Bom", new { n = 1 });
             await db.SaveChangesAsync();
         }
 
@@ -210,7 +219,7 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         await using (var db = banco.CriarContexto())
         {
             await db.EventosOutbox.Where(e => e.ProcessadoEmUtc == null).ExecuteUpdateAsync(s => s.SetProperty(e => e.ProcessadoEmUtc, DateTime.UtcNow));
-            var evento = new EventoOutbox("PedidoCriado", payload);
+            var evento = new EventoOutbox("PedidoCriado", payload, DateTime.UtcNow);
             db.EventosOutbox.Add(evento);
             await db.SaveChangesAsync();
             id = evento.Id;
@@ -233,7 +242,7 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         await using (var db = banco.CriarContexto())
         {
             await db.EventosOutbox.Where(e => e.ProcessadoEmUtc == null).ExecuteUpdateAsync(s => s.SetProperty(e => e.ProcessadoEmUtc, DateTime.UtcNow));
-            db.EventosOutbox.Add(new EventoOutbox("TocandoAgora", """{"grupos":null,"dados":{"titulo":"Faixa"}}"""));
+            db.EventosOutbox.Add(new EventoOutbox("TocandoAgora", """{"grupos":null,"dados":{"titulo":"Faixa"}}""", DateTime.UtcNow));
             await db.SaveChangesAsync();
         }
 
@@ -259,7 +268,8 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         Assert.Null(pendurado.ProcessadoEmUtc);
         Assert.Equal(1, pendurado.Tentativas);
         Assert.StartsWith("Tempo esgotado", pendurado.UltimoErro, StringComparison.Ordinal);
-        // A transação terminou (as travas de linha caíram): outro passe consegue ler o evento de novo.
+        // A transação terminou (as travas de linha caíram): outro passe consegue ler o evento de novo (depois do backoff dele).
+        _relogio.Avancar(EventoOutbox.EsperaDepoisDaFalha(1));
         Assert.Equal(1, (await Novo(new NotificadorFalso()).ProcessarLoteAsync(default)).Lidos);
     }
 
@@ -319,7 +329,7 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
     {
         // Nada é gravado: o IOutbox só adiciona ao contexto (quem salva é o handler), então nem precisa de servidor.
         using var db = new RadioDbContext(new DbContextOptionsBuilder<RadioDbContext>().UseSqlServer("Server=nao-usado").Options);
-        var outbox = new OutboxEf(db);
+        var outbox = new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio());
         var usuarioId = Guid.NewGuid();
 
         outbox.EnfileirarParaTodos("TocandoAgora", new { titulo = "Faixa" });
@@ -341,6 +351,86 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
         Assert.Equal(3, db.EventosOutbox.Local.Count);
     }
 
+    [SqlFact]
+    public async Task Backoff_por_evento_o_que_falhou_espera_o_proprio_prazo_e_dobra_enquanto_os_outros_seguem()
+    {
+        var ids = await EnfileirarAsync(("Ruim", new { n = 1 }, []), ("Bom", new { n = 2 }, []));
+        var notificador = new NotificadorFalso { EventoQueFalha = "Ruim" };
+
+        Assert.Equal(new ResultadoDoLote(2, 1), await Novo(notificador).ProcessarLoteAsync(default));
+        var depoisDaPrimeira = await LerAsync(ids[0]);
+        Assert.Equal(_relogio.UtcNow + EventoOutbox.EsperaDepoisDaFalha(1), depoisDaPrimeira.ProximaTentativaEmUtc);
+        Assert.Equal(TimeSpan.FromSeconds(5), EventoOutbox.EsperaDepoisDaFalha(1));
+
+        // Um evento NOVO entra no meio da espera do "Ruim": é entregue na hora, sem ser atrasado pelo backoff do outro.
+        var novos = await EnfileirarNovoSemMarcarOsOutrosAsync("Bom2");
+        Assert.Equal(new ResultadoDoLote(1, 0), await Novo(notificador).ProcessarLoteAsync(default));
+        Assert.NotNull((await LerAsync(novos)).ProcessadoEmUtc);
+        Assert.Equal(1, (await LerAsync(ids[0])).Tentativas); // o Ruim nem foi tentado de novo
+
+        // Antes do prazo nada; no prazo ele volta, falha de novo e a espera DOBRA.
+        _relogio.Avancar(TimeSpan.FromSeconds(4));
+        Assert.Equal(new ResultadoDoLote(0, 0), await Novo(notificador).ProcessarLoteAsync(default));
+        _relogio.Avancar(TimeSpan.FromSeconds(1));
+        Assert.Equal(new ResultadoDoLote(1, 1), await Novo(notificador).ProcessarLoteAsync(default));
+        var depoisDaSegunda = await LerAsync(ids[0]);
+        Assert.Equal(2, depoisDaSegunda.Tentativas);
+        Assert.Equal(_relogio.UtcNow + TimeSpan.FromSeconds(10), depoisDaSegunda.ProximaTentativaEmUtc);
+    }
+
+    private async Task<long> EnfileirarNovoSemMarcarOsOutrosAsync(string tipo)
+    {
+        await using var db = banco.CriarContexto();
+        new OutboxEf(db, _relogio).EnfileirarParaTodos(tipo, new { n = 3 });
+        await db.SaveChangesAsync();
+        return await db.EventosOutbox.Where(e => e.Tipo == tipo).OrderByDescending(e => e.Id).Select(e => e.Id).FirstAsync();
+    }
+
+    [Theory]
+    [InlineData(1, 5)]
+    [InlineData(2, 10)]
+    [InlineData(5, 80)]
+    [InlineData(7, 300)] // 320 s, cortado no teto de 5 min
+    [InlineData(9, 300)]
+    public void Espera_depois_da_falha_dobra_a_partir_de_5_s_ate_o_teto_de_5_min(int falhas, int segundos)
+        => Assert.Equal(TimeSpan.FromSeconds(segundos), EventoOutbox.EsperaDepoisDaFalha(falhas));
+
+    [SqlFact]
+    public async Task Evento_enfileirado_usa_o_instante_do_IClock_e_nao_o_relogio_do_sistema()
+    {
+        var relogio = new RelogioFalso(new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+        await using var db = banco.CriarContexto();
+        new OutboxEf(db, relogio).EnfileirarParaTodos("RelogioDoOutbox", new { n = 1 });
+        await db.SaveChangesAsync();
+
+        var gravado = await db.EventosOutbox.AsNoTracking().Where(e => e.Tipo == "RelogioDoOutbox").OrderByDescending(e => e.Id).FirstAsync();
+        Assert.Equal(relogio.UtcNow, gravado.CriadoEmUtc);
+    }
+
+    [SqlFact]
+    public async Task Eventos_parados_ficam_fora_do_indice_de_pendentes_e_o_filtro_e_o_texto_literal_da_consulta()
+    {
+        await using var db = banco.CriarContexto();
+        await db.EventosOutbox.Where(e => e.ProcessadoEmUtc == null).ExecuteUpdateAsync(s => s.SetProperty(e => e.ProcessadoEmUtc, DateTime.UtcNow));
+        // 2 pendentes e 2 parados (10 tentativas, sem ProcessadoEmUtc): só os 2 pendentes cabem no índice filtrado.
+        db.EventosOutbox.AddRange(
+            new EventoOutbox("IdxPendente", "{\"grupos\":null,\"dados\":{}}", DateTime.UtcNow),
+            new EventoOutbox("IdxPendente", "{\"grupos\":null,\"dados\":{}}", DateTime.UtcNow));
+        var parado1 = new EventoOutbox("IdxParado", "{\"grupos\":null,\"dados\":{}}", DateTime.UtcNow);
+        var parado2 = new EventoOutbox("IdxParado", "{\"grupos\":null,\"dados\":{}}", DateTime.UtcNow);
+        parado1.Parar("erro de teste", DateTime.UtcNow);
+        parado2.Parar("erro de teste", DateTime.UtcNow);
+        db.EventosOutbox.AddRange(parado1, parado2);
+        await db.SaveChangesAsync();
+
+        var filtro = await db.Database.SqlQueryRaw<string>("SELECT filter_definition AS [Value] FROM sys.indexes WHERE name = N'IX_EventoOutbox_Pendentes' AND object_id = OBJECT_ID(N'infra.EventoOutbox')").SingleAsync();
+        Assert.Contains("[ProcessadoEmUtc] IS NULL", filtro, StringComparison.Ordinal);
+        Assert.Contains("[Tentativas]<(10)", filtro, StringComparison.Ordinal);
+        var linhasNoIndice = await db.Database.SqlQueryRaw<long>("SELECT SUM(ps.row_count) AS [Value] FROM sys.dm_db_partition_stats ps JOIN sys.indexes i ON i.object_id = ps.object_id AND i.index_id = ps.index_id WHERE i.name = N'IX_EventoOutbox_Pendentes' AND i.object_id = OBJECT_ID(N'infra.EventoOutbox')").SingleAsync();
+        Assert.Equal(2, linhasNoIndice);
+        Assert.Equal(2, await db.EventosOutbox.CountAsync(e => e.Tipo == "IdxParado")); // continuam na tabela, para análise
+    }
+
     [Theory]
     [InlineData(1, false, 1)]
     [InlineData(1, true, 2)]
@@ -353,8 +443,8 @@ public class OutboxProcessorTests(BancoDeTeste banco) : IClassFixture<BancoDeTes
     [Fact]
     public void Erro_gigante_e_truncado_em_1000_caracteres()
     {
-        var evento = new EventoOutbox("X", "{}");
-        evento.RegistrarFalha(new string('e', 5000));
+        var evento = new EventoOutbox("X", "{}", DateTime.UtcNow);
+        evento.RegistrarFalha(new string('e', 5000), DateTime.UtcNow);
 
         Assert.Equal(1000, evento.UltimoErro!.Length);
         Assert.Equal(1, evento.Tentativas);

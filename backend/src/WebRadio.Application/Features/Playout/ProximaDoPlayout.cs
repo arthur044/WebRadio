@@ -98,8 +98,14 @@ public sealed class ProximaDoPlayoutHandler(
         {
             var tipo = EscolherTipo(restantes, o);
             var corte = agora - o.Janela(tipo);
-            var candidata = await fila.SortearForaDaJanelaAsync(tipo, aleatorio.ChaveDoSorteio(), corte, voo, ct)
-                ?? await fila.MaisAntigaDaJanelaAsync(tipo, corte, voo, ct);
+            // E4-A01b (K = 5): a fila devolve até 5 candidatas a partir da chave e a aplicação sorteia UMA entre elas. Com uma só, não há sorteio (e nenhum número aleatório é gasto).
+            var candidatas = await fila.CandidatasForaDaJanelaAsync(tipo, aleatorio.ChaveDoSorteio(), corte, voo, ct);
+            var candidata = candidatas.Count switch
+            {
+                0 => await fila.MaisAntigaDaJanelaAsync(tipo, corte, voo, ct),
+                1 => candidatas[0],
+                _ => candidatas[aleatorio.Proximo(0, candidatas.Count)],
+            };
             if (candidata is not null)
             {
                 var dto = await MontarAsync(candidata.Id, pedidoId: null, candidata.Titulo, candidata.Artista, ct);

@@ -136,7 +136,7 @@ public sealed class PipelineDeMidiaTests
         public MarcadorFalso Marcador { get; } = new();
         public ListaDeLogs Logs { get; } = new();
 
-        public PipelineDeMidia Pipeline => new(F.Db, new CapturaDeMidia(F.Db, F.Relogio), F.Storage, Scanner, Sanitizer, new OutboxEf(F.Db), F.Relogio, Marcador,
+        public PipelineDeMidia Pipeline => new(F.Db, new CapturaDeMidia(F.Db, F.Relogio), F.Storage, Scanner, Sanitizer, new OutboxEf(F.Db, F.Relogio), F.Relogio, Marcador,
             Options.Create(F.Opcoes), Logs.Logger<PipelineDeMidia>());
 
         /// <summary>Uma mídia <c>Pendente</c> com o objeto na quarentena (conteúdo, tamanho e ETag batendo com o registrado no concluir).</summary>
@@ -759,7 +759,7 @@ public sealed class PipelineDeMidiaTests
         c.F.Db.SaveChanges();
         c.F.Relogio.UtcNow = c.F.Relogio.UtcNow.Add(c.F.Opcoes.LeaseDoPipeline(TipoMidia.Vinheta, 120)).AddSeconds(1);
         var db = new DbQueFalhaUmaVez(c.F.Db);
-        var pipeline = new PipelineDeMidia(db, new CapturaDeMidia(c.F.Db, c.F.Relogio), c.F.Storage, c.Scanner, c.Sanitizer, new OutboxEf(c.F.Db), c.F.Relogio, c.Marcador,
+        var pipeline = new PipelineDeMidia(db, new CapturaDeMidia(c.F.Db, c.F.Relogio), c.F.Storage, c.Scanner, c.Sanitizer, new OutboxEf(c.F.Db, c.F.Relogio), c.F.Relogio, c.Marcador,
             Options.Create(c.F.Opcoes), c.Logs.Logger<PipelineDeMidia>());
 
         await pipeline.ProcessarProximaAsync(default); // perde a corrida: nada salvo
@@ -778,7 +778,7 @@ public sealed class PipelineDeMidiaTests
         var m = c.Pendente();
         c.SanitizerAprova();
         var db = new GerirMidiaTests.DbQueFalhaAoSalvar(c.F.Db, new Microsoft.EntityFrameworkCore.DbUpdateException("FK ou conexão"));
-        var pipeline = new PipelineDeMidia(db, new CapturaDeMidia(c.F.Db, c.F.Relogio), c.F.Storage, c.Scanner, c.Sanitizer, new OutboxEf(c.F.Db), c.F.Relogio, c.Marcador,
+        var pipeline = new PipelineDeMidia(db, new CapturaDeMidia(c.F.Db, c.F.Relogio), c.F.Storage, c.Scanner, c.Sanitizer, new OutboxEf(c.F.Db, c.F.Relogio), c.F.Relogio, c.Marcador,
             Options.Create(c.F.Opcoes), c.Logs.Logger<PipelineDeMidia>());
 
         Assert.Equal(PassoDoPipeline.InfraestruturaFora, await pipeline.ProcessarProximaAsync(default));

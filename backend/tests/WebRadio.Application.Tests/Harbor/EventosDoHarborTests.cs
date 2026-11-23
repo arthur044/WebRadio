@@ -53,7 +53,7 @@ public class EventosDoHarborTests
     }
 
     private Task Evento(string tipo, int segundos = 0, Guid? id = null) =>
-        new RegistrarEventoDoHarborHandler(_consultas, _estado, new OutboxEf(_db), _db, new LogCapturado<RegistrarEventoDoHarborHandler>())
+        new RegistrarEventoDoHarborHandler(_consultas, _estado, new OutboxEf(_db, _relogio), _db, new LogCapturado<RegistrarEventoDoHarborHandler>())
             .Handle(new RegistrarEventoDoHarborCommand(tipo, (id ?? _id).ToString(), AuthFixture.Agora.AddSeconds(segundos)), CancellationToken.None);
 
     private List<JsonElement> Publicados() => _db.EventosOutbox.OrderBy(e => e.Id).ToList()

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using WebRadio.Application.Abstracoes;
@@ -7,7 +8,7 @@ using WebRadio.Application.Abstracoes;
 namespace WebRadio.Infrastructure.Persistencia.Outbox;
 
 /// <param name="Lidos">Eventos pegos neste passe.</param>
-/// <param name="Falhas">Falhas que ainda serão tentadas de novo (destino fora, tempo esgotado): fazem o dispatcher esperar mais.</param>
+/// <param name="Falhas">Falhas que ainda serão tentadas de novo (destino fora, tempo esgotado): cada evento que falhou espera o PRÓPRIO backoff (<c>ProximaTentativaEmUtc</c>); o laço do dispatcher não desacelera por causa dele.</param>
 /// <param name="Parados">Eventos que saíram da fila neste passe sem entrega (payload inválido ou 10 tentativas).</param>
 public sealed record ResultadoDoLote(int Lidos, int Falhas, int Parados = 0);
 
@@ -32,8 +33,9 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
         // Só os testes HTTP usam o provedor em memória (sem transação nem dica de trava); lá há um único consumidor.
         if (!db.Database.IsSqlServer())
         {
+            var agoraMemoria = clock.UtcNow;
             return await EntregarAsync(await db.EventosOutbox
-                .Where(e => e.ProcessadoEmUtc == null && e.Tentativas < EventoOutbox.MaximoDeTentativas)
+                .Where(e => e.ProcessadoEmUtc == null && e.Tentativas < EventoOutbox.MaximoDeTentativas && (e.ProximaTentativaEmUtc == null || e.ProximaTentativaEmUtc <= agoraMemoria))
                 .OrderBy(e => e.Id).Take(TamanhoDoLote).ToListAsync(ct), ct);
         }
 
@@ -42,9 +44,14 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
             db.ChangeTracker.Clear();
             await using var tx = await db.Database.BeginTransactionAsync(ct2);
             // As travas de linha valem até o commit. ROWLOCK evita que a trava suba para a página e esconda vizinhos do
-            // READPAST da outra réplica. O filtro é o do índice IX_EventoOutbox_Pendentes.
+            // READPAST da outra réplica. O filtro é o do índice IX_EventoOutbox_Pendentes (ProcessadoEmUtc IS NULL AND Tentativas < 10) e a consulta precisa de DUAS coisas para usá-lo:
+            //  1. o 10 LITERAL no texto (é uma constante do código, nunca entrada de fora): com um parâmetro o SQL Server não prova que a consulta cabe no índice filtrado;
+            //  2. o hint INDEX(IX_EventoOutbox_Pendentes): o literal só torna o índice ELEGÍVEL. Sem o hint o plano é um scan da PK (as pendentes ficam no fim da ordem do Id; medido pelo Atlas
+            //     com 200 mil processados + 3 mil pendentes: 1.623 leituras, crescendo com os 7 dias de histórico); com o hint são 164, independente do histórico.
+            // Só o instante da espera por evento é parâmetro.
             var lote = await db.EventosOutbox
-                .FromSqlInterpolated($"SELECT TOP ({TamanhoDoLote}) * FROM infra.EventoOutbox WITH (UPDLOCK, READPAST, ROWLOCK) WHERE ProcessadoEmUtc IS NULL AND Tentativas < {EventoOutbox.MaximoDeTentativas} ORDER BY Id")
+                .FromSqlRaw($"SELECT TOP ({TamanhoDoLote}) * FROM infra.EventoOutbox WITH (UPDLOCK, READPAST, ROWLOCK, INDEX(IX_EventoOutbox_Pendentes)) WHERE ProcessadoEmUtc IS NULL AND Tentativas < {EventoOutbox.MaximoDeTentativas} AND (ProximaTentativaEmUtc IS NULL OR ProximaTentativaEmUtc <= @agora) ORDER BY Id",
+                    new SqlParameter("@agora", System.Data.SqlDbType.DateTime2) { Value = clock.UtcNow })
                 .ToListAsync(ct2);
             var resultado = await EntregarAsync(lote, ct2);
             await tx.CommitAsync(ct2);
@@ -69,7 +76,7 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
             {
                 // Payload fora do envelope não melhora com o tempo: para na hora, sem atrasar os eventos saudáveis com o
                 // backoff do dispatcher.
-                evento.Parar($"{nameof(JsonException)}: {ex.Message}");
+                evento.Parar($"{nameof(JsonException)}: {ex.Message}", clock.UtcNow);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -78,7 +85,7 @@ public sealed class OutboxProcessor(RadioDbContext db, IRealtimeNotifier notifie
                 falhas++;
                 evento.RegistrarFalha(ex is OperationCanceledException
                     ? $"Tempo esgotado: a entrega passou de {TempoMaximoPorEvento.TotalSeconds:0.###} s."
-                    : $"{ex.GetType().Name}: {ex.Message}");
+                    : $"{ex.GetType().Name}: {ex.Message}", clock.UtcNow);
                 logger.LogWarning(ex, "OUTBOX_FALHA: evento {EventoId} ({Tipo}), tentativa {Tentativa} de {Maximo}",
                     evento.Id, evento.Tipo, evento.Tentativas, EventoOutbox.MaximoDeTentativas);
             }

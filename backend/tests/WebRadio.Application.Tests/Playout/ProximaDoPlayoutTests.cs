@@ -14,6 +14,9 @@ internal sealed class FilaFalsa : IFilaDoPlayout
 
     public Dictionary<TipoMidia, CandidataDaRotacao?> ForaDaJanela { get; } = [];
 
+    /// <summary>Várias candidatas por tipo (a rotação sorteia UMA entre elas, K = 5); tem precedência sobre <see cref="ForaDaJanela"/>.</summary>
+    public Dictionary<TipoMidia, List<CandidataDaRotacao>> VariasForaDaJanela { get; } = [];
+
     public Dictionary<TipoMidia, CandidataDaRotacao?> Antigas { get; } = [];
 
     public List<(TipoMidia Tipo, int R, DateTime Corte, Guid EmVoo)> BuscasForaDaJanela { get; } = [];
@@ -28,10 +31,11 @@ internal sealed class FilaFalsa : IFilaDoPlayout
         return Task.FromResult(Pedidos.Count > 0 ? Pedidos.Dequeue() : null);
     }
 
-    public Task<CandidataDaRotacao?> SortearForaDaJanelaAsync(TipoMidia tipo, int sorteio, DateTime corteDaJanela, Guid emVoo, CancellationToken ct)
+    public Task<IReadOnlyList<CandidataDaRotacao>> CandidatasForaDaJanelaAsync(TipoMidia tipo, int sorteio, DateTime corteDaJanela, Guid emVoo, CancellationToken ct)
     {
         BuscasForaDaJanela.Add((tipo, sorteio, corteDaJanela, emVoo));
-        return Task.FromResult(ForaDaJanela.GetValueOrDefault(tipo));
+        if (VariasForaDaJanela.TryGetValue(tipo, out var varias)) return Task.FromResult<IReadOnlyList<CandidataDaRotacao>>(varias);
+        return Task.FromResult<IReadOnlyList<CandidataDaRotacao>>(ForaDaJanela.GetValueOrDefault(tipo) is { } uma ? [uma] : []);
     }
 
     public Task<CandidataDaRotacao?> MaisAntigaDaJanelaAsync(TipoMidia tipo, DateTime corteDaJanela, Guid emVoo, CancellationToken ct)
@@ -112,6 +116,38 @@ public sealed class ProximaDoPlayoutTests
 
         Assert.Equal((m.Id, (Guid?)null, "Do índice", "Artista do índice"), (r!.MidiaId, r.PedidoId, r.Titulo, r.Artista));
         Assert.Equal(m.Id, c.EmVoo.Atual);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(2, 2)]
+    [InlineData(4, 4)]
+    public async Task Com_varias_candidatas_a_aplicacao_sorteia_UMA_entre_elas_pelo_IAleatorio(int indiceSorteado, int esperado)
+    {
+        var c = new Cena();
+        var cinco = Enumerable.Range(0, 5).Select(i => c.Aprovada(TipoMidia.Musica, "Faixa" + i)).ToList();
+        c.Fila.VariasForaDaJanela[TipoMidia.Musica] = [.. cinco.Select(m => new CandidataDaRotacao(m.Id, m.Titulo, "Banda"))];
+
+        // 1º sorteio: o tipo (0 de 11 = Musica); 2º: o índice entre as candidatas (E4-A01b, K = 5)
+        var r = await c.Handler(0, indiceSorteado).Handle(new ProximaDoPlayoutQuery(Instancia), default);
+
+        Assert.Equal(cinco[esperado].Id, r!.MidiaId);
+        Assert.Equal(cinco[esperado].Id, c.EmVoo.Atual);
+    }
+
+    [Fact]
+    public async Task Com_uma_so_candidata_nao_ha_sorteio_e_sem_nenhuma_cai_na_busca_3()
+    {
+        var c = new Cena();
+        var unica = c.Aprovada(TipoMidia.Musica, "Única");
+        c.Fila.VariasForaDaJanela[TipoMidia.Musica] = [new CandidataDaRotacao(unica.Id, "Única", "Banda")];
+        Assert.Equal(unica.Id, (await c.Handler(0, 4).Handle(new ProximaDoPlayoutQuery(Instancia), default))!.MidiaId); // o 4 sobraria: com uma candidata o índice não é sorteado
+
+        var d = new Cena();
+        var antiga = d.Aprovada(TipoMidia.Musica, "Antiga");
+        d.Fila.VariasForaDaJanela[TipoMidia.Musica] = [];
+        d.Fila.Antigas[TipoMidia.Musica] = new CandidataDaRotacao(antiga.Id, "Antiga", "Banda");
+        Assert.Equal(antiga.Id, (await d.Handler(0).Handle(new ProximaDoPlayoutQuery(Instancia), default))!.MidiaId);
     }
 
     [Theory]

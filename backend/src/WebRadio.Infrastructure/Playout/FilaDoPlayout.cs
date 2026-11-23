@@ -49,8 +49,10 @@ public sealed class FilaDoPlayout(RadioDbContext db) : IFilaDoPlayout
         SELECT PedidoId, MidiaId FROM @capturado;
         """;
 
+    // E4-A01b: TOP (@k) com K = 5 (texto medido pelo Atlas, infra/perf/medir-e4-a01b-k.sql). O hint INDEX(...) e o StatusSanitizacao = 4 AND Ativo = 1 LITERAL fazem parte do contrato: o
+    // nested loops com esse índice é o plano certo, e parametrizar o status ou tirar o hint salta de ~13 para ~900 leituras.
     private const string SqlForaDaJanelaDepois = """
-        SELECT TOP (1) a.Id, a.Titulo, a.Artista
+        SELECT TOP (@k) a.Id, a.Titulo, a.Artista
         FROM midia.ArquivoMidia AS a WITH (INDEX(IX_ArquivoMidia_Rotacao))
         WHERE a.TipoMidia = @tipo AND a.StatusSanitizacao = 4 AND a.Ativo = 1 AND a.Sorteio >= @r AND a.Id <> @emVoo
           AND NOT EXISTS (SELECT 1 FROM midia.Reproducao AS r WITH (INDEX(IX_Reproducao_Periodo))
@@ -59,7 +61,7 @@ public sealed class FilaDoPlayout(RadioDbContext db) : IFilaDoPlayout
         """;
 
     private const string SqlForaDaJanelaAntes = """
-        SELECT TOP (1) a.Id, a.Titulo, a.Artista
+        SELECT TOP (@k) a.Id, a.Titulo, a.Artista
         FROM midia.ArquivoMidia AS a WITH (INDEX(IX_ArquivoMidia_Rotacao))
         WHERE a.TipoMidia = @tipo AND a.StatusSanitizacao = 4 AND a.Ativo = 1 AND a.Sorteio < @r AND a.Id <> @emVoo
           AND NOT EXISTS (SELECT 1 FROM midia.Reproducao AS r WITH (INDEX(IX_Reproducao_Periodo))
@@ -85,20 +87,27 @@ public sealed class FilaDoPlayout(RadioDbContext db) : IFilaDoPlayout
         return linhas.Count == 0 ? null : new PedidoParaTocar(linhas[0].PedidoId, linhas[0].MidiaId);
     }
 
-    public async Task<CandidataDaRotacao?> SortearForaDaJanelaAsync(TipoMidia tipo, int sorteio, DateTime corteDaJanela, Guid emVoo, CancellationToken ct) =>
-        await Buscar(SqlForaDaJanelaDepois, tipo, sorteio, corteDaJanela, emVoo, ct) ?? await Buscar(SqlForaDaJanelaAntes, tipo, sorteio, corteDaJanela, emVoo, ct);
+    public async Task<IReadOnlyList<CandidataDaRotacao>> CandidatasForaDaJanelaAsync(TipoMidia tipo, int sorteio, DateTime corteDaJanela, Guid emVoo, CancellationToken ct)
+    {
+        // Busca 1: a partir da chave. Busca 2 SÓ se vieram menos de K: completa com as do início do círculo (Sorteio < @r), que nunca repetem as da busca 1.
+        var candidatas = await Buscar(SqlForaDaJanelaDepois, tipo, sorteio, corteDaJanela, emVoo, IFilaDoPlayout.CandidatasPorSorteio, ct);
+        if (candidatas.Count < IFilaDoPlayout.CandidatasPorSorteio)
+            candidatas.AddRange(await Buscar(SqlForaDaJanelaAntes, tipo, sorteio, corteDaJanela, emVoo, IFilaDoPlayout.CandidatasPorSorteio - candidatas.Count, ct));
+        return candidatas;
+    }
 
-    public Task<CandidataDaRotacao?> MaisAntigaDaJanelaAsync(TipoMidia tipo, DateTime corteDaJanela, Guid emVoo, CancellationToken ct) =>
-        Buscar(SqlMaisAntigaDaJanela, tipo, 0, corteDaJanela, emVoo, ct);
+    public async Task<CandidataDaRotacao?> MaisAntigaDaJanelaAsync(TipoMidia tipo, DateTime corteDaJanela, Guid emVoo, CancellationToken ct) =>
+        (await Buscar(SqlMaisAntigaDaJanela, tipo, 0, corteDaJanela, emVoo, 1, ct)).FirstOrDefault();
 
-    private async Task<CandidataDaRotacao?> Buscar(string sql, TipoMidia tipo, int r, DateTime corteDaJanela, Guid emVoo, CancellationToken ct)
+    private async Task<List<CandidataDaRotacao>> Buscar(string sql, TipoMidia tipo, int r, DateTime corteDaJanela, Guid emVoo, int k, CancellationToken ct)
     {
         var linhas = await db.Database.SqlQueryRaw<LinhaDaCandidata>(sql,
             new SqlParameter("@tipo", System.Data.SqlDbType.TinyInt) { Value = (byte)tipo },
             new SqlParameter("@r", System.Data.SqlDbType.Int) { Value = r },
             new SqlParameter("@corteJanela", System.Data.SqlDbType.DateTime2) { Value = corteDaJanela, Scale = 0 },
-            new SqlParameter("@emVoo", System.Data.SqlDbType.UniqueIdentifier) { Value = emVoo }).ToListAsync(ct);
-        return linhas.Count == 0 ? null : new CandidataDaRotacao(linhas[0].Id, linhas[0].Titulo, linhas[0].Artista);
+            new SqlParameter("@emVoo", System.Data.SqlDbType.UniqueIdentifier) { Value = emVoo },
+            new SqlParameter("@k", System.Data.SqlDbType.Int) { Value = k }).ToListAsync(ct);
+        return [.. linhas.Select(l => new CandidataDaRotacao(l.Id, l.Titulo, l.Artista))];
     }
 }
 

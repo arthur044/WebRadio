@@ -405,12 +405,15 @@ CREATE TABLE infra.EventoOutbox (
     ProcessadoEmUtc  datetime2(3)         NULL,
     Tentativas       smallint             NOT NULL CONSTRAINT DF_EventoOutbox_Tentativas DEFAULT (0),
     UltimoErro       nvarchar(1000)       NULL,
+    ProximaTentativaEmUtc datetime2(3)    NULL,  -- backoff POR EVENTO (#25): depois de uma falha o evento só volta à fila a partir deste instante (NULL = pronto)
     CONSTRAINT PK_EventoOutbox PRIMARY KEY CLUSTERED (Id),
     CONSTRAINT CK_EventoOutbox_Payload CHECK (ISJSON(Payload) = 1)
 );
--- Fila do OutboxDispatcher: pendentes com até 10 tentativas.
--- Leitura: UPDATE TOP(50) ... WITH (UPDLOCK, READPAST, ROWLOCK) WHERE ProcessadoEmUtc IS NULL AND Tentativas < 10
-CREATE INDEX IX_EventoOutbox_Pendentes ON infra.EventoOutbox (Id) INCLUDE (Tentativas) WHERE ProcessadoEmUtc IS NULL;
+-- Fila do OutboxDispatcher: pendentes com até 10 tentativas. Os eventos PARADOS (10 tentativas, ProcessadoEmUtc NULL) ficam fora do índice (#25).
+-- Leitura: SELECT TOP(50) ... WITH (UPDLOCK, READPAST, ROWLOCK, INDEX(IX_EventoOutbox_Pendentes)) WHERE ProcessadoEmUtc IS NULL AND Tentativas < 10 AND (ProximaTentativaEmUtc IS NULL OR ProximaTentativaEmUtc <= @agora)
+-- O 10 vai LITERAL na consulta (igual ao filtro): com um parâmetro o SQL Server não prova que a consulta cabe no índice filtrado. O literal só torna o índice ELEGÍVEL: o hint INDEX(...) é
+-- que o faz ser usado (sem ele, scan da PK: 1.623 leituras com 200 mil processados + 3 mil pendentes; com ele, 164, independente do histórico; Atlas, #175).
+CREATE INDEX IX_EventoOutbox_Pendentes ON infra.EventoOutbox (Id) INCLUDE (Tentativas, ProximaTentativaEmUtc) WHERE ProcessadoEmUtc IS NULL AND Tentativas < 10;
 GO
 
 /* ---------- 9.1 rel.usp_MaisTocadas (E4-A02, 08 E4-D12; relatório "mais tocadas") ----------

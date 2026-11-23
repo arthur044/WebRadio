@@ -27,7 +27,7 @@ public class AlertaDoHarborTests
     private readonly LogCapturado<FilaDeAlertasDoHarbor> _logFila = new();
     private readonly FilaDeAlertasDoHarbor _fila;
     private IRequestThrottle _contadores;
-    private Func<RadioDbContext, IOutbox> _outbox = db => new OutboxEf(db);
+    private Func<RadioDbContext, IOutbox> _outbox = db => new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio());
 
     private readonly Guid _id = Guid.NewGuid();
     private readonly Guid _donoId = Guid.NewGuid();
@@ -279,7 +279,7 @@ public class AlertaDoHarborTests
         Assert.Null(decima); // o mesmo 401 sem corpo: nenhuma exceção chega ao auth
         Assert.Contains(_logAlerta.Linhas, l => l.Contains("HARBOR_ALERTA_FALHOU"));
 
-        _outbox = db => new OutboxEf(db); // o banco volta: a 11ª não regrava o que se perdeu
+        _outbox = db => new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()); // o banco volta: a 11ª não regrava o que se perdeu
         await Falhas(3);
         await Drenar();
         Assert.Empty(Alertas());

@@ -204,9 +204,9 @@ public class ManutencaoTests(BancoDeTeste banco) : IClassFixture<BancoDeTeste>
     [SqlFact]
     public async Task Apaga_outbox_processado_ha_mais_de_7_dias_e_nunca_o_pendente()
     {
-        var antigo = new EventoOutbox("TocandoAgora", "{}");
-        var recente = new EventoOutbox("TocandoAgora", "{}");
-        var pendente = new EventoOutbox("TocandoAgora", "{}");
+        var antigo = new EventoOutbox("TocandoAgora", "{}", DateTime.UtcNow);
+        var recente = new EventoOutbox("TocandoAgora", "{}", DateTime.UtcNow);
+        var pendente = new EventoOutbox("TocandoAgora", "{}", DateTime.UtcNow);
         await using (var db = banco.CriarContexto())
         {
             db.EventosOutbox.AddRange(antigo, recente, pendente);

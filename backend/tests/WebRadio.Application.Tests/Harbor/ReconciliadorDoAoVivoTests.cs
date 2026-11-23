@@ -18,7 +18,7 @@ public class ReconciliadorDoAoVivoTests
     private readonly EstadoEmMemoria _estado = new() { Agora = AuthFixture.Agora };
 
     private ReconciliadorDoAoVivo Novo(IOutbox? outbox = null) =>
-        new(_estado, outbox ?? new OutboxEf(_db), _db, new LogCapturado<ReconciliadorDoAoVivo>());
+        new(_estado, outbox ?? new OutboxEf(_db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), _db, new LogCapturado<ReconciliadorDoAoVivo>());
 
     private void NoAr() => _estado.Atual = new EstadoDoAoVivo(true, Guid.NewGuid(), "Ana", Guid.NewGuid(), AuthFixture.Agora, Fim);
 

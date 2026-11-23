@@ -167,7 +167,7 @@ public class TransicoesDaGradeTests(BancoDeTeste banco) : IClassFixture<BancoDeT
         var id = await ProgramaAsync(locutor, agora.AddMinutes(-10), agora.AddHours(1), "Encerrado a mao");
         await using (var db = _c.NovoDb())
         {
-            var encerrar = new EncerrarProgramaHandler(db, new TransacaoComTrava(db), new OutboxEf(db), _c.Relogio);
+            var encerrar = new EncerrarProgramaHandler(db, new TransacaoComTrava(db), new OutboxEf(db, new WebRadio.Infrastructure.Seguranca.SistemaRelogio()), _c.Relogio);
             await encerrar.Handle(new EncerrarProgramaCommand(id, locutor, SolicitanteEhAdmin: false), default);
         }
 
