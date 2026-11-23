@@ -108,7 +108,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       DB_SERVER: sqlserver
       PATH: "/opt/mssql-tools18/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    secrets: [mssql_sa_password, db_app_password, db_migrator_password, db_relatorio_password]
+    secrets: [mssql_sa_password, db_app_password, db_migrator_password, db_relatorio_password, sql_backup_senha]
     volumes:
       - ./infra/db-init:/init/db-init:ro
       - ./infra/sql:/init/sql:ro
@@ -189,7 +189,7 @@ services:
     build: { context: ., dockerfile: infra/minio/Dockerfile }
     image: webradio-minio-init:local
     <<: *one-shot
-    secrets: [minio_root_user, minio_root_password, minio_api_access_key, minio_api_secret_key, minio_worker_access_key, minio_worker_secret_key]
+    secrets: [minio_root_user, minio_root_password, minio_api_access_key, minio_api_secret_key, minio_worker_access_key, minio_worker_secret_key, minio_backup_access_key, minio_backup_secret_key]
     tmpfs: [/tmp]
     networks: [dados]
     # 256m, medido (#128/#112): o pico do mc (Go) no `policy attach` passa de 128m e o contêiner morria por OOM (OOMKilled=true, "Killed" no log e
@@ -361,6 +361,70 @@ services:
       retries: 3
       start_period: 600s
 
+  # ------------------------------------------------------------------ backup e restauração (E5-F03, E5-D3, E5-D10, E5-D13)
+  # Imagem própria: restic, sqlcmd e mc (o mesmo mc do minio-init, por `additional_contexts`), sem root dentro. Só com o perfil `backup`: o `up` comum não o sobe; o systemd.timer do host
+  # roda `docker compose --profile backup run --rm backup` às 03:30 (infra/backup/systemd). Roda como o uid 10001 (o do `mssql`, dono do volume sql-backup): é o único jeito de ler o .bak
+  # e, no `restaurar`, de gravar o .bak onde o SQL Server o lê, sem root e sem capability. A ponte aceita entre `dados` e a internet (rede `saida-backup`, só dele): o 05 registra.
+  # Identidades mínimas: svc_backup no SQL (db_backupoperator) e svc-backup no MinIO (só ler midia e publico). A cópia EXTERNA é opcional: sem BACKUP_S3_* e sem os dois segredos preenchidos, só o local.
+  backup:
+    build:
+      context: .
+      dockerfile: infra/backup/Dockerfile
+      additional_contexts:
+        mc-img: "service:minio-init"
+    image: webradio-backup:local
+    <<: *one-shot
+    profiles: [backup]
+    user: "10001:0"
+    environment:
+      DB_SERVER: sqlserver
+      MINIO_ENDPOINT: "minio:9000"
+      BACKUP_S3_ENDPOINT: "${BACKUP_S3_ENDPOINT:-}"
+      BACKUP_S3_BUCKET: "${BACKUP_S3_BUCKET:-}"
+    secrets: [restic_senha, backup_s3_access_key, backup_s3_secret_key, sql_backup_senha, minio_backup_access_key, minio_backup_secret_key]
+    volumes:
+      - sql-backup:/var/opt/mssql/backup:ro
+      - backup-local:/backup
+      - ./infra/sql:/sql:ro
+    tmpfs: ["/tmp:uid=10001,gid=0,mode=0700"]
+    networks: [dados, saida-backup]
+    mem_limit: 768m
+    pids_limit: 100
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+
+  # Restauração manual (E5-D13): `docker compose stop api worker` e depois `docker compose --profile restore run --rm restaurar`. É o ÚNICO serviço, além do db-init e do minio-init, com o `sa` e a
+  # credencial ROOT do MinIO (exceção aceita no 05 S-A04: o svc-backup é só leitura e a volta da mídia precisa gravar em midia e publico). Mesmo endurecimento e redes do `backup`.
+  restaurar:
+    image: webradio-backup:local
+    <<: *one-shot
+    profiles: [restore]
+    entrypoint: ["/usr/local/bin/restaurar.sh"]
+    user: "10001:0"
+    environment:
+      DB_SERVER: sqlserver
+      MINIO_ENDPOINT: "minio:9000"
+      BACKUP_S3_ENDPOINT: "${BACKUP_S3_ENDPOINT:-}"
+      BACKUP_S3_BUCKET: "${BACKUP_S3_BUCKET:-}"
+      RESTAURAR_FONTE: "${RESTAURAR_FONTE:-}"
+      RESTAURAR_SNAPSHOT: "${RESTAURAR_SNAPSHOT:-latest}"
+    secrets: [restic_senha, backup_s3_access_key, backup_s3_secret_key, mssql_sa_password, minio_root_user, minio_root_password]
+    volumes:
+      - sql-backup:/var/opt/mssql/backup
+      - backup-local:/backup
+      - ./infra/sql:/sql:ro
+    tmpfs: ["/tmp:uid=10001,gid=0,mode=0700"]
+    networks: [dados, saida-backup]
+    mem_limit: 768m
+    pids_limit: 100
+    stdin_open: true
+    tty: true
+    depends_on:
+      backup: { condition: service_completed_successfully, required: false }
+      db-init: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+
   # ------------------------------------------------------------------ playout
   icecast:
     build: { context: ., dockerfile: infra/icecast/Dockerfile }
@@ -483,6 +547,9 @@ networks:
   # E4-F06: rede SÓ do freshclam, com saída à internet (espelhos de assinatura) e mais ninguém: o freshclam faz o parse do que baixa, e na `borda` ele alcançaria as portas
   # do web e do harbor-borda (multi-homed para app e playout).
   saida-freshclam: {}
+  # E5-D10: só o `backup` e o `restaurar`, com saída à internet (o storage externo do backup, opcional) e mais ninguém nela. Eles também estão na `dados` (SQL e MinIO): são a ponte aceita
+  # entre os dados e a internet (05), e por isso têm a lista mínima de identidades e nenhuma porta.
+  saida-backup: {}
   # E4-D7: só o worker e o clamd (INSTREAM na 3310).
   antivirus:
     internal: true
@@ -493,6 +560,8 @@ volumes:
   sqlserver-data: {}
   # E5-D3/E5-D13: o webradio.bak do BACKUP noturno, com o dono ajustado pelo sql-backup-init.
   sql-backup: {}
+  # E5-D3: o repositório restic LOCAL (criptografado, com a retenção), o espelho da mídia e o cache do restic. Persiste entre recriações; é o backup que existe SEM storage externo.
+  backup-local: {}
   minio-data: {}
   redis-data: {}
   # E4-D7: a base de assinaturas do ClamAV (o freshclam escreve, o clamd lê).
@@ -526,3 +595,10 @@ secrets:
   seed_admin_senha: { file: ./secrets/seed_admin_senha }
   # Só o docker-compose.dev.yml o monta (Seed__DevSenha, DevDataSeeder); a base de produção não o usa.
   seed_dev_senha: { file: ./secrets/seed_dev_senha }
+  # E5-D4: o backup. restic_senha: sem ela o backup não abre (guardar também FORA do servidor). backup_s3_*: do storage externo, colados pelo operador; arquivo VAZIO = cópia externa desligada.
+  restic_senha: { file: ./secrets/restic_senha }
+  sql_backup_senha: { file: ./secrets/sql_backup_senha }
+  minio_backup_access_key: { file: ./secrets/minio_backup_access_key }
+  minio_backup_secret_key: { file: ./secrets/minio_backup_secret_key }
+  backup_s3_access_key: { file: ./secrets/backup_s3_access_key }
+  backup_s3_secret_key: { file: ./secrets/backup_s3_secret_key }

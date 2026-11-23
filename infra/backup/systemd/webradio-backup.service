@@ -1,0 +1,17 @@
+# WebRadio — backup diário (E5-F03). Exemplo: copie para /etc/systemd/system/ e ajuste WorkingDirectory (a raiz do projeto no servidor).
+#   sudo cp infra/backup/systemd/webradio-backup.* /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now webradio-backup.timer
+# Os segredos NÃO passam por aqui: o Compose os monta de secrets/ dentro do contêiner `backup`, e o script os lê de arquivo (nunca argv nem Environment=).
+# O resultado fica no journal e no log do contêiner: `journalctl -u webradio-backup -n 50` mostra BACKUP_OK ou BACKUP_FALHOU etapa=... motivo=...
+[Unit]
+Description=WebRadio - backup diario (SQL Server e biblioteca de midia, restic)
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/webradio
+# -T: sem terminal (o systemd não tem um). O Compose sobe o db-init e o minio-init antes se preciso (já concluídos, não refazem nada).
+ExecStart=/usr/bin/docker compose --profile backup run --rm -T backup
+# Um backup que passa de 3 h está preso (o normal é minutos): o systemd o derruba e o próximo timer tenta de novo.
+TimeoutStartSec=3h
+Nice=10

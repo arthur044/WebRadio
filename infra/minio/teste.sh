@@ -37,6 +37,8 @@ segredos() { # $1 = diretório; $2 = secret key do svc-api
   printf '%s' "$2" > "$1/minio_api_secret_key"
   printf '%s' "WorkerAcesso123" > "$1/minio_worker_access_key"
   printf '%s' "WorkerSecreto123" > "$1/minio_worker_secret_key"
+  printf '%s' "BackupAcesso123" > "$1/minio_backup_access_key"
+  printf '%s' "BackupSecreto123" > "$1/minio_backup_secret_key"
 }
 rodar() { # $1 = diretório de segredos; saída (stdout+stderr) em $TMP/saida; devolve o código de saída
   PATH="$TMP/bin:$PATH" SEGREDOS_DIR="$1" MC_LOG="$TMP/mc.log" MC_FALHA_USER="${MC_FALHA_USER:-0}" sh -c "P=$TMP/pol; sed 's#^P=.*#P=$TMP/pol#' infra/minio/init-buckets.sh | sh" > "$TMP/saida" 2>&1
@@ -64,7 +66,7 @@ segredos "$TMP/s3" "$SEGREDO_OK"
 : > "$TMP/mc.log"
 confere "init-buckets.sh termina bem" rodar "$TMP/s3"
 confere "mc admin user add recebe -- antes dos argumentos" grep -q -- "^user add admin user add -- wr ApiAcesso123 $SEGREDO_OK\$" "$TMP/mc.log"
-confere "os dois usuários de serviço foram criados" test "$(grep -c '^user add' "$TMP/mc.log")" = "2"
+confere "os três usuários de serviço (api, worker e backup) foram criados" test "$(grep -c '^user add' "$TMP/mc.log")" = "3"
 
 echo
 if [[ "$FALHAS" -eq 0 ]]; then echo "minio-init: tudo certo."; else echo "minio-init: $FALHAS falha(s)." >&2; cat "$TMP/saida" >&2 || true; exit 1; fi

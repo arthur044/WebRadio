@@ -27,8 +27,8 @@
 #   DB_APP_PASSWORD_FILE         (padrão: /run/secrets/db_app_password)
 #   DB_MIGRATOR_PASSWORD_FILE    (padrão: /run/secrets/db_migrator_password)
 #   DB_RELATORIO_PASSWORD_FILE   (padrão: /run/secrets/db_relatorio_password)
-#   DB_BACKUP_PASSWORD_FILE      (padrão: /run/secrets/sql_backup_senha) — E5-A01. OPCIONAL por enquanto: sem o arquivo, o login
-#                                svc_backup não é criado e o entrypoint avisa. O E5-F03 liga o segredo no compose e torna isto obrigatório.
+#   DB_BACKUP_PASSWORD_FILE      (padrão: /run/secrets/sql_backup_senha) — E5-A01/E5-F03. OBRIGATÓRIA: o login svc_backup é o do backup noturno; sem ele o backup não roda e o
+#                                restaurar.sh não religa o usuário (o pos-restore.sql aborta se faltar o login).
 #   DB_SERVER                    host do SQL Server (padrão: sqlserver)
 # =============================================================================
 set -euo pipefail
@@ -89,12 +89,9 @@ validar_alfabeto_senha "DB_APP_PASSWORD" "$APP_PASSWORD"
 validar_alfabeto_senha "DB_MIGRATOR_PASSWORD" "$MIGRATOR_PASSWORD"
 validar_alfabeto_senha "DB_RELATORIO_PASSWORD" "$RELATORIO_PASSWORD"
 
-# E5-A01: a senha do svc_backup é opcional até o E5-F03 ligar o segredo; presente, vale o mesmo alfabeto das outras.
-BACKUP_PASSWORD=""
-if [[ -r "$DB_BACKUP_PASSWORD_FILE" ]]; then
-  BACKUP_PASSWORD="$(cat "$DB_BACKUP_PASSWORD_FILE")"
-  validar_alfabeto_senha "DB_BACKUP_PASSWORD" "$BACKUP_PASSWORD"
-fi
+# E5-F03: a senha do svc_backup é OBRIGATÓRIA (o E5-A01 a deixou opcional até o segredo entrar no compose), com o mesmo alfabeto das outras.
+BACKUP_PASSWORD="$(ler_segredo "$DB_BACKUP_PASSWORD_FILE")"
+validar_alfabeto_senha "DB_BACKUP_PASSWORD" "$BACKUP_PASSWORD"
 
 # Argumentos comuns. -N exige a conexão cifrada (gatilho iii do risco aceito: Encrypt=True fixo, sem depender do padrão do cliente) e -C aceita
 # o certificado autoassinado (mesmo risco aceito do migrator, Api e Worker; docs/conexao-sql-server.md §2). -l 30 = Connect Timeout da §4. O sqlcmd NÃO deixa trocar o Application Name (ele fixa program_name = SQLCMD, mesmo
@@ -116,12 +113,8 @@ DB_MIGRATOR_PASSWORD="$MIGRATOR_PASSWORD" \
 DB_RELATORIO_PASSWORD="$RELATORIO_PASSWORD" \
   sqlcmd "${SQLCMD_BASE[@]}" -i "$DIR_SQL/logins.sql"
 
-if [[ -n "$BACKUP_PASSWORD" ]]; then
-  echo "entrypoint: rodando logins-backup.sql (svc_backup)..."
-  DB_BACKUP_PASSWORD="$BACKUP_PASSWORD" \
-    sqlcmd "${SQLCMD_BASE[@]}" -i "$DIR_SQL/logins-backup.sql"
-else
-  echo "entrypoint: AVISO — sem $DB_BACKUP_PASSWORD_FILE: o login svc_backup NÃO foi criado e o backup do SQL não vai rodar." >&2
-fi
+echo "entrypoint: rodando logins-backup.sql (svc_backup)..."
+DB_BACKUP_PASSWORD="$BACKUP_PASSWORD" \
+  sqlcmd "${SQLCMD_BASE[@]}" -i "$DIR_SQL/logins-backup.sql"
 
 echo "entrypoint: db-init concluído."

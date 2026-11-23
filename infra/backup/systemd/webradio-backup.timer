@@ -1,0 +1,12 @@
+# WebRadio — dispara o webradio-backup.service todo dia às 03:30, no horário do SERVIDOR (E5-D3). Mesmo padrão do limpar-logs (docs/operacao-logs.md).
+[Unit]
+Description=WebRadio - backup diario as 03:30
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+# Servidor desligado às 03:30: roda assim que ligar.
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

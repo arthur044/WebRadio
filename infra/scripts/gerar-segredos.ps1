@@ -87,6 +87,13 @@ $Receitas = [ordered]@{
     'redis_password'             = { New-StrongSecret -Bytes 32 }
     'seed_admin_senha'           = { New-StrongSecret -Bytes 18 }
     'seed_dev_senha'             = { New-StrongSecret -Bytes 18 }
+    'restic_senha'               = { New-StrongSecret -Bytes 32 }
+    'sql_backup_senha'           = { New-StrongSecret -Bytes 24 }
+    'minio_backup_access_key'    = { New-HexSecret -Bytes 20 }
+    'minio_backup_secret_key'    = { New-StrongSecret -Bytes 30 }
+    # Nascem VAZIOS para o operador colar (chaves do storage externo do backup, E5-D4). Vazio = cópia externa desligada.
+    'backup_s3_access_key'       = { '' }
+    'backup_s3_secret_key'       = { '' }
 }
 
 $DestinoDir = Join-Path $DirRaiz 'secrets'
